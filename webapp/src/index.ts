@@ -1,0 +1,1064 @@
+#!/usr/bin/env bun
+import { spawn } from "bun";
+import {
+  existsSync,
+  mkdirSync,
+  copyFileSync,
+  unlinkSync,
+  statSync,
+} from "fs";
+import { spawnSync } from "child_process";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+import { createConnection } from "net";
+import index from "./index.html";
+import { homedir } from "os";
+import NodeID3 from "node-id3";
+import * as archiver from "archiver";
+import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./server/http";
+import { extractTrackIds, parseTrackId } from "./server/spotify-url";
+import {
+  JobRegistry,
+  type DownloadJob,
+  type TrackMetadata,
+} from "./server/jobs";
+import {
+  copyWavFallback,
+  displayFileName,
+  expectedFloatPcmBytes,
+  ffprobeOk,
+  transcodeWavToMp3,
+  validateWavFile,
+  writeSidecar,
+} from "./server/media";
+
+const PORT = Number.parseInt(process.env.SOGGFY_PORT || "8085", 10);
+const HOSTNAME = process.env.SOGGFY_HOST || "127.0.0.1";
+const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
+const WEBAPP_DIR = join(SERVER_DIR, "..");
+const REPO_ROOT = join(WEBAPP_DIR, "..");
+const OUTPUT_DIR = join(REPO_ROOT, "downloads");
+const WORKSPACE_DIR = join(REPO_ROOT, "workspace");
+const PROFILES_DIR = join(WORKSPACE_DIR, "profiles");
+const POOL_SIZE = Number.parseInt(process.env.SOGGFY_POOL_SIZE || "1", 10);
+const SOGGFY_HIDDEN = process.env.SOGGFY_HIDDEN !== "0";
+const MAX_ATTEMPTS = Number.parseInt(process.env.SOGGFY_MAX_ATTEMPTS || "2", 10);
+const BASE_DEBUG_PORT = Number.parseInt(process.env.SOGGFY_DEBUG_PORT_BASE || "9222", 10);
+const CAPTURE_BACKEND = process.env.SOGGFY_CAPTURE_BACKEND || "disabled";
+const MUTE_OUTPUT = process.env.SOGGFY_MUTE_OUTPUT || "0";
+
+mkdirSync(OUTPUT_DIR, { recursive: true });
+mkdirSync(PROFILES_DIR, { recursive: true });
+
+const jobs = new JobRegistry();
+const GLOBAL_METADATA: Record<string, TrackMetadata> = {};
+
+async function fetchTrackDuration(trackId: string): Promise<number | null> {
+  try {
+    const res = await fetch(`https://open.spotify.com/embed/track/${trackId}`);
+    if (!res.ok) return null;
+    const html = await res.text();
+    const match = html.match(/"duration"\s*:\s*(\d+)/);
+    if (match?.[1]) return Number.parseInt(match[1], 10);
+  } catch (e: any) {
+    console.warn(`[Server] Failed to fetch duration for ${trackId}: ${e.message}`);
+  }
+  return null;
+}
+
+async function fetchTrackMetadata(trackId: string): Promise<TrackMetadata | null> {
+  try {
+    const res = await fetch(`https://open.spotify.com/embed/track/${trackId}`);
+    if (!res.ok) return null;
+    const html = await res.text();
+    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">({.*?})<\/script>/);
+    if (nextDataMatch?.[1]) {
+      const data = JSON.parse(nextDataMatch[1]);
+      const entity = data.props?.pageProps?.state?.data?.entity;
+      return {
+        title: entity?.title || entity?.name,
+        artist: entity?.artists?.[0]?.name,
+        coverUrl: entity?.visualIdentity?.image?.[0]?.url,
+      };
+    }
+  } catch (e: any) {
+    console.warn(`[Server] Failed to fetch metadata for ${trackId}: ${e.message}`);
+  }
+  return null;
+}
+
+function runChecked(command: string, args: string[], label: string) {
+  const result = spawnSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (result.status !== 0) {
+    throw new Error(`${label} failed (${result.status}): ${result.stderr || result.stdout || "no output"}`);
+  }
+}
+
+async function preparePayload() {
+  const dylibSource = join(REPO_ROOT, "soggfy-macos/build/libsoggfy.dylib");
+  const destDir = join(WORKSPACE_DIR, "PatchedSpotify.app/Contents/MacOS");
+  const dylibDest = join(destDir, "libsoggfy.dylib");
+
+  if (!existsSync(dylibSource)) {
+    throw new Error(`[Server] libsoggfy.dylib not found at ${dylibSource}. Build with: cd soggfy-macos && cmake --build build`);
+  }
+  if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+
+  console.log(`[Server] Copying payload dylib into patched app bundle...`);
+  copyFileSync(dylibSource, dylibDest);
+  console.log(`[Server] Codesigning payload dylib synchronously...`);
+  runChecked("codesign", ["-f", "-s", "-", dylibDest], "codesign libsoggfy.dylib");
+  console.log(`[Server] Payload dylib is ready: ${dylibDest}`);
+}
+
+function parsePlainIpcResponse(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, value: "", raw };
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try { return { ok: true, value: JSON.parse(trimmed), raw }; } catch {}
+  }
+  return { ok: !trimmed.startsWith("error"), value: trimmed, raw };
+}
+
+class JobCancelledError extends Error {
+  constructor(job: DownloadJob) {
+    super(
+      job.error && job.state === "cancelled"
+        ? job.error
+        : `job ${job.id} was cancelled`
+    );
+    this.name = "JobCancelledError";
+  }
+}
+
+function assertJobActive(job: DownloadJob) {
+  if (job.state === "cancelled") throw new JobCancelledError(job);
+}
+
+class SpotifyInstance {
+  id: number;
+  socketPath: string;
+  savePath: string;
+  profileDir: string;
+  debugPort: number;
+  process: any = null;
+  isReady = false;
+  isBusy = false;
+  currentTrack: string | null = null;
+  currentJobId: string | null = null;
+  statusText = "Stopped";
+  logs: string[] = [];
+  lastHeartbeatAt?: string;
+  lastError?: string;
+
+  constructor(id: number) {
+    this.id = id;
+    this.socketPath = `/tmp/soggfy_instance_${id}.sock`;
+    this.savePath = `/tmp/Soggfy_instance_${id}`;
+    this.profileDir = join(PROFILES_DIR, `instance_${id}`);
+    this.debugPort = BASE_DEBUG_PORT + id;
+  }
+
+  log(msg: string) {
+    const time = new Date().toLocaleTimeString();
+    const formatted = `[${time}] ${msg}`;
+    this.logs.push(formatted);
+    if (this.logs.length > 100) this.logs.shift();
+    console.log(`[Instance ${this.id}] ${msg}`);
+  }
+
+  snapshot() {
+    return {
+      id: this.id,
+      socketPath: this.socketPath,
+      savePath: this.savePath,
+      profileDir: this.profileDir,
+      debugPort: this.debugPort,
+      isReady: this.isReady,
+      isBusy: this.isBusy,
+      currentTrack: this.currentTrack,
+      currentJobId: this.currentJobId,
+      statusText: this.statusText,
+      lastHeartbeatAt: this.lastHeartbeatAt,
+      lastError: this.lastError,
+      logs: this.logs,
+    };
+  }
+
+  async sendIPC(command: string, retries = 4, timeoutMs = 2500): Promise<string> {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        return await new Promise<string>((resolve, reject) => {
+          const client = createConnection(this.socketPath);
+          let response = "";
+          const timer = setTimeout(() => {
+            client.destroy();
+            reject(new Error(`IPC timeout for '${command}'`));
+          }, timeoutMs);
+          client.on("connect", () => client.write(command));
+          client.on("data", (data) => { response += data.toString(); });
+          client.on("end", () => {
+            clearTimeout(timer);
+            resolve(response.trim());
+          });
+          client.on("error", (err) => {
+            clearTimeout(timer);
+            reject(err);
+          });
+        });
+      } catch (e: any) {
+        this.lastError = e.message;
+        if (attempt === retries - 1) throw e;
+        await new Promise((r) => setTimeout(r, 150 + attempt * 250));
+      }
+    }
+    throw new Error("unreachable IPC retry fallthrough");
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      const raw = await this.sendIPC("ping", 1, 1000);
+      const parsed = parsePlainIpcResponse(raw);
+      const ok = parsed.value === "pong" || parsed.value?.ok === true;
+      if (ok) this.lastHeartbeatAt = new Date().toISOString();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async isRunning(): Promise<boolean> {
+    if (this.process?.pid) {
+      try {
+        process.kill(this.process.pid, 0);
+        return true;
+      } catch {}
+    }
+    try {
+      const proc = spawn(["pgrep", "-f", `SOGGFY_SOCKET_PATH=${this.socketPath}|instance_${this.id}`]);
+      const output = await new Response(proc.stdout).text();
+      return output.trim().length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async start() {
+    this.statusText = "Starting";
+    this.lastError = undefined;
+    this.log("Initializing instance...");
+
+    mkdirSync(this.savePath, { recursive: true });
+    mkdirSync(this.profileDir, { recursive: true });
+
+    const appSupportSpotify = join(this.savePath, "Application Support/Spotify");
+    mkdirSync(appSupportSpotify, { recursive: true });
+    const sourceDir = join(homedir(), "Library/Application Support/Spotify");
+    try {
+      const sourcePrefs = join(sourceDir, "prefs");
+      const sourceUsers = join(sourceDir, "Users");
+      if (existsSync(sourcePrefs)) copyFileSync(sourcePrefs, join(appSupportSpotify, "prefs"));
+      if (existsSync(sourceUsers)) {
+        const cp = spawn(["cp", "-R", sourceUsers, appSupportSpotify]);
+        await cp.exited;
+      }
+      this.log("Cloned login state into isolated Application Support.");
+    } catch (err: any) {
+      this.log(`Warning: failed to clone login state: ${err.message}`);
+    }
+
+    try {
+      if (existsSync(this.socketPath)) unlinkSync(this.socketPath);
+      const activeTrackTxt = join(this.savePath, "active_track.txt");
+      if (existsSync(activeTrackTxt)) unlinkSync(activeTrackTxt);
+      const lockFiles = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+      for (const lf of lockFiles) {
+        const p = join(this.profileDir, lf);
+        if (existsSync(p)) unlinkSync(p);
+      }
+    } catch {}
+
+    const appPath = join(WORKSPACE_DIR, "PatchedSpotify.app");
+    const binaryPath = join(appPath, "Contents/MacOS/Spotify");
+    const dylibPath = join(appPath, "Contents/MacOS/libsoggfy.dylib");
+    if (!existsSync(binaryPath)) throw new Error(`Patched Spotify binary missing: ${binaryPath}`);
+    if (!existsSync(dylibPath)) throw new Error(`Payload dylib missing: ${dylibPath}`);
+
+    const homeDir = join(this.profileDir, "home");
+    mkdirSync(homeDir, { recursive: true });
+
+    const env = {
+      ...process.env,
+      HOME: homeDir,
+      DYLD_INSERT_LIBRARIES: dylibPath,
+      SOGGFY_SOCKET_PATH: this.socketPath,
+      SOGGFY_SAVE_PATH: this.savePath,
+      SOGGFY_NO_FOCUS: "1",
+      SOGGFY_HIDDEN: SOGGFY_HIDDEN ? "1" : "0",
+      SOGGFY_CAPTURE_BACKEND: CAPTURE_BACKEND,
+      SOGGFY_MUTE_OUTPUT: MUTE_OUTPUT,
+    };
+
+    const cefFlags = [
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--renderer-process-limit=1",
+      "--js-flags=--max-old-space-size=256",
+      "--disable-extensions",
+      "--disable-background-networking",
+      `--remote-debugging-port=${this.debugPort}`,
+      `--user-data-dir=${this.profileDir}`,
+    ];
+
+    this.log(`Spawning Patched Spotify (hidden=${SOGGFY_HIDDEN}, debugPort=${this.debugPort})...`);
+    this.process = spawn([binaryPath, ...cefFlags], { env, stdout: "pipe", stderr: "pipe" });
+    this.pipeProcessLogs();
+
+    const socketReady = await this.waitForSocketAndHooks();
+    if (!socketReady) {
+      this.statusText = "Socket Error";
+      this.isReady = false;
+      this.log("Error: IPC socket/hook handshake did not complete.");
+      return;
+    }
+
+    this.isReady = true;
+    this.statusText = "Ready";
+    this.log("Instance ready.");
+  }
+
+  private pipeProcessLogs() {
+    if (!this.process) return;
+    const logWriter = Bun.file(join(this.profileDir, "spotify.log")).writer();
+    const errWriter = Bun.file(join(this.profileDir, "spotify.err")).writer();
+    (async () => {
+      try {
+        for await (const chunk of this.process.stdout) {
+          logWriter.write(chunk);
+          logWriter.flush();
+        }
+      } catch {}
+      finally { logWriter.end(); }
+    })();
+    (async () => {
+      try {
+        for await (const chunk of this.process.stderr) {
+          errWriter.write(chunk);
+          errWriter.flush();
+        }
+      } catch {}
+      finally { errWriter.end(); }
+    })();
+    this.process.exited.then((code: number) => {
+      this.log(`Spotify process exited with code ${code}`);
+      this.isReady = false;
+      if (this.isBusy) this.lastError = `process exited during active job (${code})`;
+    }).catch(() => {});
+  }
+
+  private async waitForSocketAndHooks(): Promise<boolean> {
+    for (let i = 0; i < 60; i++) {
+      if (existsSync(this.socketPath)) {
+        const ok = await this.ping();
+        if (ok) return true;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
+  }
+
+  async stop() {
+    this.log("Stopping instance...");
+    this.isReady = false;
+    this.isBusy = false;
+    this.currentTrack = null;
+    this.currentJobId = null;
+    this.statusText = "Stopped";
+    if (this.process) {
+      try {
+        this.process.kill("SIGKILL");
+        await Promise.race([
+          this.process.exited,
+          new Promise((r) => setTimeout(r, 1500)),
+        ]);
+      } catch {}
+      this.process = null;
+    }
+    try {
+      spawnSync("pkill", ["-9", "-f", `instance_${this.id}`]);
+    } catch {}
+    try {
+      if (existsSync(this.socketPath)) unlinkSync(this.socketPath);
+      const lockFiles = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+      for (const lf of lockFiles) {
+        const p = join(this.profileDir, lf);
+        if (existsSync(p)) unlinkSync(p);
+      }
+    } catch {}
+  }
+
+  async recycle(reason: string) {
+    this.log(`Recycling instance: ${reason}`);
+    await this.stop();
+    await new Promise((r) => setTimeout(r, 1000));
+    await this.start();
+  }
+
+  async downloadJob(job: DownloadJob): Promise<DownloadJob> {
+    const trackId = job.trackId;
+    assertJobActive(job);
+    this.isBusy = true;
+    this.currentTrack = trackId;
+    this.currentJobId = job.id;
+    jobs.transition(job, "assigned", { instanceId: this.id, attempts: job.attempts + 1 });
+
+    try {
+      this.statusText = `Starting: ${trackId}`;
+      jobs.transition(job, "starting");
+      assertJobActive(job);
+      await this.sendIPC(`reset_track ${trackId}`);
+      await this.sendIPC(`set_track ${trackId}`);
+
+      const metadataPromise = fetchTrackMetadata(trackId).then((meta) => {
+        if (meta) {
+          GLOBAL_METADATA[trackId] = meta;
+          jobs.patch(job, { metadata: meta }, "metadata resolved");
+        }
+        return meta;
+      });
+      const durationPromise = fetchTrackDuration(trackId).then((durationMs) => {
+        if (durationMs && durationMs > 0) {
+          jobs.patch(job, {
+            durationMs,
+            expectedBytes: expectedFloatPcmBytes(durationMs),
+          }, `duration=${durationMs}ms`);
+        }
+        return durationMs;
+      });
+
+      this.statusText = `Playing: ${trackId}`;
+      jobs.transition(job, "playing");
+      assertJobActive(job);
+      await this.sendIPC(`play spotify:track:${trackId}`);
+
+      // Wait for the target track to actually start playing (not an ad).
+      // The dylib gates capture via PlaybackStateChanged notifications.
+      let trackConfirmed = false;
+      for (let i = 0; i < 30; i++) {
+        assertJobActive(job);
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          const playingRaw = await this.sendIPC("get_playing", 1);
+          if (playingRaw.startsWith("{")) {
+            const playing = JSON.parse(playingRaw);
+            if (playing.is_ad) {
+              if (i % 4 === 0) jobs.log(job, `waiting: ad playing (${playing.uri})`);
+              continue;
+            }
+            if (playing.uri?.includes(trackId) && !playing.gated) {
+              trackConfirmed = true;
+              jobs.log(job, "target track confirmed playing");
+              break;
+            }
+          }
+        } catch {}
+      }
+      if (!trackConfirmed) {
+        jobs.log(job, "warning: track not confirmed via notification, proceeding with fallback");
+      }
+
+      let status = "idle";
+      for (let i = 0; i < 50; i++) {
+        assertJobActive(job);
+        await new Promise((r) => setTimeout(r, 500));
+        status = await this.sendIPC(`get_status ${trackId}`, 1).catch(() => "idle");
+        this.refreshCapturedBytes(job);
+        if (status === "downloading" || status === "completed") break;
+      }
+      if (status !== "downloading" && status !== "completed") {
+        await this.sendIPC("pause").catch(() => undefined);
+        throw new Error("audio interception timed out before capture started");
+      }
+
+      jobs.transition(job, "capturing");
+      assertJobActive(job);
+      const durationMs = await durationPromise.catch(() => null);
+      if (durationMs && durationMs > 0) {
+        await this.sendIPC(`set_duration ${trackId} ${durationMs}`).catch((err) => {
+          jobs.log(job, `warning: set_duration failed: ${err.message}`);
+        });
+      }
+
+      const started = Date.now();
+      const maxCaptureMs = Math.max((durationMs || 240000) + 30000, 90000);
+      let lastBytes = -1;
+      let stagnantTicks = 0;
+      while (status !== "completed" && Date.now() - started < maxCaptureMs) {
+        assertJobActive(job);
+        await new Promise((r) => setTimeout(r, 1000));
+        status = await this.sendIPC(`get_status ${trackId}`, 1).catch(() => "ipc_lost");
+        const bytes = this.refreshCapturedBytes(job);
+        if (bytes === lastBytes) stagnantTicks += 1;
+        else stagnantTicks = 0;
+        lastBytes = bytes;
+        if (status === "ipc_lost") throw new Error("IPC lost during capture");
+        if (stagnantTicks >= 20 && bytes > 44) {
+          jobs.log(job, "capture appears stagnant; finalizing defensively");
+          break;
+        }
+      }
+
+      jobs.transition(job, "finalizing");
+      assertJobActive(job);
+      if (status !== "completed") {
+        await this.sendIPC(`finish_track ${trackId}`).catch(() => undefined);
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      await this.sendIPC("pause").catch(() => undefined);
+
+      const wavPath = join(this.savePath, `${trackId}.wav`);
+      if (!existsSync(wavPath)) throw new Error("output WAV file not found in temp cache");
+
+      this.refreshCapturedBytes(job);
+      const validation = validateWavFile(wavPath, job.expectedBytes);
+      validation.ffprobeOk = ffprobeOk(wavPath);
+      jobs.patch(job, { validation }, `wav validation warnings=${validation.warnings.length}`);
+      if (!validation.riffHeader || !validation.waveHeader || !validation.dataChunk || (validation.actualDataBytes || 0) <= 0) {
+        throw new Error(`invalid WAV capture: ${validation.warnings.join(",") || "header/data invalid"}`);
+      }
+
+      jobs.transition(job, "transcoding");
+      assertJobActive(job);
+      const finalMp3Path = join(OUTPUT_DIR, `${trackId}.mp3`);
+      const finalWavPath = join(OUTPUT_DIR, `${trackId}.wav`);
+      const transcode = transcodeWavToMp3(wavPath, finalMp3Path);
+      let savedPath: string;
+      let outputFormat: "mp3" | "wav";
+      if (transcode.ok && ffprobeOk(finalMp3Path)) {
+        savedPath = finalMp3Path;
+        outputFormat = "mp3";
+      } else {
+        jobs.log(job, `ffmpeg failed; preserving validated WAV fallback: ${transcode.stderr}`);
+        savedPath = copyWavFallback(wavPath, OUTPUT_DIR, trackId);
+        outputFormat = "wav";
+      }
+      assertJobActive(job);
+
+      const meta = await metadataPromise.catch(() => null);
+      if (outputFormat === "mp3" && meta) {
+        await this.writeTags(finalMp3Path, meta);
+      }
+
+      assertJobActive(job);
+      const sizeBytes = statSync(savedPath).size;
+      writeSidecar(savedPath, {
+        jobId: job.id,
+        trackId,
+        state: "completed",
+        outputFormat,
+        savedPath,
+        sizeBytes,
+        durationMs: job.durationMs,
+        expectedBytes: job.expectedBytes,
+        bytesCaptured: job.bytesCaptured,
+        validation,
+        metadata: meta || job.metadata,
+        completedAt: new Date().toISOString(),
+      });
+
+      return jobs.complete(job, {
+        savedPath,
+        wavPath,
+        mp3Path: outputFormat === "mp3" ? finalMp3Path : undefined,
+        outputFormat,
+        sizeBytes,
+        metadata: meta || job.metadata,
+      });
+    } catch (err) {
+      await this.sendIPC("pause").catch(() => undefined);
+      throw err;
+    } finally {
+      this.statusText = "Ready";
+      this.currentTrack = null;
+      this.currentJobId = null;
+      this.isBusy = false;
+    }
+  }
+
+  private refreshCapturedBytes(job: DownloadJob): number {
+    const wavPath = join(this.savePath, `${job.trackId}.wav`);
+    if (!existsSync(wavPath)) return job.bytesCaptured;
+    const size = statSync(wavPath).size;
+    const bytes = Math.max(0, size - 44);
+    jobs.patch(job, { bytesCaptured: bytes, wavPath });
+    return bytes;
+  }
+
+  private async writeTags(mp3Path: string, meta: TrackMetadata) {
+    let coverBuffer = null;
+    if (meta.coverUrl) {
+      try {
+        const imgRes = await fetch(meta.coverUrl);
+        coverBuffer = Buffer.from(await imgRes.arrayBuffer());
+      } catch {}
+    }
+    const tags: any = { title: meta.title, artist: meta.artist };
+    if (coverBuffer) {
+      tags.image = { mime: "image/jpeg", type: { id: 3, name: "front cover" }, description: "Cover", imageBuffer: coverBuffer };
+    }
+    try { NodeID3.write(tags, mp3Path); } catch (err: any) { this.log(`Warning: failed to write ID3 tags: ${err.message}`); }
+  }
+}
+
+class SpotifyPoolManager {
+  instances: SpotifyInstance[] = [];
+  queue: Array<{ job: DownloadJob; resolve: (value: DownloadJob) => void; reject: (error: Error) => void }> = [];
+  started = false;
+
+  constructor(size: number) {
+    for (let i = 1; i <= size; i++) this.instances.push(new SpotifyInstance(i));
+  }
+
+  async start() {
+    await preparePayload();
+    console.log(`[Server] Starting Spotify pool with ${this.instances.length} instances...`);
+    for (const inst of this.instances) {
+      try {
+        await inst.start();
+        await new Promise((r) => setTimeout(r, 1500));
+      } catch (err: any) {
+        inst.lastError = err.message;
+        inst.log(`Startup failed: ${err.message}`);
+      }
+    }
+    this.started = true;
+    this.startWatchdog();
+    console.log(`[Server] Pool startup complete.`);
+  }
+
+  async stop() {
+    console.log(`[Server] Shutting down Spotify pool...`);
+    await Promise.all(this.instances.map((inst) => inst.stop()));
+  }
+
+  async addJob(trackParam: string): Promise<DownloadJob> {
+    const trackId = parseTrackId(trackParam);
+    if (!trackId) throw new Error("Invalid Spotify track URL, URI, or ID format");
+
+    const reusable = jobs.findReusable(trackId);
+    if (reusable) return reusable;
+
+    const job = jobs.create(trackId, GLOBAL_METADATA[trackId]);
+    fetchTrackMetadata(trackId).then((meta) => {
+      if (meta) {
+        GLOBAL_METADATA[trackId] = meta;
+        jobs.patch(job, { metadata: meta }, "metadata prefetched");
+      }
+    }).catch(() => undefined);
+
+    this.queue.push({
+      job,
+      resolve: () => undefined,
+      reject: (error) => console.error(`[Server] Job ${job.id} failed: ${error.message}`),
+    });
+    this.dispatch();
+    return job;
+  }
+
+  async cancelJob(jobId: string, reason = "cancelled by user"): Promise<DownloadJob> {
+    const job = jobs.get(jobId);
+    if (!job) throw new Error(`Unknown job: ${jobId}`);
+    if (jobs.isTerminal(job)) return job;
+
+    const queuedIndex = this.queue.findIndex((queued) => queued.job.id === jobId);
+    if (queuedIndex >= 0) {
+      const [queued] = this.queue.splice(queuedIndex, 1);
+      jobs.cancel(job, reason);
+      queued.reject(new JobCancelledError(job));
+      return job;
+    }
+
+    const instance = this.instances.find((inst) => inst.currentJobId === jobId);
+    jobs.cancel(job, reason);
+    if (instance) {
+      instance.log(`Cancelling active job ${jobId}: ${reason}`);
+      await instance.sendIPC(`cancel_track ${job.trackId}`, 1, 1000).catch(() => undefined);
+      await instance.sendIPC("pause", 1, 1000).catch(() => undefined);
+      await instance.recycle(`cancelled job ${jobId}`).catch((err) => instance.log(`cancel recycle failed: ${err.message}`));
+    }
+    this.dispatch();
+    return job;
+  }
+
+  async retryJob(jobId: string): Promise<DownloadJob> {
+    const job = jobs.get(jobId);
+    if (!job) throw new Error(`Unknown job: ${jobId}`);
+    if (job.state !== "failed" && job.state !== "cancelled") {
+      throw new Error(`Only failed or cancelled jobs can be retried; current state is ${job.state}`);
+    }
+    jobs.log(job, "retry requested; creating replacement job");
+    return this.addJob(job.trackId);
+  }
+
+  private dispatch() {
+    const idleInstance = this.instances.find((inst) => inst.isReady && !inst.isBusy);
+    if (!idleInstance) return;
+    const queued = this.queue.shift();
+    if (!queued) return;
+
+    idleInstance.downloadJob(queued.job)
+      .then((res) => queued.resolve(res))
+      .catch(async (err: Error) => {
+        jobs.log(queued.job, `attempt failed on instance ${idleInstance.id}: ${err.message}`);
+        if (queued.job.state === "cancelled" || err instanceof JobCancelledError) {
+          queued.reject(err);
+          return;
+        }
+        if (queued.job.attempts < MAX_ATTEMPTS) {
+          jobs.transition(queued.job, "queued", { instanceId: undefined, error: undefined });
+          this.queue.push(queued);
+          await idleInstance.recycle(err.message).catch((recycleErr) => idleInstance.log(`recycle failed: ${recycleErr.message}`));
+        } else {
+          jobs.fail(queued.job, err);
+          queued.reject(err);
+        }
+      })
+      .finally(() => this.dispatch());
+  }
+
+  private startWatchdog() {
+    setInterval(async () => {
+      for (const inst of this.instances) {
+        if (!inst.isReady || inst.isBusy) continue;
+        const ok = await inst.ping();
+        if (!ok) await inst.recycle("watchdog ping failed").catch((err) => inst.log(`watchdog recycle failed: ${err.message}`));
+      }
+      this.dispatch();
+    }, 15_000).unref?.();
+  }
+
+  snapshots() {
+    return this.instances.map((inst) => inst.snapshot());
+  }
+}
+
+const pool = new SpotifyPoolManager(POOL_SIZE);
+
+async function resolveSpotifyUrl(input: string): Promise<string[]> {
+  const trackId = parseTrackId(input);
+  if (trackId) return [trackId];
+
+  const playlistMatch = input.match(/playlist\/([a-zA-Z0-9]{22})/);
+  if (playlistMatch?.[1]) {
+    try {
+      const res = await fetch(`https://open.spotify.com/embed/playlist/${playlistMatch[1]}`);
+      const text = await res.text();
+      return extractTrackIds(text);
+    } catch (e: any) {
+      console.warn(`[Server] Failed to fetch playlist tracks: ${e.message}`);
+    }
+  }
+
+  const albumMatch = input.match(/album\/([a-zA-Z0-9]{22})/);
+  if (albumMatch?.[1]) {
+    try {
+      const res = await fetch(`https://open.spotify.com/embed/album/${albumMatch[1]}`);
+      const text = await res.text();
+      return extractTrackIds(text);
+    } catch (e: any) {
+      console.warn(`[Server] Failed to fetch album tracks: ${e.message}`);
+    }
+  }
+
+  return [];
+}
+
+let _anonymousAccessToken: string | null = null;
+let _anonymousTokenExpiry = 0;
+let _clientToken: string | null = null;
+
+async function getAnonymousTokens() {
+  if (_anonymousAccessToken && _clientToken && Date.now() < _anonymousTokenExpiry) {
+    return { accessToken: _anonymousAccessToken, clientToken: _clientToken };
+  }
+
+  const cookie = process.env.SPOTIFY_COOKIE;
+  if (!cookie?.includes("sp_dc=")) {
+    console.error("[Server] Missing SPOTIFY_COOKIE in environment. Search will fail.");
+    return null;
+  }
+
+  try {
+    const tokenRes = await fetch("https://open.spotify.com/get_access_token?reason=transport&productType=web_player", {
+      headers: {
+        Cookie: cookie,
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+    if (!tokenRes.ok) {
+      console.error("[Server] get_access_token failed:", tokenRes.status, await tokenRes.text());
+      return null;
+    }
+
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.accessToken;
+    const clientId = tokenData.clientId;
+    _anonymousTokenExpiry = tokenData.accessTokenExpirationTimestampMs ? tokenData.accessTokenExpirationTimestampMs - 60_000 : Date.now() + 3_600_000;
+
+    const clientTokenRes = await fetch("https://clienttoken.spotify.com/v1/clienttoken", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        client_data: {
+          client_version: "1.2.93.177.g139bfa35",
+          client_id: clientId,
+          js_sdk_data: {
+            device_brand: "Apple",
+            device_model: "unknown",
+            os: "macos",
+            os_version: "10.15.7",
+            device_id: "06d5275f-c577-4569-8d9c-36ee0a344ac3",
+            device_type: "computer",
+          },
+        },
+      }),
+    });
+    const clientTokenData = await clientTokenRes.json();
+    const clientToken = clientTokenData.granted_token?.token;
+    if (!clientToken) return null;
+
+    _anonymousAccessToken = accessToken;
+    _clientToken = clientToken;
+    return { accessToken, clientToken };
+  } catch (err) {
+    console.error("[Server] Failed to get Spotify tokens:", err);
+    return null;
+  }
+}
+
+async function searchSpotify(query: string) {
+  const tokens = await getAnonymousTokens();
+  if (!tokens) throw new Error("Failed to get anonymous tokens");
+
+  const payload = {
+    variables: {
+      searchTerm: query,
+      offset: 0,
+      limit: 10,
+      numberOfTopResults: 5,
+      includeAudiobooks: false,
+      includeArtistHasConcertsField: false,
+      includePreReleases: true,
+      includeAlbumPreReleases: false,
+      includeAuthors: false,
+      includeEpisodeContentRatingsV2: false,
+      isPrefix: null,
+      sectionFilters: ["GENERIC"],
+    },
+    operationName: "searchDesktop",
+    extensions: {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: "eff59fa0a3d026b88b56fddbcf4bdfa16a186b8175a5c1a358c072e053c2e5b0",
+      },
+    },
+  };
+
+  const res = await fetch("https://api-partner.spotify.com/pathfinder/v2/query", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${tokens.accessToken}`,
+      "client-token": tokens.clientToken,
+      "content-type": "application/json;charset=UTF-8",
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let data: any;
+  try { data = JSON.parse(text); }
+  catch { throw new Error(`Spotify API returned invalid JSON: ${text.slice(0, 500)}`); }
+  if (data.errors) throw new Error(data.errors[0]?.message || "Search failed");
+
+  const mappedTracks: any[] = [];
+  const searchV2 = data.data?.searchV2;
+  if (searchV2?.tracks?.items) {
+    for (const wrapper of searchV2.tracks.items) {
+      const track = wrapper.item?.data;
+      if (!track) continue;
+      const artistNames = track.artists?.items?.map((a: any) => ({ name: a.profile?.name })) || [];
+      const coverUrl = track.albumOfTrack?.coverArt?.sources?.[0]?.url;
+      mappedTracks.push({
+        id: track.id,
+        name: track.name,
+        type: "track",
+        external_urls: { spotify: track.uri },
+        album: { images: coverUrl ? [{ url: coverUrl }] : [] },
+        artists: artistNames,
+      });
+    }
+  }
+  return { tracks: { items: mappedTracks }, albums: { items: [] }, playlists: { items: [] } };
+}
+
+function findOutputForTrack(trackId: string): { path: string; format: "mp3" | "wav" } | null {
+  const job = jobs.findByTrack(trackId);
+  if (job?.savedPath && existsSync(job.savedPath)) return { path: job.savedPath, format: job.outputFormat || (job.savedPath.endsWith(".mp3") ? "mp3" : "wav") };
+  const mp3Path = join(OUTPUT_DIR, `${trackId}.mp3`);
+  if (existsSync(mp3Path)) return { path: mp3Path, format: "mp3" };
+  const wavPath = join(OUTPUT_DIR, `${trackId}.wav`);
+  if (existsSync(wavPath)) return { path: wavPath, format: "wav" };
+  return null;
+}
+
+const server = Bun.serve({
+  port: PORT,
+  hostname: HOSTNAME,
+  idleTimeout: 0,
+  routes: {
+    "/*": index,
+    "/api/health": {
+      GET: () => jsonResponse({
+        ok: true,
+        started: pool.started,
+        repoRoot: REPO_ROOT,
+        outputDir: OUTPUT_DIR,
+        poolSize: POOL_SIZE,
+        readyInstances: pool.instances.filter((i) => i.isReady).length,
+        activeJobs: jobs.all().filter((j) => jobs.isActive(j)).length,
+        completedJobs: jobs.all().filter((j) => j.state === "completed").length,
+        failedJobs: jobs.all().filter((j) => j.state === "failed").length,
+        captureBackend: CAPTURE_BACKEND,
+      }),
+    },
+    "/api/instances": {
+      GET: () => jsonResponse(pool.snapshots()),
+    },
+    "/api/jobs": {
+      GET: () => jsonResponse({ jobs: jobs.all(), queue: pool.queue.map((q) => q.job.id), instances: pool.snapshots() }),
+    },
+    "/api/jobs/action": {
+      POST: async (req) => {
+        try {
+          const body = await req.json();
+          const jobId = body.jobId;
+          const action = body.action;
+          if (!jobId || typeof jobId !== "string") return jsonResponse({ error: "Missing jobId" }, { status: 400 });
+          if (action === "cancel") return jsonResponse({ job: await pool.cancelJob(jobId, body.reason || "cancelled by user") });
+          if (action === "retry") return jsonResponse({ job: await pool.retryJob(jobId) });
+          return jsonResponse({ error: "Unsupported action" }, { status: 400 });
+        } catch (err: any) {
+          return jsonResponse({ error: err.message }, { status: 500 });
+        }
+      },
+    },
+    "/api/status": {
+      GET: () => jsonResponse(jobs.toLegacyStatus(GLOBAL_METADATA)),
+    },
+    "/api/search": {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const query = url.searchParams.get("q");
+        if (!query) return jsonResponse({ error: "Missing query" }, { status: 400 });
+        try { return jsonResponse(await searchSpotify(query)); }
+        catch (err: any) { return jsonResponse({ error: err.message }, { status: 500 }); }
+      },
+    },
+    "/api/download-all": {
+      GET: () => {
+        const archive = archiver("zip", { zlib: { level: 9 } });
+        const stream = new ReadableStream({
+          start(controller) {
+            archive.on("data", (chunk: Buffer) => controller.enqueue(chunk));
+            archive.on("end", () => controller.close());
+            archive.on("error", (err: Error) => controller.error(err));
+            for (const job of jobs.all().filter((j) => j.state === "completed" && j.savedPath && existsSync(j.savedPath))) {
+              const ext = job.outputFormat || (job.savedPath!.endsWith(".mp3") ? "mp3" : "wav");
+              archive.file(job.savedPath!, { name: displayFileName(job.trackId, job.metadata, ext) });
+            }
+            archive.finalize();
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition": 'attachment; filename="soggfy_downloads.zip"',
+            ...CORS_HEADERS,
+          },
+        });
+      },
+    },
+    "/api/file": {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const trackParam = url.searchParams.get("track");
+        if (!trackParam) return new Response("Missing track", { status: 400, headers: CORS_HEADERS });
+        const trackId = parseTrackId(trackParam);
+        if (!trackId) return new Response("Invalid track", { status: 400, headers: CORS_HEADERS });
+        const output = findOutputForTrack(trackId);
+        if (!output) return new Response("File not ready", { status: 404, headers: CORS_HEADERS });
+        const job = jobs.findByTrack(trackId);
+        return serveFileWithRange(req, output.path, displayFileName(trackId, job?.metadata, output.format));
+      },
+    },
+    "/api/stream": {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const trackParam = url.searchParams.get("track");
+        if (!trackParam) return new Response("Missing track", { status: 400, headers: CORS_HEADERS });
+        const trackId = parseTrackId(trackParam);
+        if (!trackId) return new Response("Invalid track", { status: 400, headers: CORS_HEADERS });
+
+        const output = findOutputForTrack(trackId);
+        if (output) return serveFileWithRange(req, output.path);
+
+        const existing = jobs.findReusable(trackId);
+        if (!existing) {
+          pool.addJob(trackId).catch((err) => console.error(`[Server] stream-triggered job failed for ${trackId}:`, err));
+        }
+        return jsonResponse({ queued: true, trackId, message: "Track is queued/capturing; retry stream when status is completed." }, { status: 202 });
+      },
+    },
+    "/api/download": {
+      POST: async (req) => {
+        try {
+          const body = await req.json();
+          const input = body.url || body.trackId;
+          if (!input) return jsonResponse({ success: false, error: "Missing 'url' or 'trackId'" }, { status: 400 });
+          const trackIds = await resolveSpotifyUrl(input);
+          if (trackIds.length === 0) return jsonResponse({ success: false, error: "Could not extract any valid tracks from the input URL." }, { status: 400 });
+
+          for (const id of trackIds) {
+            pool.addJob(id).catch((err) => console.error(`[Server] Background job failed for ${id}:`, err));
+          }
+          return jsonResponse({ success: true, queued: true, count: trackIds.length, trackIds });
+        } catch (err: any) {
+          return jsonResponse({ success: false, error: err.message }, { status: 500 });
+        }
+      },
+    },
+  },
+  async fetch(req) {
+    if (req.method === "OPTIONS") return new Response("", { headers: CORS_HEADERS });
+    return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
+  },
+});
+
+console.log(`\n=============================================================`);
+console.log(`Soggfy supervised API server running at http://${HOSTNAME}:${PORT}`);
+console.log(`=============================================================`);
+console.log(`- Web UI: http://${HOSTNAME}:${PORT}/`);
+console.log(`- Repo root: ${REPO_ROOT}`);
+console.log(`- Pool size: ${POOL_SIZE}`);
+console.log(`- Capture backend: ${CAPTURE_BACKEND}`);
+console.log(`- Health: http://${HOSTNAME}:${PORT}/api/health`);
+console.log(`=============================================================\n`);
+
+pool.start().catch((err) => console.error("[Server] Error initializing Spotify pool:", err));
+
+process.on("SIGINT", async () => {
+  console.log("\n[Server] Shutting down...");
+  await pool.stop();
+  server.stop(true);
+  process.exit(0);
+});

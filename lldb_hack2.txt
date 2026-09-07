@@ -1,0 +1,7 @@
+process attach --pid 76780
+breakpoint set -a 0x105f7f714
+continue
+bt
+disassemble -f -p
+detach
+quit

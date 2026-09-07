@@ -1,0 +1,6 @@
+process attach --name "Spotify" --waitfor
+breakpoint set -a 0x10127f714
+continue
+bt
+disassemble -f -p
+quit

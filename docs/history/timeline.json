@@ -1,0 +1,177 @@
+[
+  {
+    "timestamp": "2026-06-12T08:53:36Z",
+    "type": "Action",
+    "description": "Reviewed initial codebase files (soggfy-original) and defined the porting objective for macOS."
+  },
+  {
+    "timestamp": "2026-06-12T09:10:06Z",
+    "type": "Action",
+    "description": "Configured the CMake environment and successfully compiled the baseline dylib payload using Ninja."
+  },
+  {
+    "timestamp": "2026-06-12T09:31:33Z",
+    "type": "Action",
+    "description": "Executed launch.sh and inspected dyld logs using 'log show' to verify successful dylib injection."
+  },
+  {
+    "timestamp": "2026-06-12T09:33:40Z",
+    "type": "Action",
+    "description": "Investigated codesign entitlements of the Spotify binary to understand and bypass hardened runtime restrictions."
+  },
+  {
+    "timestamp": "2026-06-12T09:36:23Z",
+    "type": "Analysis",
+    "description": "Began hunting for Ogg Vorbis decoding hooks by comparing symbol maps with soggfy-original patterns."
+  },
+  {
+    "timestamp": "2026-06-12T09:39:55Z",
+    "type": "Action",
+    "description": "Wrote and executed 'search_pattern.py' to scan the PatchedSpotify Mach-O binary for known byte signatures."
+  },
+  {
+    "timestamp": "2026-06-12T09:44:14Z",
+    "type": "Action",
+    "description": "Continuously relaunched patched Spotify after iterative recompilations of the interception hooks."
+  },
+  {
+    "timestamp": "2026-06-12T09:53:58Z",
+    "type": "Analysis",
+    "description": "Used radare2 (r2) to search the binary's string sections specifically for the 'OggS' magic header bytes."
+  },
+  {
+    "timestamp": "2026-06-12T09:59:51Z",
+    "type": "Revelation",
+    "description": "Wrote and executed a heuristic ARM64 scanner 'search_refs.py' which successfully mapped relative ADRP/ADD instructions to the OggS offset."
+  },
+  {
+    "timestamp": "2026-06-12T10:13:04Z",
+    "type": "Action",
+    "description": "Developed 'find_branches.py' to trace execution flows backward from the OggS references to the decoder vtables."
+  },
+  {
+    "timestamp": "2026-06-12T10:25:54Z",
+    "type": "Action",
+    "description": "Ran 'patch_macho.py' to forcibly inject an LC_LOAD_DYLIB load command directly into the binary header."
+  },
+  {
+    "timestamp": "2026-06-12T10:35:56Z",
+    "type": "Action",
+    "description": "Tested the headless TypeScript orchestration wrapper 'soggfy-download.ts' for the first time."
+  },
+  {
+    "timestamp": "2026-06-12T10:43:21Z",
+    "type": "Action",
+    "description": "Established bidirectional IPC communication with the injected payload via the local socket '/tmp/soggfy.sock'."
+  },
+  {
+    "timestamp": "2026-06-12T10:43:40Z",
+    "type": "Analysis",
+    "description": "Disassembled specific hook points using 'llvm-objdump' to verify instruction layout before overwriting them."
+  },
+  {
+    "timestamp": "2026-06-12T10:58:05Z",
+    "type": "Dead End",
+    "description": "Sampled the Spotify process during a hanging playback session to identify bottleneck threads causing real-time extraction delays."
+  },
+  {
+    "timestamp": "2026-06-12T11:12:29Z",
+    "type": "Action",
+    "description": "Recompiled the time-bypassing payload and forcibly killed Spotify to clear IPC deadlocks."
+  },
+  {
+    "timestamp": "2026-06-12T11:36:09Z",
+    "type": "Adjustment",
+    "description": "Edited the Spotify 'prefs' file to enforce 'audio.play_bitrate=2' for max quality streaming."
+  },
+  {
+    "timestamp": "2026-06-13T05:44:12Z",
+    "type": "Dead End",
+    "description": "Discovered that the extracted audio files contained intermittent blocks of silence and corruption."
+  },
+  {
+    "timestamp": "2026-06-13T06:04:03Z",
+    "type": "Action",
+    "description": "Wrote and ran 'verify_silence.sh' to programmatically quantify the silence corruption bug across different tracks."
+  },
+  {
+    "timestamp": "2026-06-13T06:11:37Z",
+    "type": "Analysis",
+    "description": "Examined the 'AudioConverterFillComplexBuffer' and underrun flags in the C++ hooking logic to trace dropped chunks."
+  },
+  {
+    "timestamp": "2026-06-13T06:12:23Z",
+    "type": "Analysis",
+    "description": "Used 'ffprobe' to check durations of malformed extraction outputs, realizing the stream was seeking out-of-order."
+  },
+  {
+    "timestamp": "2026-06-13T06:24:04Z",
+    "type": "Success",
+    "description": "Verified the IPC socket pool logic, confirming the server could maintain persistent instances: 'Pool is online and ready'."
+  },
+  {
+    "timestamp": "2026-06-13T06:37:19Z",
+    "type": "Adjustment",
+    "description": "Implemented API timeout handler for hanging audio streams to gracefully terminate stuck ripping sessions."
+  },
+  {
+    "timestamp": "2026-06-13T06:48:35Z",
+    "type": "Action",
+    "description": "Adjusted 'limitBytes' in 'StateManager.cpp' to ensure absolute offset mapping didn't result in buffer overflows."
+  },
+  {
+    "timestamp": "2026-06-13T07:26:46Z",
+    "type": "Action",
+    "description": "Developed fully headless HTTP API routes for 'soggfy-server.ts', replacing CLI manual execution."
+  },
+  {
+    "timestamp": "2026-06-13T10:12:44Z",
+    "type": "Dead End",
+    "description": "Investigated payload logs after encountering injected advertisements corrupting the audio file streams."
+  },
+  {
+    "timestamp": "2026-06-13T10:25:33Z",
+    "type": "Adjustment",
+    "description": "Explored and implemented 'getaddrinfo' network hooks to neutralize DNS resolution for known ad-serving domains."
+  },
+  {
+    "timestamp": "2026-06-13T10:45:20Z",
+    "type": "Action",
+    "description": "Refined the injection script to utilize 'DYLD_INSERT_LIBRARIES' alongside 'SOGGFY_HIDDEN=0' env vars."
+  },
+  {
+    "timestamp": "2026-06-13T11:37:31Z",
+    "type": "Success",
+    "description": "Committed the massive C++ refactor: offset-aware architecture, DNS ad-blocking, and dynamic API complete."
+  },
+  {
+    "timestamp": "2026-06-13T14:49:42Z",
+    "type": "Action",
+    "description": "Cleaned up the workspace, deleting obsolete reverse engineering scripts (disasm, dump_flags, etc)."
+  },
+  {
+    "timestamp": "2026-06-13T14:58:33Z",
+    "type": "Action",
+    "description": "Performed end-to-end verification of 'soggfy-server' API endpoints while it orchestrated background Spotify instances."
+  },
+  {
+    "timestamp": "2026-06-13T15:11:06Z",
+    "type": "Action",
+    "description": "Documented the highly specific 'from scratch' patching instructions in the project README."
+  },
+  {
+    "timestamp": "2026-06-13T15:32:31Z",
+    "type": "Action",
+    "description": "Reversed the Spotify Web Player token endpoint to fetch access tokens needed for playlist metadata."
+  },
+  {
+    "timestamp": "2026-06-13T15:42:40Z",
+    "type": "Action",
+    "description": "Initialized the React and Shadcn webapp frontend within the repository."
+  },
+  {
+    "timestamp": "2026-06-13T15:53:06Z",
+    "type": "Success",
+    "description": "Finalized the project by committing the integrated web frontend and reorganizing the repository structure."
+  }
+]

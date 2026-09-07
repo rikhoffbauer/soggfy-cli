@@ -1,0 +1,11 @@
+--- soggfy-macos/Payload/Main.mm
++++ soggfy-macos/Payload/Main.mm
+@@ -420,7 +420,7 @@
+         ts.mSampleTime += 1024;
+         
+         // Throttling logic for active pulling: yield to prevent 100% CPU lockup
+-        std::this_thread::sleep_for(std::chrono::microseconds(1));
++        std::this_thread::yield();
+         
+         // Exit loop if the active track has changed or completed
+         std::string active_id;

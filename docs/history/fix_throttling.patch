@@ -1,0 +1,11 @@
+--- soggfy-macos/Payload/Main.mm
++++ soggfy-macos/Payload/Main.mm
+@@ -420,7 +420,7 @@
+         // Throttling logic: if it's silent, sleep for 10ms to give watchdog time to terminate/Spotify time to buffer
+         // If it's active audio, yield with 1 microsecond to pull at max speed
+-        if (is_silence && has_started_writing) {
++        if (is_underrun || (is_digital_silence && !has_started_writing)) {
+             std::this_thread::sleep_for(std::chrono::milliseconds(10));
+         } else {
+             std::this_thread::sleep_for(std::chrono::microseconds(1));
+         }

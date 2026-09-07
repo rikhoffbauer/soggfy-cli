@@ -1,0 +1,9 @@
+(lldb) command source -s 0 'lldb_cmd.txt'
+Executing commands in '/Volumes/Repositories/soggfy-cli/lldb_cmd.txt'.
+(lldb) command script import run_lldb.py
+(lldb) do_debug
+2026-09-06 22:49:18.596729+0200 Spotify[77589:401649] Error sending data: 0
+Launched suspended!
+Breakpoint set at: 0x10127f714
+Continuing...
+(lldb) quit

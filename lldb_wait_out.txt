@@ -1,0 +1,22 @@
+(lldb) command source -s 0 'lldb_wait.txt'
+Executing commands in '/Volumes/Repositories/soggfy-cli/lldb_wait.txt'.
+(lldb) process attach --name "Spotify" --waitfor
+Process 70810 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = signal SIGSTOP
+       frame #0: 0x0000000180bfcd10 dyld`_platform_strcmp_noMTE + 12
+dyld`_platform_strcmp_noMTE:
+->  0x180bfcd10 <+12>: ldrb   w5, [x1], #0x1
+    0x180bfcd14 <+16>: subs   x3, x4, x5
+    0x180bfcd18 <+20>: ccmp   w4, #0x0, #0x4, eq
+    0x180bfcd1c <+24>: b.ne   0x180bfcd04               ; <+0>
+Target 0: (Spotify) stopped.
+Executable binary set to "/Users/rikhoffbauer/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify".
+Architecture set to: arm64-apple-macosx-.
+(lldb) breakpoint set -a 0x10127f714
+warning: failed to set breakpoint site at 0x10127f714 for breakpoint 1.1: error sending the breakpoint request: 9
+Breakpoint 1: address = 0x000000010127f714
+(lldb) continue
+Process 70810 resuming
+Process 70810 exited with status = 13 (0x0000000d) Terminated due to signal 13
+(lldb) bt
+error: Command requires a process which is currently stopped.

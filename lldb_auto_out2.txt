@@ -1,0 +1,54 @@
+(lldb) command source -s 0 'lldb_auto2.txt'
+Executing commands in '/Volumes/Repositories/soggfy-cli/lldb_auto2.txt'.
+(lldb) command script import auto_lldb2.py
+(lldb) do_debug
+Process 76780 detached
+Attaching to PID 76780...
+Attached!
+Breakpoint set at: 0x105f7f714
+Trigger thread sleeping for 3 seconds...
+Continuing process...
+Triggering stream...
+Triggered: {"success":true,"track":"https://open.spotify.com/track/5FFVCYuBDztqDMWDrqAJAo"}
+Hit breakpoint!
+Frame 0: mach_msg2_trap pc=0x180fbcc20
+Frame 1: mach_msg2_internal pc=0x180fcf8e0
+Frame 2: mach_msg_overwrite pc=0x180fc5a28
+Frame 3: mach_msg pc=0x180fbcfac
+Frame 4: __CFRunLoopServiceMachPort pc=0x1810c290c
+Frame 5: __CFRunLoopRun pc=0x1810c1154
+Frame 6: _CFRunLoopRunSpecificWithOptions pc=0x18119b0dc
+Frame 7: RunCurrentEventLoopInMode pc=0x18e55c578
+Frame 8: ReceiveNextEventCommon pc=0x18e55f904
+Frame 9: _BlockUntilNextEventMatchingListInMode pc=0x18e6e2368
+Frame 10: _DPSBlockUntilNextEventMatchingListInMode pc=0x1859a4f10
+Frame 11: _DPSNextEvent pc=0x185661494
+Frame 12: -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] pc=0x185de78cc
+Frame 13: -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] pc=0x185de73f0
+Frame 14: -[NSApplication run] pc=0x1856548a4
+Frame 15: ___lldb_unnamed_symbol_472c4b8 pc=0x11feb5020
+Frame 16: ___lldb_unnamed_symbol_472c4b8 pc=0x11feb2c4c
+Frame 17: ___lldb_unnamed_symbol_472c4b8 pc=0x11fe65434
+Frame 18: ___lldb_unnamed_symbol_472c4b8 pc=0x11fe26e90
+Disassembly of caller (frame 1):
+0x180fcf8e0: cbz w0, 0x180fcf978
+0x180fcf8e4: tbnz w24, #0x6, 0x180fcf920
+0x180fcf8e8: mov w28, #0x7
+0x180fcf8ec: movk w28, #0x1000, lsl #16
+0x180fcf8f0: cmp w0, w28
+0x180fcf8f4: b.ne 0x180fcf920
+0x180fcf8f8: and x1, x24, x27
+0x180fcf8fc: mov x0, x25
+0x180fcf900: mov x2, x26
+0x180fcf904: mov x3, x23
+0x180fcf908: mov x4, x22
+0x180fcf90c: mov x5, x21
+0x180fcf910: mov x6, x20
+0x180fcf914: mov x7, x19
+0x180fcf918: bl 0x180fbcc18
+0x180fcf91c: b 0x180fcf8f0
+0x180fcf920: tbnz w24, #0xa, 0x180fcf978
+0x180fcf924: mov w27, #0x4005
+0x180fcf928: movk w27, #0x1000, lsl #16
+0x180fcf92c: cmp w0, w27
+(lldb) quit

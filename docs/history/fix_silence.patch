@@ -1,0 +1,21 @@
+--- soggfy-macos/Payload/Main.mm
++++ soggfy-macos/Payload/Main.mm
+@@ -389,17 +389,18 @@
+         }
+         
+         if (!is_silence) {
+             has_started_writing = true;
+             g_last_audio_time_ms.store(now_ms());
++        }
+         
+-        // Write the data to StateManager
+-        if (has_started_writing) {
++        // Only write non-silent data or data if we are confident it's not a buffer underrun
++        if (has_started_writing && !is_silence) {
+             StateManager::Instance().ReceiveAudioData(track_id, (const char*)pcm_buf.data(), bytes_returned);
++            ts.mSampleTime += 1024;
+         }
+-        
+-        ts.mSampleTime += 1024;
+         
+         // Exit loop if the active track has changed or completed

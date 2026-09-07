@@ -1,0 +1,49 @@
+.sgf-status-indicator {
+    background: transparent;
+    border: 0;
+    display: flex;
+}
+.sgf-status-indicator-card {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    background: #222;
+    border-radius: 4px;
+    top: -18px;
+    padding: 4px;
+    transform: translateX(calc(-50% + 8px));
+    box-shadow: 2px 2px 6px 4px rgb(0 0 0 / 25%);
+    opacity: 0;
+    transition: opacity 0.1s ease-out 0.5s;
+    z-index: 999;
+    max-width: 220px;
+    width: fit-content;
+}
+.sgf-status-indicator:hover .sgf-status-indicator-card {
+    opacity: 1;
+    height: auto;
+}
+.sgf-status-browse-button {
+    background: transparent;
+    border: 0;
+    height: 24px;
+    display: flex;
+    cursor: pointer;
+}
+
+/* This style is applied to playlist track rows in enhanced playlists as of 1.1.97. */
+/* The last column width was adjusted for the status indicator (120px -> 150px). */
+.ShMHCGsT93epRGdxJp2w.Ss6hr6HYpN4wjHJ9GHmi[aria-colcount="6"] .wTUruPetkKdWAR1dd6w4 {
+    grid-template-columns:
+        [index] 16px 
+        [first] 6fr 
+        [var1] 4fr 
+        [var2] 3fr 
+        [var3] minmax(120px, 2fr) 
+        [last] minmax(150px, 1fr) !important;
+}
+/* Align status icons to the left (we finally have :has()!) */
+.ShMHCGsT93epRGdxJp2w.Ss6hr6HYpN4wjHJ9GHmi[aria-colcount="6"] .wTUruPetkKdWAR1dd6w4 
+        .sgf-status-indicator:not(:has(+ button + button)) {
+    margin-right: 48px;
+}

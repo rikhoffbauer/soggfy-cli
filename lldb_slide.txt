@@ -1,0 +1,4 @@
+process attach --pid 76780
+image list Spotify
+detach
+quit
