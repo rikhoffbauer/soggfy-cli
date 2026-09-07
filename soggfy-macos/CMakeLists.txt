@@ -17,10 +17,6 @@ fetchcontent_declare(
 )
 fetchcontent_makeavailable(Dobby)
 
-# Find Capstone (installed via brew) for potential pattern scanning
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(CAPSTONE REQUIRED capstone)
-
 # Define the dynamic library payload
 add_library(soggfy SHARED 
     Payload/Main.mm
@@ -30,12 +26,7 @@ add_library(soggfy SHARED
 )
 
 target_include_directories(soggfy PRIVATE 
-    ${CAPSTONE_INCLUDE_DIRS}
     ${dobby_SOURCE_DIR}/include
-)
-
-target_link_directories(soggfy PRIVATE 
-    ${CAPSTONE_LIBRARY_DIRS}
 )
 
 find_library(AUDIOTOOLBOX_LIBRARY AudioToolbox)
@@ -44,8 +35,7 @@ find_library(FOUNDATION_LIBRARY Foundation)
 find_library(APPLICATIONSERVICES_LIBRARY ApplicationServices)
 
 target_link_libraries(soggfy PRIVATE 
-    dobby
-    ${CAPSTONE_LIBRARIES}
+    dobby_static
     ${AUDIOTOOLBOX_LIBRARY}
     ${OBJC_LIBRARY}
     ${FOUNDATION_LIBRARY}
