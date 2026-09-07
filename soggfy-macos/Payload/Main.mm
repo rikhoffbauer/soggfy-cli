@@ -44,6 +44,29 @@ my_setActivationPolicy(id self, SEL _cmd,
   return orig_setActivationPolicy(self, _cmd, activationPolicy);
 }
 
+typedef NSArray *(*runningApplicationsWithBundleIdentifier_t)(
+    id self, SEL _cmd, NSString *bundleIdentifier);
+static runningApplicationsWithBundleIdentifier_t
+    orig_runningApplicationsWithBundleIdentifier = nullptr;
+
+static NSArray *
+my_runningApplicationsWithBundleIdentifier(id self, SEL _cmd,
+                                           NSString *bundleIdentifier) {
+  pid_t my_pid = getpid();
+  NSArray *apps = orig_runningApplicationsWithBundleIdentifier
+                      ? orig_runningApplicationsWithBundleIdentifier(self, _cmd,
+                                                                     bundleIdentifier)
+                      : nil;
+  if (!apps) return @[];
+  NSMutableArray *filtered = [NSMutableArray array];
+  for (NSRunningApplication *app in apps) {
+    if ([app processIdentifier] == my_pid) {
+      [filtered addObject:app];
+    }
+  }
+  return filtered;
+}
+
 typedef void (*activateIgnoringOtherApps_t)(id self, SEL _cmd, BOOL flag);
 static activateIgnoringOtherApps_t orig_activateIgnoringOtherApps = nullptr;
 
@@ -144,6 +167,22 @@ static NSString *my_NSHomeDirectory(void) {
     return [NSString stringWithUTF8String:env_save_path];
   }
   return orig_NSHomeDirectory();
+}
+
+typedef NSString *(*NSTemporaryDirectory_t)(void);
+static NSTemporaryDirectory_t orig_NSTemporaryDirectory = nullptr;
+
+static NSString *my_NSTemporaryDirectory(void) {
+  const char *env_save_path = getenv("SOGGFY_SAVE_PATH");
+  if (env_save_path) {
+    NSString *tmp = [NSString stringWithFormat:@"%s/tmp", env_save_path];
+    [[NSFileManager defaultManager] createDirectoryAtPath:tmp
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    return tmp;
+  }
+  return orig_NSTemporaryDirectory();
 }
 
 // ── Global state ──
@@ -488,127 +527,7 @@ static AudioUnitSetProperty_t orig_AudioUnitSetProperty = nullptr;
 static std::map<void *, AURenderCallback> g_render_callbacks;
 static std::mutex g_cb_mutex;
 
-static std::atomic<bool> g_pulling_active{false};
-static std::thread g_pulling_thread;
-static std::string g_pulling_track_id;
-static std::mutex g_pull_mutex;
 
-void PullAudioThreadFunc(std::string track_id) {
-  printf("[Soggfy-PULL] Pull thread started for track: %s\n", track_id.c_str());
-  fflush(stdout);
-
-  AURenderCallback orig_cb = nullptr;
-  void *orig_refcon = nullptr;
-
-  // Wait up to 30 seconds for a callback to be registered
-  for (int i = 0; i < 300; ++i) {
-    if (!g_pulling_active.load())
-      return;
-    {
-      std::lock_guard<std::mutex> lock(g_cb_mutex);
-      if (!g_render_callbacks.empty()) {
-        auto it = g_render_callbacks.begin();
-        orig_refcon = it->first;
-        orig_cb = it->second;
-        break;
-      }
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
-
-  if (!orig_cb) {
-    printf("[Soggfy-PULL] No callback registered. Exiting pull thread.\n");
-    fflush(stdout);
-    g_pulling_active.store(false);
-    return;
-  }
-
-  printf("[Soggfy-PULL] Intercepted callback: %p, refcon: %p. Starting clean fast-pull loop...\n",
-         orig_cb, orig_refcon);
-  fflush(stdout);
-
-  static const uint32_t FRAMES_PER_CALL = 2048;
-  uint64_t total_frames_pulled = 0;
-  auto start_time = std::chrono::steady_clock::now();
-
-  std::vector<float> pcm_buf(FRAMES_PER_CALL * 2);
-  AudioBufferList bufferList;
-  bufferList.mNumberBuffers = 1;
-  bufferList.mBuffers[0].mNumberChannels = 2;
-
-  AudioUnitRenderActionFlags flags = 0;
-  AudioTimeStamp ts;
-  memset(&ts, 0, sizeof(ts));
-  ts.mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid;
-  ts.mSampleTime = 0;
-  ts.mHostTime = 1;
-
-  while (g_pulling_active.load()) {
-    bufferList.mBuffers[0].mDataByteSize = FRAMES_PER_CALL * 2 * sizeof(float);
-    bufferList.mBuffers[0].mData = pcm_buf.data();
-    flags = 0;
-
-    OSStatus err = orig_cb(orig_refcon, &flags, &ts, 0, FRAMES_PER_CALL, &bufferList);
-    if (err != noErr) {
-      std::this_thread::yield();
-      continue;
-    }
-
-    uint32_t bytes_returned = bufferList.mBuffers[0].mDataByteSize;
-    if (bytes_returned == 0) {
-      std::this_thread::yield();
-      continue;
-    }
-
-    if (total_frames_pulled == 0) {
-      // Discard pre-roll silence before playback actually begins
-      bool is_digital_silence = true;
-      float *samples = (float *)bufferList.mBuffers[0].mData;
-      uint32_t check_count = bytes_returned / sizeof(float);
-      for (uint32_t i = 0; i < check_count; ++i) {
-        if (std::abs(samples[i]) > 1e-5f) {
-          is_digital_silence = false;
-          break;
-        }
-      }
-      if (is_digital_silence) {
-        std::this_thread::yield();
-        continue;
-      }
-    }
-
-    uint32_t frames_returned = bytes_returned / (2 * sizeof(float));
-    total_frames_pulled += frames_returned;
-    CaptureAudioBuffer("pull", track_id, (const char *)pcm_buf.data(), bytes_returned);
-    ts.mSampleTime += frames_returned;
-    ts.mHostTime += (frames_returned * 1000000000ULL / 44100ULL);
-  }
-
-  auto elapsed = std::chrono::steady_clock::now() - start_time;
-  double elapsed_s = std::chrono::duration<double>(elapsed).count();
-  double audio_s = (double)total_frames_pulled / 44100.0;
-  printf("[Soggfy-PULL] Done: %.1fs audio in %.1fs (%.1fx speed).\n",
-         audio_s, elapsed_s, audio_s / std::max(0.01, elapsed_s));
-  fflush(stdout);
-}
-
-void StopPulling() {
-  std::lock_guard<std::mutex> lock(g_pull_mutex);
-  if (g_pulling_active.load()) {
-    g_pulling_active.store(false);
-    if (g_pulling_thread.joinable()) {
-      g_pulling_thread.join();
-    }
-  }
-}
-
-static std::atomic<double> g_virtual_sample_time{0.0};
-static std::atomic<uint64_t> g_virtual_host_time{1};
-
-void StartPulling(const std::string &track_id) {
-  // Acceleration is performed directly in my_render_callback at 12x speed
-  return;
-}
 
 static OSStatus my_render_callback(void *inRefCon,
                                    AudioUnitRenderActionFlags *ioActionFlags,
@@ -692,10 +611,6 @@ static OSStatus my_AudioUnitSetProperty(AudioUnit inUnit,
     {
       std::lock_guard<std::mutex> lock(g_track_mutex);
       active_track = g_active_track_id;
-    }
-    if (!active_track.empty() && active_track != "prototype_track" && !g_pulling_active.load()) {
-      printf("[Soggfy-AU] Auto-triggering StartPulling for active track: %s\n", active_track.c_str());
-      StartPulling(active_track);
     }
 
     AURenderCallbackStruct myStruct;
@@ -805,11 +720,8 @@ static void ApplySetTrack(const std::string &track) {
   }
 
   g_last_audio_time_ms.store(0);
-  g_virtual_sample_time.store(0.0);
-  g_virtual_host_time.store(1);
   StateManager::Instance().MarkPlaybackActive(track);
   PersistActiveTrackId(track);
-  StartPulling(track);
 }
 
 void StartIPCServer() {
@@ -875,11 +787,7 @@ void StartIPCServer() {
       printf("[Soggfy-IPC] Received command: play %s\n", uri.c_str());
 
       dispatch_async(dispatch_get_main_queue(), ^{
-        pid_t pid = getpid();
-        NSAppleEventDescriptor *target = [NSAppleEventDescriptor
-            descriptorWithDescriptorType:typeKernelProcessID
-                                   bytes:&pid
-                                  length:sizeof(pid)];
+        NSAppleEventDescriptor *target = [NSAppleEventDescriptor currentProcessDescriptor];
         NSAppleEventDescriptor *event = [NSAppleEventDescriptor
             appleEventWithEventClass:'spfy'
                              eventID:'PCtx'
@@ -889,12 +797,13 @@ void StartIPCServer() {
         NSString *urlStr = [NSString stringWithUTF8String:uri.c_str()];
         [event setParamDescriptor:[NSAppleEventDescriptor descriptorWithString:urlStr]
                        forKeyword:keyDirectObject];
+        [event setParamDescriptor:[NSAppleEventDescriptor descriptorWithString:urlStr]
+                       forKeyword:'cotx'];
 
         AppleEvent reply;
         OSStatus err = AESendMessage([event aeDesc], &reply, kAENoReply,
                                      kAEDefaultTimeout);
-        printf("[Soggfy-INFO] Sent play event to self (PID %d). Result: %d\n",
-               pid, (int)err);
+        printf("[Soggfy-INFO] Sent play event to self. Result: %d\n", (int)err);
 
         // Also send 'Play' unpause event in case track was paused at EOS
         NSAppleEventDescriptor *unpauseEvent = [NSAppleEventDescriptor
@@ -909,11 +818,7 @@ void StartIPCServer() {
     } else if (req == "pause") {
       printf("[Soggfy-IPC] Received command: pause\n");
       dispatch_async(dispatch_get_main_queue(), ^{
-        pid_t pid = getpid();
-        NSAppleEventDescriptor *target = [NSAppleEventDescriptor
-            descriptorWithDescriptorType:typeKernelProcessID
-                                   bytes:&pid
-                                  length:sizeof(pid)];
+        NSAppleEventDescriptor *target = [NSAppleEventDescriptor currentProcessDescriptor];
         NSAppleEventDescriptor *event = [NSAppleEventDescriptor
             appleEventWithEventClass:'spfy'
                              eventID:'Paus'
@@ -923,8 +828,7 @@ void StartIPCServer() {
         AppleEvent reply;
         OSStatus err = AESendMessage([event aeDesc], &reply, kAENoReply,
                                      kAEDefaultTimeout);
-        printf("[Soggfy-INFO] Sent pause event to self (PID %d). Result: %d\n",
-               pid, (int)err);
+        printf("[Soggfy-INFO] Sent pause event to self. Result: %d\n", (int)err);
       });
       SendResponse(client_fd, "ok");
     } else if (req.rfind("set_track ", 0) == 0) {
@@ -972,19 +876,16 @@ void StartIPCServer() {
     } else if (req.rfind("cancel_track ", 0) == 0) {
       std::string track = req.substr(13);
       TrimInPlace(track);
-      StopPulling();
       StateManager::Instance().CancelPlayback(track);
       SendResponse(client_fd, "track cancelled");
     } else if (req.rfind("finish_track ", 0) == 0) {
       std::string track = req.substr(13);
       TrimInPlace(track);
-      StopPulling();
       StateManager::Instance().FinishPlayback(track);
       SendResponse(client_fd, "track finished");
     } else if (req.rfind("reset_track ", 0) == 0) {
       std::string track = req.substr(12);
       TrimInPlace(track);
-      StopPulling();
       StateManager::Instance().ResetPlayback(track);
       SendResponse(client_fd, "track reset");
     } else if (req == "get_playing") {
@@ -1040,6 +941,21 @@ void SetupImmediateHooks() {
     }
   }
 
+  Class runCls = objc_getClass("NSRunningApplication");
+  if (runCls) {
+    Method m = class_getClassMethod(
+        runCls, sel_registerName("runningApplicationsWithBundleIdentifier:"));
+    if (m) {
+      IMP imp = method_getImplementation(m);
+      int res = DobbyHook((void *)imp,
+                          (void *)my_runningApplicationsWithBundleIdentifier,
+                          (void **)&orig_runningApplicationsWithBundleIdentifier);
+      printf("[Soggfy-INFO] Hooked runningApplicationsWithBundleIdentifier: "
+             "result=%d\n",
+             res);
+    }
+  }
+
   Class winCls = objc_getClass("NSWindow");
   if (winCls) {
     Method m1 = class_getInstanceMethod(
@@ -1089,6 +1005,15 @@ void SetupImmediateHooks() {
     printf("[Soggfy-INFO] Hooked NSHomeDirectory: result=%d\n", res);
   } else {
     printf("[Soggfy-WARN] NSHomeDirectory not found via dlsym\n");
+  }
+
+  void *nsTmp = dlsym(RTLD_DEFAULT, "NSTemporaryDirectory");
+  if (nsTmp) {
+    int res = DobbyHook(nsTmp, (void *)my_NSTemporaryDirectory,
+                        (void **)&orig_NSTemporaryDirectory);
+    printf("[Soggfy-INFO] Hooked NSTemporaryDirectory: result=%d\n", res);
+  } else {
+    printf("[Soggfy-WARN] NSTemporaryDirectory not found via dlsym\n");
   }
 
   DobbyHook((void *)getaddrinfo, (void *)my_getaddrinfo,

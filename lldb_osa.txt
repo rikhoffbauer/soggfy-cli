@@ -1,4 +1,0 @@
-(lldb) command source -s 0 'lldb_osascript.txt'
-Executing commands in '/Volumes/Repositories/soggfy-cli/lldb_osascript.txt'.
-(lldb) process attach --pid 76780
-error: attach failed: debugserver died with an exit status of 0x00000000

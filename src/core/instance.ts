@@ -81,14 +81,18 @@ export class SpotifyInstance {
 
     const sslKeyLogPath = process.env.SSLKEYLOGFILE || "/tmp/sslkeylog.log";
 
+    const tmpDir = join(this.profileDir, "tmp");
+    mkdirSync(tmpDir, { recursive: true });
+
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
       HOME: homeDir,
+      TMPDIR: tmpDir,
       DYLD_INSERT_LIBRARIES: dylibPath,
       SOGGFY_SOCKET_PATH: this.socketPath,
       SOGGFY_SAVE_PATH: this.savePath,
       SOGGFY_NO_FOCUS: "1",
-      SOGGFY_HIDDEN: "1",
+      SOGGFY_HIDDEN: "0",
       SOGGFY_CAPTURE_BACKEND: CAPTURE_BACKEND,
       SOGGFY_MUTE_OUTPUT: "1",
       SSLKEYLOGFILE: sslKeyLogPath,
@@ -101,6 +105,7 @@ export class SpotifyInstance {
       "--js-flags=--max-old-space-size=256",
       "--disable-extensions",
       "--disable-background-networking",
+      `--cache-path=${this.profileDir}`,
       `--user-data-dir=${this.profileDir}`,
       `--ssl-key-log-file=${sslKeyLogPath}`,
     ];
@@ -112,21 +117,6 @@ export class SpotifyInstance {
       stderr: "pipe",
     });
 
-    // START PATCH
-    const readStream = async (stream, prefix) => {
-      const reader = stream.getReader();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const text = new TextDecoder().decode(value);
-          console.log(`[Spotify-${prefix}] ${text.trim()}`);
-        }
-      } catch {}
-    };
-    if (this.process.stdout) readStream(this.process.stdout, "OUT");
-    if (this.process.stderr) readStream(this.process.stderr, "ERR");
-    // END PATCH
 
 
     log.info(`Spotify process spawned (PID: ${this.process.pid})`);

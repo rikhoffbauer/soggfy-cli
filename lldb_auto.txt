@@ -1,3 +1,0 @@
-command script import auto_lldb.py
-do_debug
-quit

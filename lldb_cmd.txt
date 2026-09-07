@@ -1,3 +1,0 @@
-command script import run_lldb.py
-do_debug
-quit

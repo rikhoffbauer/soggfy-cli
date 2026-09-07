@@ -1,7 +1,0 @@
-target create /Users/rikhoffbauer/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify
-process launch -s -- --disable-gpu --disable-software-rasterizer --renderer-process-limit=1 --js-flags=--max-old-space-size=256 --disable-extensions --disable-background-networking --user-data-dir=/Users/rikhoffbauer/.soggfy/workspace/profiles/cli_instance
-breakpoint set -a 0x10127f714
-continue
-bt
-disassemble -f -p
-quit

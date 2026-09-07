@@ -234,7 +234,6 @@ async function daemonRun(): Promise<void> {
     process.exit(1);
   }
 
-  // >>> ADD THE HTTP SERVER HERE <<<
   const server = Bun.serve({
     port: 8080,
     routes: {
@@ -271,7 +270,6 @@ async function daemonRun(): Promise<void> {
   });
 
   appendLog(`Web UI and API server listening on http://localhost:${server.port}`);
-  // >>> END HTTP SERVER ADDITION <<<
 
 
   // Watchdog loop: ping every 15s, restart if unresponsive

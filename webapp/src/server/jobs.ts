@@ -92,16 +92,16 @@ function legacyForState(state: DownloadState): LegacyDownloadState {
       return "downloading";
   }
 }
-
 export class JobRegistry {
   private jobs = new Map<string, DownloadJob>();
   private byTrack = new Map<string, string>();
+  private jobSeq = 0;
 
   create(trackId: string, metadata?: TrackMetadata): DownloadJob {
     const existing = this.findReusable(trackId);
     if (existing) return existing;
 
-    const id = `${Date.now().toString(36)}-${trackId}`;
+    const id = `${Date.now().toString(36)}-${(++this.jobSeq).toString(36)}-${trackId}`;
     const job: DownloadJob = {
       id,
       trackId,

@@ -26,6 +26,11 @@ export async function captureTrack(
 
   // Tell Spotify to play the track
   await sendIPC(socketPath, `play spotify:track:${trackId}`);
+  Bun.spawn([
+    "osascript",
+    "-e",
+    `tell application id "com.spotify.client" to play track "spotify:track:${trackId}" in context "spotify:track:${trackId}"`,
+  ]);
   log.info(`Playback started for ${trackId}`);
 
   // Wait for the correct track to be confirmed playing
@@ -50,6 +55,11 @@ export async function captureTrack(
     // Re-nudge play every 3 seconds if not confirmed yet
     if (i > 0 && i % 6 === 0 && !trackConfirmed) {
       await sendIPC(socketPath, `play spotify:track:${trackId}`).catch(() => {});
+      Bun.spawn([
+        "osascript",
+        "-e",
+        `tell application id "com.spotify.client" to play track "spotify:track:${trackId}" in context "spotify:track:${trackId}"`,
+      ]);
     }
   }
 

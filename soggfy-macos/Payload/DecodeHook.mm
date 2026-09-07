@@ -41,7 +41,10 @@ std::atomic<bool> g_decoder_active{false};
 std::atomic<bool> g_ogg_stream_active{false};
 
 static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
-    if (!orig_ogg_stream_pagein || !og) return 0;
+    if (!orig_ogg_stream_pagein) return 0;
+
+    int ret = orig_ogg_stream_pagein(os, og);
+    if (ret != 1 || !og) return ret;
 
     unsigned char* hdr = og->header;
     long hlen = og->header_len;
@@ -67,6 +70,10 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
 
         if (!track_id.empty() && track_id != "prototype_track") {
             if (is_vorbis_bos) {
+                if (StateManager::Instance().GetPlaybackStatus(track_id) == "completed" ||
+                    StateManager::Instance().GetPlaybackBytes(track_id) < 10000) {
+                    StateManager::Instance().ResetPlayback(track_id);
+                }
                 g_ogg_stream_active.store(true);
                 g_active_ogg_serial = serial;
                 g_capture_gated.store(false);
@@ -84,17 +91,23 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
                 if (is_eos) {
                     uint64_t granule = *(uint64_t*)(hdr + 6);
                     double audio_sec = (double)granule / 44100.0;
-                    printf("[Soggfy-OGG] Stream EOS reached for %s (serial 0x%x, %.1fs audio). Finalizing!\n",
-                           track_id.c_str(), serial, audio_sec);
-                    fflush(stdout);
-                    g_ogg_stream_active.store(false);
-                    StateManager::Instance().FinishPlayback(track_id);
+                    if (audio_sec > 5.0) {
+                        printf("[Soggfy-OGG] Stream EOS reached for %s (serial 0x%x, %.1fs audio). Finalizing!\n",
+                               track_id.c_str(), serial, audio_sec);
+                        fflush(stdout);
+                        g_ogg_stream_active.store(false);
+                        StateManager::Instance().FinishPlayback(track_id);
+                    } else {
+                        printf("[Soggfy-OGG] Ignoring premature EOS page for %s (serial 0x%x, %.1fs audio)\n",
+                               track_id.c_str(), serial, audio_sec);
+                        fflush(stdout);
+                    }
                 }
             }
         }
     }
 
-    return orig_ogg_stream_pagein(os, og);
+    return ret;
 }
 
 static int my_DecodeAudioData(void* x0, float* x1, size_t* x2, const char* x3, size_t* x4, int x5) {
