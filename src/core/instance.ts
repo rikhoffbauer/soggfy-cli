@@ -26,11 +26,7 @@ export class SpotifyInstance {
   ) {
     this.socketPath = socketPath;
     this.savePath = savePath;
-    this.profileDir =
-      profileDir ||
-      (savePath === SAVE_PATH
-        ? join(PROFILES_DIR, "cli_instance")
-        : join(savePath, "profile"));
+    this.profileDir = profileDir || join(PROFILES_DIR, "cli_instance");
   }
 
   async start(): Promise<void> {

@@ -274,7 +274,7 @@ async function daemonRun(): Promise<void> {
 
   // Watchdog loop: ping every 15s, restart if unresponsive
   while (!shuttingDown) {
-    await Bun.sleep(3600000);
+    await Bun.sleep(15000);
     if (shuttingDown) break;
 
     const ok = await ping(IPC_SOCKET);

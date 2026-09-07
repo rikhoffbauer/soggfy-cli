@@ -215,8 +215,10 @@ static int my_getaddrinfo(const char *nodename, const char *servname,
         host.find("analytics") != std::string::npos ||
         host.find("metrics") != std::string::npos ||
         host.find("crashdump") != std::string::npos ||
+        host.find("upgrade") != std::string::npos ||
+        host.find("desktop.spotify.com") != std::string::npos ||
         host.find("doubleclick.net") != std::string::npos) {
-      printf("[Soggfy-INFO] Blocked ad/analytics domain: %s\n", nodename);
+      printf("[Soggfy-INFO] Blocked ad/analytics/update domain: %s\n", nodename);
       return EAI_NONAME;
     }
   }
