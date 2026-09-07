@@ -1,0 +1,86 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Native Payload (libsoggfy.dylib)
+        run: bun run build:payload
+
+      - name: Verify libsoggfy.dylib architecture
+        run: |
+          file src/payload/libsoggfy.dylib
+          otool -L src/payload/libsoggfy.dylib
+
+      - name: Run Unit Tests
+        run: bun test
+
+      - name: Build CLI Bundle
+        run: bun run build:cli
+
+      - name: Create Distribution Archive
+        run: |
+          mkdir -p release-bundle/bin release-bundle/payload
+          cp dist/cli.js release-bundle/bin/soggfy
+          chmod +x release-bundle/bin/soggfy
+          cp src/payload/libsoggfy.dylib release-bundle/payload/libsoggfy.dylib
+          cp README.md release-bundle/ 2>/dev/null || true
+          tar -czvf soggfy-macos-arm64.tar.gz -C release-bundle .
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: soggfy-macos-arm64
+          path: |
+            soggfy-macos-arm64.tar.gz
+            src/payload/libsoggfy.dylib
+            dist/cli.js
+
+  release:
+    name: Publish Release
+    runs-on: macos-latest
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: soggfy-macos-arm64
+          path: release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/soggfy-macos-arm64.tar.gz
+            release-assets/libsoggfy.dylib
+            release-assets/cli.js
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
