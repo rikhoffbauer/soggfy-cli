@@ -26,11 +26,6 @@ export async function captureTrack(
 
   // Tell Spotify to play the track
   await sendIPC(socketPath, `play spotify:track:${trackId}`);
-  Bun.spawn([
-    "osascript",
-    "-e",
-    `tell application id "com.spotify.client" to play track "spotify:track:${trackId}" in context "spotify:track:${trackId}"`,
-  ]);
   log.info(`Playback started for ${trackId}`);
 
   // Wait for the correct track to be confirmed playing
@@ -38,14 +33,15 @@ export async function captureTrack(
   for (let i = 0; i < 30; i++) {
     await Bun.sleep(500);
     try {
-      const raw = await sendIPC(socketPath, "get_playing", { retries: 1 });
-      if (raw.startsWith("{")) {
-        const playing = JSON.parse(raw);
-        if (playing.is_ad) {
-          if (i % 4 === 0) log.info(`Ad currently playing, waiting for track...`);
-          continue;
-        }
-        if (playing.uri?.includes(trackId) && !playing.gated) {
+      const playingUri = await sendIPC(socketPath, "get_playing").catch(() => "");
+      if (playingUri && playingUri.includes(trackId)) {
+        trackConfirmed = true;
+        break;
+      }
+      const notifyFile = join(savePath, "active_track.txt");
+      if (existsSync(notifyFile)) {
+        const fileContent = readFileSync(notifyFile, "utf-8").trim();
+        if (fileContent.includes(trackId)) {
           trackConfirmed = true;
           break;
         }
@@ -55,11 +51,6 @@ export async function captureTrack(
     // Re-nudge play every 3 seconds if not confirmed yet
     if (i > 0 && i % 6 === 0 && !trackConfirmed) {
       await sendIPC(socketPath, `play spotify:track:${trackId}`).catch(() => {});
-      Bun.spawn([
-        "osascript",
-        "-e",
-        `tell application id "com.spotify.client" to play track "spotify:track:${trackId}" in context "spotify:track:${trackId}"`,
-      ]);
     }
   }
 

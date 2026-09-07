@@ -84,13 +84,10 @@ typedef void (*makeKeyAndOrderFront_t)(id self, SEL _cmd, id sender);
 static makeKeyAndOrderFront_t orig_makeKeyAndOrderFront = nullptr;
 
 static void my_makeKeyAndOrderFront(id self, SEL _cmd, id sender) {
+  orig_makeKeyAndOrderFront(self, _cmd, sender);
   const char *env_hidden = getenv("SOGGFY_HIDDEN");
   if (env_hidden && std::string(env_hidden) == "1") {
-    printf("[Soggfy-INFO] makeKeyAndOrderFront: Window hide active, bypassing "
-           "window front order.\n");
-    [(NSWindow *)self orderOut:nil];
-  } else {
-    orig_makeKeyAndOrderFront(self, _cmd, sender);
+    [(NSWindow *)self setFrameOrigin:NSMakePoint(-20000, -20000)];
   }
 }
 
@@ -98,13 +95,10 @@ typedef void (*orderFront_t)(id self, SEL _cmd, id sender);
 static orderFront_t orig_orderFront = nullptr;
 
 static void my_orderFront(id self, SEL _cmd, id sender) {
+  orig_orderFront(self, _cmd, sender);
   const char *env_hidden = getenv("SOGGFY_HIDDEN");
   if (env_hidden && std::string(env_hidden) == "1") {
-    printf("[Soggfy-INFO] orderFront: Window hide active, bypassing window "
-           "front order.\n");
-    [(NSWindow *)self orderOut:nil];
-  } else {
-    orig_orderFront(self, _cmd, sender);
+    [(NSWindow *)self setFrameOrigin:NSMakePoint(-20000, -20000)];
   }
 }
 
@@ -112,13 +106,10 @@ typedef void (*orderFrontRegardless_t)(id self, SEL _cmd);
 static orderFrontRegardless_t orig_orderFrontRegardless = nullptr;
 
 static void my_orderFrontRegardless(id self, SEL _cmd) {
+  orig_orderFrontRegardless(self, _cmd);
   const char *env_hidden = getenv("SOGGFY_HIDDEN");
   if (env_hidden && std::string(env_hidden) == "1") {
-    printf("[Soggfy-INFO] orderFrontRegardless: Window hide active, bypassing "
-           "window front order.\n");
-    [(NSWindow *)self orderOut:nil];
-  } else {
-    orig_orderFrontRegardless(self, _cmd);
+    [(NSWindow *)self setFrameOrigin:NSMakePoint(-20000, -20000)];
   }
 }
 

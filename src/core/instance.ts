@@ -92,7 +92,7 @@ export class SpotifyInstance {
       SOGGFY_SOCKET_PATH: this.socketPath,
       SOGGFY_SAVE_PATH: this.savePath,
       SOGGFY_NO_FOCUS: "1",
-      SOGGFY_HIDDEN: "0",
+      SOGGFY_HIDDEN: "1",
       SOGGFY_CAPTURE_BACKEND: CAPTURE_BACKEND,
       SOGGFY_MUTE_OUTPUT: "1",
       SSLKEYLOGFILE: sslKeyLogPath,
