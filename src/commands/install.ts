@@ -143,16 +143,17 @@ export async function installCommand(args: string[]): Promise<void> {
   log.step(5, totalSteps, "Building payload (libsoggfy.dylib)");
 
   const repoPayloadDir = join(import.meta.dir, "..", "..", "soggfy-macos");
-  const prebuiltDylib = join(import.meta.dir, "..", "payload", "libsoggfy.dylib");
+  const bundledPrebuiltDylib = join(import.meta.dir, "..", "payload", "libsoggfy.dylib");
+  const hasPayloadSource = existsSync(join(repoPayloadDir, "CMakeLists.txt"));
 
   let dylibPath = "";
 
-  if (!rebuild && existsSync(prebuiltDylib)) {
+  if (!hasPayloadSource && !rebuild && existsSync(bundledPrebuiltDylib)) {
     log.ok("Using bundled prebuilt payload (libsoggfy.dylib)");
-    dylibPath = prebuiltDylib;
+    dylibPath = bundledPrebuiltDylib;
   } else {
     let payloadSourceDir = PAYLOAD_SOURCE_DIR;
-    if (existsSync(join(repoPayloadDir, "CMakeLists.txt"))) {
+    if (hasPayloadSource) {
       payloadSourceDir = repoPayloadDir;
     } else if (!existsSync(PAYLOAD_SOURCE_DIR)) {
       log.error("Payload source not found. Cannot build libsoggfy.dylib.");

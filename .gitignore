@@ -7,3 +7,6 @@ dist/
 .DS_Store
 
 .worktrees/
+
+# Generated native payload; releases stage it from soggfy-macos/build.
+/src/payload/libsoggfy.dylib

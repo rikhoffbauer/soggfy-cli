@@ -7,7 +7,7 @@
     "soggfy": "./src/cli.ts"
   },
   "scripts": {
-    "build:payload": "cmake -B soggfy-macos/build -S soggfy-macos && cmake --build soggfy-macos/build && cp soggfy-macos/build/libsoggfy.dylib src/payload/libsoggfy.dylib",
+    "build:payload": "cmake -B soggfy-macos/build -S soggfy-macos && cmake --build soggfy-macos/build",
     "build:cli": "bun build src/cli.ts --outdir dist --target bun",
     "build": "bun run build:payload && bun run build:cli",
     "start": "bun run src/cli.ts",

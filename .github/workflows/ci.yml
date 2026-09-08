@@ -45,8 +45,8 @@ jobs:
 
       - name: Verify libsoggfy.dylib architecture
         run: |
-          file src/payload/libsoggfy.dylib
-          otool -L src/payload/libsoggfy.dylib
+          file soggfy-macos/build/libsoggfy.dylib
+          otool -L soggfy-macos/build/libsoggfy.dylib
 
       - name: Run Unit Tests
         run: bun test
@@ -63,21 +63,21 @@ jobs:
 
       - name: Create Distribution Archive
         run: |
-          mkdir -p release-bundle/bin release-bundle/payload
+          mkdir -p release-bundle/bin release-bundle/payload release-artifacts
           cp dist/cli.js release-bundle/bin/soggfy
           chmod +x release-bundle/bin/soggfy
-          cp src/payload/libsoggfy.dylib release-bundle/payload/libsoggfy.dylib
+          cp soggfy-macos/build/libsoggfy.dylib release-bundle/payload/libsoggfy.dylib
           cp README.md release-bundle/ 2>/dev/null || true
           tar -czvf soggfy-macos-arm64.tar.gz -C release-bundle .
+          cp soggfy-macos-arm64.tar.gz release-artifacts/
+          cp soggfy-macos/build/libsoggfy.dylib release-artifacts/
+          cp dist/cli.js release-artifacts/
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: soggfy-macos-arm64
-          path: |
-            soggfy-macos-arm64.tar.gz
-            src/payload/libsoggfy.dylib
-            dist/cli.js
+          path: release-artifacts/
 
   release:
     name: Publish Release
