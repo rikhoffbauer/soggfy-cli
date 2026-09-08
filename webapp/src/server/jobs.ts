@@ -19,6 +19,9 @@ export interface TrackMetadata {
 }
 
 export interface OutputValidation {
+  ok?: boolean;
+  container?: string;
+  decodedSignalOk?: boolean;
   riffHeader?: boolean;
   waveHeader?: boolean;
   fmtChunk?: boolean;
@@ -45,10 +48,12 @@ export interface DownloadJob {
   bytesCaptured: number;
   expectedBytes?: number;
   durationMs?: number;
+  capturePath?: string;
   wavPath?: string;
+  oggPath?: string;
   mp3Path?: string;
   savedPath?: string;
-  outputFormat?: "wav" | "mp3";
+  outputFormat?: "wav" | "ogg" | "mp3";
   sizeBytes?: number;
   error?: string;
   metadata?: TrackMetadata;

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { log } from "../core/log";
+import { assertSupportedSpotifyBundle } from "../core/spotify-runtime";
 import {
   SOGGFY_HOME,
   WORKSPACE_DIR,
@@ -102,6 +103,13 @@ export async function installCommand(args: string[]): Promise<void> {
     }
   }
   log.ok("Spotify.app present");
+  try {
+    assertSupportedSpotifyBundle(SPOTIFY_APP);
+    log.ok("Spotify build is capture-compatible");
+  } catch (error) {
+    log.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 
   // Step 3: Create patched workspace
   log.step(3, totalSteps, "Creating patched workspace app");
@@ -177,6 +185,7 @@ export async function installCommand(args: string[]): Promise<void> {
   const destDylib = join(destDir, "libsoggfy.dylib");
   run(["cp", dylibPath, destDylib], "copy dylib");
   run(["codesign", "-f", "-s", "-", destDylib], "sign dylib");
+  run(["codesign", "-f", "-s", "-", "--deep", PATCHED_APP], "sign patched Spotify bundle");
   run(["codesign", "--verify", "--deep", "--strict", PATCHED_APP], "verify patched Spotify bundle");
   log.ok("Payload installed, signed, and verified");
 

@@ -43,6 +43,18 @@ export function expectedFloatPcmBytes(
   return Math.floor((sampleRate * channels * 4 * durationMs) / 1000);
 }
 
+export function expectedOggBytes(durationMs: number, bitrateKbps = 320): number {
+  return Math.floor((bitrateKbps * 1000 / 8) * (durationMs / 1000));
+}
+
+export function findCapturedAudioPath(savePath: string, trackId: string): string | null {
+  for (const extension of ["ogg", "wav"] as const) {
+    const candidate = join(savePath, `${trackId}.${extension}`);
+    if (existsSync(candidate) && statSync(candidate).size > 0) return candidate;
+  }
+  return null;
+}
+
 function readAscii(buffer: Buffer, start: number, end: number): string {
   return buffer.subarray(start, end).toString("ascii");
 }
@@ -203,13 +215,13 @@ export function ffprobeOk(path: string): boolean {
   return probeDurationMs(path).ok;
 }
 
-export function transcodeWavToMp3(
-  wavPath: string,
+export function transcodeAudioToMp3(
+  inputPath: string,
   mp3Path: string,
 ): { ok: boolean; stderr: string } {
   const result = spawnSync("ffmpeg", [
     "-y", "-hide_banner", "-loglevel", "error",
-    "-i", wavPath, "-b:a", "320k", mp3Path,
+    "-i", inputPath, "-b:a", "320k", mp3Path,
   ], { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] });
   return {
     ok: result.status === 0 && existsSync(mp3Path) && statSync(mp3Path).size > 0,
@@ -217,16 +229,23 @@ export function transcodeWavToMp3(
   };
 }
 
+export const transcodeWavToMp3 = transcodeAudioToMp3;
+
 export function writeSidecar(outputPath: string, payload: Record<string, unknown>): string {
   const sidecarPath = `${outputPath}.json`;
   writeFileSync(sidecarPath, `${JSON.stringify(payload, null, 2)}\n`);
   return sidecarPath;
 }
 
-export function copyWavFallback(wavPath: string, outputDir: string, trackId: string): string {
-  const finalPath = join(outputDir, `${trackId}.wav`);
-  copyFileSync(wavPath, finalPath);
+export function copyAudioFallback(inputPath: string, outputDir: string, trackId: string): string {
+  const extension = extname(inputPath).toLowerCase() || ".bin";
+  const finalPath = join(outputDir, `${trackId}${extension}`);
+  copyFileSync(inputPath, finalPath);
   return finalPath;
+}
+
+export function copyWavFallback(wavPath: string, outputDir: string, trackId: string): string {
+  return copyAudioFallback(wavPath, outputDir, trackId);
 }
 
 export function displayFileName(

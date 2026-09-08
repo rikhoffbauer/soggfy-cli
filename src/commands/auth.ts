@@ -3,6 +3,7 @@ import { join, resolve, sep } from "path";
 import { homedir } from "os";
 import { log } from "../core/log";
 import { AUTH_DIR, SPOTIFY_APP } from "../core/paths";
+import { terminateProcessTree } from "../core/spotify-runtime";
 
 const SPOTIFY_SUPPORT = join(homedir(), "Library/Application Support/Spotify");
 const PREFS_FILE = join(SPOTIFY_SUPPORT, "prefs");
@@ -116,8 +117,9 @@ async function authLogin(): Promise<void> {
   log.info("then return here and press Enter.");
   console.error();
 
-  // Open official Spotify (not patched) so login works cleanly
-  Bun.spawnSync(["open", "-a", SPOTIFY_APP]);
+  // Launch the official Spotify binary directly so cleanup can target only this process tree.
+  const spotifyBinary = join(SPOTIFY_APP, "Contents/MacOS/Spotify");
+  const spotify = Bun.spawn([spotifyBinary], { stdout: "ignore", stderr: "ignore" });
 
   // Wait for user to press Enter
   process.stderr.write("Press Enter after Spotify is logged in and loaded... ");
@@ -125,9 +127,8 @@ async function authLogin(): Promise<void> {
     break; // consume one line
   }
 
-  // Kill Spotify after login
-  Bun.spawnSync(["killall", "Spotify"]);
-  await Bun.sleep(2000);
+  // Stop only the Spotify process tree launched by this command.
+  await terminateProcessTree(spotify.pid, spotify.exited);
 
   // Verify login state
   const prefs = readPrefs();

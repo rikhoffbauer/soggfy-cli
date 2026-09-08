@@ -1,9 +1,9 @@
 import { spawn, type Subprocess } from "bun";
-import { existsSync, unlinkSync, mkdirSync, copyFileSync } from "fs";
+import { existsSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { sendIPC, ping } from "./ipc";
 import { log } from "./log";
+import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "./spotify-runtime";
 import {
   PATCHED_APP,
   PROFILES_DIR,
@@ -41,6 +41,7 @@ export class SpotifyInstance {
     if (!existsSync(dylibPath)) {
       throw new Error(`Payload dylib not found: ${dylibPath}. Run 'soggfy install' first.`);
     }
+    assertSupportedSpotifyBundle(PATCHED_APP);
 
     // Prepare directories
     mkdirSync(this.savePath, { recursive: true, mode: 0o700 });
@@ -48,25 +49,10 @@ export class SpotifyInstance {
     const homeDir = join(this.profileDir, "home");
     mkdirSync(homeDir, { recursive: true, mode: 0o700 });
 
-    // Clone login state from system Spotify
     const appSupportDest = join(this.savePath, "Application Support/Spotify");
-    mkdirSync(appSupportDest, { recursive: true });
-    const sourceDir = join(homedir(), "Library/Application Support/Spotify");
-    try {
-      const prefsPath = join(sourceDir, "prefs");
-      if (existsSync(prefsPath)) copyFileSync(prefsPath, join(appSupportDest, "prefs"));
-
-      const usersPath = join(sourceDir, "Users");
-      if (existsSync(usersPath)) {
-        await spawn(["cp", "-R", usersPath, appSupportDest]).exited;
-      }
-
-      const cachePath = join(sourceDir, "PersistentCache");
-      if (existsSync(cachePath)) {
-        await spawn(["cp", "-R", cachePath, appSupportDest]).exited;
-      }
-    } catch (e: any) {
-      log.warn(`Could not clone login state: ${e.message}`);
+    const loginState = cloneSpotifyLoginState(appSupportDest);
+    if (!loginState.copiedPrefs && !loginState.copiedSessionCache) {
+      log.warn("No reusable Spotify login state found; run 'soggfy auth login'.");
     }
 
     // Clean stale socket and locks
@@ -109,8 +95,8 @@ export class SpotifyInstance {
 
     this.process = spawn([binaryPath, ...cefFlags], {
       env,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdout: "ignore",
+      stderr: "ignore",
     });
 
 
@@ -150,16 +136,10 @@ export class SpotifyInstance {
   async stop(): Promise<void> {
     this.isReady = false;
     if (this.process) {
-      try {
-        this.process.kill("SIGKILL");
-        await Promise.race([
-          this.process.exited,
-          Bun.sleep(2000),
-        ]);
-      } catch {}
+      const pid = this.process.pid;
+      await terminateProcessTree(pid, this.process.exited);
       this.process = null;
     }
-    // Cleanup only resources owned by this instance.
     try { if (existsSync(this.socketPath)) unlinkSync(this.socketPath); } catch {}
     log.info("Spotify instance stopped.");
   }

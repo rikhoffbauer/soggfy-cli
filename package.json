@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit --pretty",
     "test:native": "./scripts/run-state-manager-fixture.sh",
     "test:webapp": "cd webapp && bun test src/server/__tests__",
-    "typecheck:webapp": "cd webapp && bun run typecheck"
+    "typecheck:webapp": "cd webapp && bun run typecheck",
+    "doctor": "bun run scripts/doctor.ts"
   },
   "dependencies": {
     "@types/react": "^19.2.18",

@@ -53,7 +53,7 @@ interface DownloadJob {
   bytesCaptured: number;
   expectedBytes?: number;
   durationMs?: number;
-  outputFormat?: "wav" | "mp3";
+  outputFormat?: "wav" | "ogg" | "mp3";
   sizeBytes?: number;
   error?: string;
   title?: string;

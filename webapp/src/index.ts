@@ -8,13 +8,21 @@ import {
   statSync,
 } from "fs";
 import { spawnSync } from "child_process";
-import { dirname, join } from "path";
+import { dirname, extname, join } from "path";
 import { fileURLToPath } from "url";
-import { createConnection } from "net";
 import index from "./index.html";
-import { homedir } from "os";
 import NodeID3 from "node-id3";
 import { ZipArchive } from "archiver";
+import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "../../src/core/spotify-runtime";
+import { sendIPC as sendIpcCommand } from "../../src/core/ipc";
+import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
+import {
+  CAPTURE_BACKEND,
+  OUTPUT_DIR,
+  PROFILES_DIR,
+  SOGGFY_HOME,
+  WORKSPACE_DIR,
+} from "../../src/core/paths";
 import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./server/http";
 import { extractTrackIds, parseTrackId } from "./server/spotify-url";
 import {
@@ -23,12 +31,13 @@ import {
   type TrackMetadata,
 } from "./server/jobs";
 import {
-  copyWavFallback,
+  copyAudioFallback,
   displayFileName,
-  expectedFloatPcmBytes,
+  expectedOggBytes,
   ffprobeOk,
-  transcodeWavToMp3,
-  validateWavFile,
+  findCapturedAudioPath,
+  transcodeAudioToMp3,
+  validateAudioFile,
   writeSidecar,
 } from "./server/media";
 
@@ -37,18 +46,16 @@ const HOSTNAME = process.env.SOGGFY_HOST || "127.0.0.1";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const WEBAPP_DIR = join(SERVER_DIR, "..");
 const REPO_ROOT = join(WEBAPP_DIR, "..");
-const OUTPUT_DIR = join(REPO_ROOT, "downloads");
-const WORKSPACE_DIR = join(REPO_ROOT, "workspace");
-const PROFILES_DIR = join(WORKSPACE_DIR, "profiles");
 const POOL_SIZE = Number.parseInt(process.env.SOGGFY_POOL_SIZE || "1", 10);
 const SOGGFY_HIDDEN = process.env.SOGGFY_HIDDEN !== "0";
 const MAX_ATTEMPTS = Number.parseInt(process.env.SOGGFY_MAX_ATTEMPTS || "2", 10);
 const BASE_DEBUG_PORT = Number.parseInt(process.env.SOGGFY_DEBUG_PORT_BASE || "9222", 10);
-const CAPTURE_BACKEND = process.env.SOGGFY_CAPTURE_BACKEND || "disabled";
-const MUTE_OUTPUT = process.env.SOGGFY_MUTE_OUTPUT || "0";
+const MUTE_OUTPUT = process.env.SOGGFY_MUTE_OUTPUT || "1";
+const RUNTIME_DIR = join(SOGGFY_HOME, "runtime");
 
-mkdirSync(OUTPUT_DIR, { recursive: true });
-mkdirSync(PROFILES_DIR, { recursive: true });
+mkdirSync(OUTPUT_DIR, { recursive: true, mode: 0o700 });
+mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
+mkdirSync(PROFILES_DIR, { recursive: true, mode: 0o700 });
 
 const jobs = new JobRegistry();
 const GLOBAL_METADATA: Record<string, TrackMetadata> = {};
@@ -102,12 +109,16 @@ async function preparePayload() {
   if (!existsSync(dylibSource)) {
     throw new Error(`[Server] libsoggfy.dylib not found at ${dylibSource}. Build with: cd soggfy-macos && cmake --build build`);
   }
+  const appBundle = join(WORKSPACE_DIR, "PatchedSpotify.app");
+  assertSupportedSpotifyBundle(appBundle);
   if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
 
   console.log(`[Server] Copying payload dylib into patched app bundle...`);
   copyFileSync(dylibSource, dylibDest);
-  console.log(`[Server] Codesigning payload dylib synchronously...`);
+  console.log(`[Server] Codesigning payload dylib and completed app bundle synchronously...`);
   runChecked("codesign", ["-f", "-s", "-", dylibDest], "codesign libsoggfy.dylib");
+  runChecked("codesign", ["-f", "-s", "-", "--deep", appBundle], "codesign patched Spotify bundle");
+  runChecked("codesign", ["--verify", "--deep", "--strict", appBundle], "verify patched Spotify bundle");
   console.log(`[Server] Payload dylib is ready: ${dylibDest}`);
 }
 
@@ -153,8 +164,8 @@ class SpotifyInstance {
 
   constructor(id: number) {
     this.id = id;
-    this.socketPath = `/tmp/soggfy_instance_${id}.sock`;
-    this.savePath = `/tmp/Soggfy_instance_${id}`;
+    this.socketPath = join(RUNTIME_DIR, `instance_${id}.sock`);
+    this.savePath = join(RUNTIME_DIR, `instance_${id}`);
     this.profileDir = join(PROFILES_DIR, `instance_${id}`);
     this.debugPort = BASE_DEBUG_PORT + id;
   }
@@ -186,33 +197,12 @@ class SpotifyInstance {
   }
 
   async sendIPC(command: string, retries = 4, timeoutMs = 2500): Promise<string> {
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        return await new Promise<string>((resolve, reject) => {
-          const client = createConnection(this.socketPath);
-          let response = "";
-          const timer = setTimeout(() => {
-            client.destroy();
-            reject(new Error(`IPC timeout for '${command}'`));
-          }, timeoutMs);
-          client.on("connect", () => client.write(command));
-          client.on("data", (data) => { response += data.toString(); });
-          client.on("end", () => {
-            clearTimeout(timer);
-            resolve(response.trim());
-          });
-          client.on("error", (err) => {
-            clearTimeout(timer);
-            reject(err);
-          });
-        });
-      } catch (e: any) {
-        this.lastError = e.message;
-        if (attempt === retries - 1) throw e;
-        await new Promise((r) => setTimeout(r, 150 + attempt * 250));
-      }
+    try {
+      return await sendIpcCommand(this.socketPath, command, { retries, timeoutMs });
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
     }
-    throw new Error("unreachable IPC retry fallthrough");
   }
 
   async ping(): Promise<boolean> {
@@ -228,16 +218,10 @@ class SpotifyInstance {
   }
 
   async isRunning(): Promise<boolean> {
-    if (this.process?.pid) {
-      try {
-        process.kill(this.process.pid, 0);
-        return true;
-      } catch {}
-    }
+    if (!this.process?.pid) return false;
     try {
-      const proc = spawn(["pgrep", "-f", `SOGGFY_SOCKET_PATH=${this.socketPath}|instance_${this.id}`]);
-      const output = await new Response(proc.stdout).text();
-      return output.trim().length > 0;
+      process.kill(this.process.pid, 0);
+      return true;
     } catch {
       return false;
     }
@@ -248,23 +232,15 @@ class SpotifyInstance {
     this.lastError = undefined;
     this.log("Initializing instance...");
 
-    mkdirSync(this.savePath, { recursive: true });
-    mkdirSync(this.profileDir, { recursive: true });
+    mkdirSync(this.savePath, { recursive: true, mode: 0o700 });
+    mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
 
     const appSupportSpotify = join(this.savePath, "Application Support/Spotify");
-    mkdirSync(appSupportSpotify, { recursive: true });
-    const sourceDir = join(homedir(), "Library/Application Support/Spotify");
-    try {
-      const sourcePrefs = join(sourceDir, "prefs");
-      const sourceUsers = join(sourceDir, "Users");
-      if (existsSync(sourcePrefs)) copyFileSync(sourcePrefs, join(appSupportSpotify, "prefs"));
-      if (existsSync(sourceUsers)) {
-        const cp = spawn(["cp", "-R", sourceUsers, appSupportSpotify]);
-        await cp.exited;
-      }
-      this.log("Cloned login state into isolated Application Support.");
-    } catch (err: any) {
-      this.log(`Warning: failed to clone login state: ${err.message}`);
+    const loginState = cloneSpotifyLoginState(appSupportSpotify);
+    if (loginState.copiedSessionCache) {
+      this.log("Cloned reusable Spotify session state.");
+    } else {
+      this.log("Warning: reusable Spotify session state not found; run `soggfy auth login`.");
     }
 
     try {
@@ -285,11 +261,14 @@ class SpotifyInstance {
     if (!existsSync(dylibPath)) throw new Error(`Payload dylib missing: ${dylibPath}`);
 
     const homeDir = join(this.profileDir, "home");
-    mkdirSync(homeDir, { recursive: true });
+    const tmpDir = join(this.profileDir, "tmp");
+    mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+    mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
 
     const env = {
       ...process.env,
       HOME: homeDir,
+      TMPDIR: tmpDir,
       DYLD_INSERT_LIBRARIES: dylibPath,
       SOGGFY_SOCKET_PATH: this.socketPath,
       SOGGFY_SAVE_PATH: this.savePath,
@@ -307,6 +286,7 @@ class SpotifyInstance {
       "--disable-extensions",
       "--disable-background-networking",
       `--remote-debugging-port=${this.debugPort}`,
+      `--cache-path=${this.profileDir}`,
       `--user-data-dir=${this.profileDir}`,
     ];
 
@@ -358,6 +338,10 @@ class SpotifyInstance {
 
   private async waitForSocketAndHooks(): Promise<boolean> {
     for (let i = 0; i < 60; i++) {
+      if (this.process?.pid) {
+        try { process.kill(this.process.pid, 0); }
+        catch { return false; }
+      }
       if (existsSync(this.socketPath)) {
         const ok = await this.ping();
         if (ok) return true;
@@ -375,18 +359,10 @@ class SpotifyInstance {
     this.currentJobId = null;
     this.statusText = "Stopped";
     if (this.process) {
-      try {
-        this.process.kill("SIGKILL");
-        await Promise.race([
-          this.process.exited,
-          new Promise((r) => setTimeout(r, 1500)),
-        ]);
-      } catch {}
+      const pid = this.process.pid;
+      await terminateProcessTree(pid, this.process.exited);
       this.process = null;
     }
-    try {
-      spawnSync("pkill", ["-9", "-f", `instance_${this.id}`]);
-    } catch {}
     try {
       if (existsSync(this.socketPath)) unlinkSync(this.socketPath);
       const lockFiles = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
@@ -430,7 +406,7 @@ class SpotifyInstance {
         if (durationMs && durationMs > 0) {
           jobs.patch(job, {
             durationMs,
-            expectedBytes: expectedFloatPcmBytes(durationMs),
+            expectedBytes: expectedOggBytes(durationMs),
           }, `duration=${durationMs}ms`);
         }
         return durationMs;
@@ -449,22 +425,24 @@ class SpotifyInstance {
         await new Promise((r) => setTimeout(r, 500));
         try {
           const playingRaw = await this.sendIPC("get_playing", 1);
-          if (playingRaw.startsWith("{")) {
-            const playing = JSON.parse(playingRaw);
-            if (playing.is_ad) {
-              if (i % 4 === 0) jobs.log(job, `waiting: ad playing (${playing.uri})`);
-              continue;
-            }
-            if (playing.uri?.includes(trackId) && !playing.gated) {
-              trackConfirmed = true;
-              jobs.log(job, "target track confirmed playing");
-              break;
-            }
+          const playing = parsePlaybackConfirmation(playingRaw, trackId);
+          if (playing.isAd) {
+            if (i % 4 === 0) jobs.log(job, `waiting: ad playing (${playing.uri})`);
+          } else if (playing.confirmed) {
+            trackConfirmed = true;
+            jobs.log(job, "target track confirmed playing");
+            break;
           }
         } catch {}
+
+        if (i > 0 && i % 6 === 0 && !trackConfirmed) {
+          await this.sendIPC(`play spotify:track:${trackId}`).catch(() => undefined);
+          jobs.log(job, "re-requested target track playback");
+        }
       }
       if (!trackConfirmed) {
-        jobs.log(job, "warning: track not confirmed via notification, proceeding with fallback");
+        await this.sendIPC("pause").catch(() => undefined);
+        throw new Error(`target track ${trackId} was not confirmed playing`);
       }
 
       let status = "idle";
@@ -512,35 +490,38 @@ class SpotifyInstance {
       assertJobActive(job);
       if (status !== "completed") {
         await this.sendIPC(`finish_track ${trackId}`).catch(() => undefined);
-        await new Promise((r) => setTimeout(r, 500));
+        const completed = await waitForTrackCompletion(
+          (command) => this.sendIPC(command, 1),
+          trackId,
+        );
+        if (!completed) throw new Error(`capture finalization timed out for ${trackId}`);
+        status = "completed";
       }
       await this.sendIPC("pause").catch(() => undefined);
 
-      const wavPath = join(this.savePath, `${trackId}.wav`);
-      if (!existsSync(wavPath)) throw new Error("output WAV file not found in temp cache");
+      const capturePath = findCapturedAudioPath(this.savePath, trackId);
+      if (!capturePath) throw new Error("captured audio file not found in temp cache");
 
       this.refreshCapturedBytes(job);
-      const validation = validateWavFile(wavPath, job.expectedBytes);
-      validation.ffprobeOk = ffprobeOk(wavPath);
-      jobs.patch(job, { validation }, `wav validation warnings=${validation.warnings.length}`);
-      if (!validation.riffHeader || !validation.waveHeader || !validation.dataChunk || (validation.actualDataBytes || 0) <= 0) {
-        throw new Error(`invalid WAV capture: ${validation.warnings.join(",") || "header/data invalid"}`);
+      const validation = validateAudioFile(capturePath, job.durationMs);
+      jobs.patch(job, { validation, capturePath }, `audio validation warnings=${validation.warnings.length}`);
+      if (!validation.ok) {
+        throw new Error(`invalid audio capture: ${validation.warnings.join(",") || "validation failed"}`);
       }
 
       jobs.transition(job, "transcoding");
       assertJobActive(job);
       const finalMp3Path = join(OUTPUT_DIR, `${trackId}.mp3`);
-      const finalWavPath = join(OUTPUT_DIR, `${trackId}.wav`);
-      const transcode = transcodeWavToMp3(wavPath, finalMp3Path);
+      const transcode = transcodeAudioToMp3(capturePath, finalMp3Path);
       let savedPath: string;
-      let outputFormat: "mp3" | "wav";
+      let outputFormat: "mp3" | "wav" | "ogg";
       if (transcode.ok && ffprobeOk(finalMp3Path)) {
         savedPath = finalMp3Path;
         outputFormat = "mp3";
       } else {
-        jobs.log(job, `ffmpeg failed; preserving validated WAV fallback: ${transcode.stderr}`);
-        savedPath = copyWavFallback(wavPath, OUTPUT_DIR, trackId);
-        outputFormat = "wav";
+        jobs.log(job, `ffmpeg failed; preserving validated capture: ${transcode.stderr}`);
+        savedPath = copyAudioFallback(capturePath, OUTPUT_DIR, trackId);
+        outputFormat = extname(savedPath).slice(1).toLowerCase() === "ogg" ? "ogg" : "wav";
       }
       assertJobActive(job);
 
@@ -568,7 +549,9 @@ class SpotifyInstance {
 
       return jobs.complete(job, {
         savedPath,
-        wavPath,
+        capturePath,
+        wavPath: capturePath.endsWith(".wav") ? capturePath : undefined,
+        oggPath: capturePath.endsWith(".ogg") ? capturePath : undefined,
         mp3Path: outputFormat === "mp3" ? finalMp3Path : undefined,
         outputFormat,
         sizeBytes,
@@ -586,11 +569,16 @@ class SpotifyInstance {
   }
 
   private refreshCapturedBytes(job: DownloadJob): number {
-    const wavPath = join(this.savePath, `${job.trackId}.wav`);
-    if (!existsSync(wavPath)) return job.bytesCaptured;
-    const size = statSync(wavPath).size;
-    const bytes = Math.max(0, size - 44);
-    jobs.patch(job, { bytesCaptured: bytes, wavPath });
+    const capturePath = findCapturedAudioPath(this.savePath, job.trackId);
+    if (!capturePath) return job.bytesCaptured;
+    const size = statSync(capturePath).size;
+    const bytes = capturePath.endsWith(".wav") ? Math.max(0, size - 44) : size;
+    jobs.patch(job, {
+      bytesCaptured: bytes,
+      capturePath,
+      wavPath: capturePath.endsWith(".wav") ? capturePath : undefined,
+      oggPath: capturePath.endsWith(".ogg") ? capturePath : undefined,
+    });
     return bytes;
   }
 
@@ -902,13 +890,17 @@ async function searchSpotify(query: string) {
   return { tracks: { items: mappedTracks }, albums: { items: [] }, playlists: { items: [] } };
 }
 
-function findOutputForTrack(trackId: string): { path: string; format: "mp3" | "wav" } | null {
+function findOutputForTrack(trackId: string): { path: string; format: "mp3" | "wav" | "ogg" } | null {
   const job = jobs.findByTrack(trackId);
-  if (job?.savedPath && existsSync(job.savedPath)) return { path: job.savedPath, format: job.outputFormat || (job.savedPath.endsWith(".mp3") ? "mp3" : "wav") };
-  const mp3Path = join(OUTPUT_DIR, `${trackId}.mp3`);
-  if (existsSync(mp3Path)) return { path: mp3Path, format: "mp3" };
-  const wavPath = join(OUTPUT_DIR, `${trackId}.wav`);
-  if (existsSync(wavPath)) return { path: wavPath, format: "wav" };
+  if (job?.savedPath && existsSync(job.savedPath)) {
+    const ext = extname(job.savedPath).slice(1).toLowerCase();
+    const inferred = ext === "ogg" ? "ogg" : ext === "wav" ? "wav" : "mp3";
+    return { path: job.savedPath, format: job.outputFormat || inferred };
+  }
+  for (const format of ["mp3", "ogg", "wav"] as const) {
+    const path = join(OUTPUT_DIR, `${trackId}.${format}`);
+    if (existsSync(path)) return { path, format };
+  }
   return null;
 }
 
@@ -974,7 +966,7 @@ const server = Bun.serve({
             archive.on("end", () => controller.close());
             archive.on("error", (err: Error) => controller.error(err));
             for (const job of jobs.all().filter((j) => j.state === "completed" && j.savedPath && existsSync(j.savedPath))) {
-              const ext = job.outputFormat || (job.savedPath!.endsWith(".mp3") ? "mp3" : "wav");
+              const ext = job.outputFormat || extname(job.savedPath!).slice(1).toLowerCase() || "bin";
               archive.file(job.savedPath!, { name: displayFileName(job.trackId, job.metadata, ext) });
             }
             archive.finalize();
