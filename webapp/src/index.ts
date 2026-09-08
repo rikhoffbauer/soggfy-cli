@@ -25,7 +25,7 @@ import {
   WORKSPACE_DIR,
 } from "../../src/core/paths";
 import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./server/http";
-import { extractTrackIds, parseTrackId } from "./server/spotify-url";
+import { extractTrackIds, parseAlbumId, parsePlaylistId, parseTrackId } from "./server/spotify-url";
 import {
   JobRegistry,
   type DownloadJob,
@@ -738,10 +738,10 @@ async function resolveSpotifyUrl(input: string): Promise<string[]> {
   const trackId = parseTrackId(input);
   if (trackId) return [trackId];
 
-  const playlistMatch = input.match(/playlist\/([a-zA-Z0-9]{22})/);
-  if (playlistMatch?.[1]) {
+  const playlistId = parsePlaylistId(input);
+  if (playlistId) {
     try {
-      const res = await fetch(`https://open.spotify.com/embed/playlist/${playlistMatch[1]}`);
+      const res = await fetch(`https://open.spotify.com/embed/playlist/${playlistId}`);
       const text = await res.text();
       return extractTrackIds(text);
     } catch (e: any) {
@@ -749,10 +749,10 @@ async function resolveSpotifyUrl(input: string): Promise<string[]> {
     }
   }
 
-  const albumMatch = input.match(/album\/([a-zA-Z0-9]{22})/);
-  if (albumMatch?.[1]) {
+  const albumId = parseAlbumId(input);
+  if (albumId) {
     try {
-      const res = await fetch(`https://open.spotify.com/embed/album/${albumMatch[1]}`);
+      const res = await fetch(`https://open.spotify.com/embed/album/${albumId}`);
       const text = await res.text();
       return extractTrackIds(text);
     } catch (e: any) {
