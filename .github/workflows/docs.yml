@@ -2,7 +2,7 @@ name: Deploy documentation
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/cli-docs-gui]
     paths:
       - "docs/**"
       - "src/core/help.ts"
