@@ -5,8 +5,8 @@
       "version": "1.2.98.301",
       "architecture": "arm64",
       "status": "supported",
-      "validatedAt": "2026-09-08T17:16:30Z",
-      "commit": "81f3526",
+      "validatedAt": "2026-09-08T20:35:04.514Z",
+      "commit": "da71ba308d8ed0f8d0d20aa8bf04ee53f0088cdd",
       "checks": {
         "patching": true,
         "signing": true,
@@ -17,8 +17,26 @@
         "capture": true,
         "mediaValidation": true,
         "headless": true
+      }
+    },
+    {
+      "version": "1.2.99.317",
+      "architecture": "arm64",
+      "status": "failed",
+      "validatedAt": "2026-09-08T20:35:11.553Z",
+      "commit": "da71ba308d8ed0f8d0d20aa8bf04ee53f0088cdd",
+      "checks": {
+        "patching": true,
+        "signing": true,
+        "processLaunch": true,
+        "ipc": true,
+        "decoderHooks": false,
+        "playback": false,
+        "capture": false,
+        "mediaValidation": false,
+        "headless": false
       },
-      "notes": "Validated with daemon startup, zero visible windows, and real Ogg capture."
+      "failureReason": "Native capture hooks are not compatible: {\"hooksInitialized\":true,\"decoderHooksReady\":false,\"captureBackend\":\"ogg\"}"
     }
   ]
 }

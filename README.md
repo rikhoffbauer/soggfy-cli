@@ -7,12 +7,14 @@ The production capture path intercepts Spotify's Ogg/Vorbis stream before decode
 ## Compatibility
 
 - macOS on Apple Silicon (`arm64`)
-- Spotify **1.2.98.301 arm64** — the currently validated build
+- Spotify **1.2.98.301 arm64** — currently exact-supported in `compatibility/spotify-versions.json`
 - [Homebrew](https://brew.sh/)
 - [Bun](https://bun.sh/)
 - CMake, FFmpeg/ffprobe, and Chromaprint (`fpcalc`)
 
-The private capture hooks are version-specific. `setup.sh`, `soggfy install`, `soggfy doctor`, and runtime startup reject other Spotify versions rather than attempting unvalidated hook addresses. The native payload also verifies the expected function prologues before installing either private hook.
+The private capture hooks are version-specific. Production accepts only exact `supported` entries from `compatibility/spotify-versions.json`; the observed min/max span is informational and never an inclusive whitelist. `setup.sh`, `soggfy install`, doctor, and runtime startup reject unrecorded/failed versions, while the native payload independently verifies expected function prologues before installing either private hook.
+
+Use `soggfy compat list` to inspect recorded builds and `soggfy compat probe [Spotify.app]` to apply the current patch to an isolated candidate clone and run native-hook, playback, capture, media-validation, and faceless-runtime checks. `--record` stores the exact result. Spotify 1.2.99.317 was probed on 2026-09-08 and is recorded as **failed** because both current native hook prologues mismatch.
 
 ## Quick start
 
@@ -131,7 +133,7 @@ The native payload enforces these rules:
 2. Ogg capture and fast-decoder mutation are coupled to the same backend policy.
 3. A cross-process, atomic `.capture-owner` file elects one writer for a track. Helper processes cannot concurrently write the same output.
 4. The main process publishes the track generation and capture gate; helpers consume that shared state instead of independently ungating themselves.
-5. Private decode/Ogg hooks are installed only when Spotify 1.2.98.301 arm64 has the expected machine-code prologues.
+5. Production launch accepts only exact registry-supported Spotify builds, and private decode/Ogg hooks are installed only when the running binary also has the expected machine-code prologues.
 6. The remaining CoreAudio wrapper is output muting only. It does not interpret or capture PCM buffers.
 
 ## Shared CLI/webapp runtime
@@ -143,7 +145,7 @@ The CLI and webapp use the same runtime primitives for:
 - minimal Spotify login-state cloning;
 - exact process-tree termination;
 - media validation/transcoding helpers;
-- supported Spotify version checks.
+- exact registry-backed Spotify compatibility checks and isolated candidate probing.
 
 The webapp keeps its job/pool orchestration layer, but its per-instance socket, save directory, profile, cache, home, and `TMPDIR` are isolated under `SOGGFY_HOME`. This makes `SOGGFY_HOME=/tmp/soggfy-test` a practical way to run an isolated service without colliding with another Soggfy client.
 
@@ -210,7 +212,7 @@ cd webapp && bun test src/server/__tests__ src/components/soggfy/__tests__ && bu
 bun run doctor
 ```
 
-On 2026-09-08, a live CLI smoke capture and an isolated webapp API capture were both validated against Spotify 1.2.98.301. The test track produced a 213.573-second, 44.1 kHz stereo Vorbis capture; the webapp successfully validated it and produced a tagged MP3 of the same duration. Exact process-tree shutdown left no capture-process leaks.
+On 2026-09-08, a live CLI smoke capture, an isolated webapp API capture, and `soggfy compat probe` were validated against Spotify 1.2.98.301. The test track produced a 213.573-second, 44.1 kHz stereo Vorbis capture; the webapp successfully validated it and produced a tagged MP3 of the same duration. Exact process-tree shutdown left no capture-process leaks.
 
 ## Safety boundaries
 

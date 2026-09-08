@@ -4,7 +4,7 @@ Current as of 2026-09-08.
 
 ## Spotify version mismatch
 
-The Ogg/decode hooks are validated for Spotify **1.2.98.301 arm64**. A different installed or patched version is treated as unsupported.
+Production support is an exact-version registry. Spotify **1.2.98.301 arm64** is currently supported; unrecorded builds and entries recorded as `failed` are treated as unsupported.
 
 Expected behavior:
 
@@ -12,8 +12,11 @@ Expected behavior:
 - doctor reports the system/workspace version mismatch.
 - CLI/webapp runtime refuses an unsupported patched bundle.
 - native hook installation also verifies the expected prologues and fails closed if the binary does not match.
+- `soggfy compat probe` can test the current patch against an isolated candidate clone without weakening those production checks.
 
-Do not "fix" this by removing the checks or installing guessed offsets. Re-analyze the new Spotify binary, establish new signatures/offsets, and live-test capture before updating `SUPPORTED_SPOTIFY_VERSION`.
+On 2026-09-08, Spotify **1.2.99.317 arm64** was probed with the current implementation. IPC became ready, but both `DecodeAudioData` and `ogg_stream_pagein` reported prologue mismatches, so the registry records that exact build as `failed`.
+
+Do not "fix" this by removing the checks or installing guessed offsets. Re-analyze the new Spotify binary, establish new signatures/offsets, rerun `soggfy compat probe`, and record support only after every probe check passes.
 
 ## Spotify startup / AppleEvent `-1708`
 
@@ -23,7 +26,7 @@ Both capture clients retry the target `play` request while waiting for `get_play
 
 ## Private hook readiness
 
-A successful IPC `ping` proves the payload/server is alive, not that arbitrary private offsets are valid. The Ogg backend handles this by checking the exact decode and Ogg function prologues before hook installation.
+A successful IPC `ping` proves the payload/server is alive, not that arbitrary private offsets are valid. `get_capabilities` separately reports `decoderHooksReady`; the Ogg backend sets that flag only after both exact decode and Ogg function prologue checks and hook installations succeed.
 
 If either check fails, the backend logs the mismatch and does not capture. This is preferable to crashing or interpreting an unknown ABI.
 

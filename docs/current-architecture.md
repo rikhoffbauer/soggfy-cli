@@ -6,7 +6,7 @@ Status: active implementation as of 2026-09-08.
 
 The production capture path is an **Ogg/Vorbis stream capture**, not a decoded-PCM capture. `SOGGFY_CAPTURE_BACKEND` defaults to `ogg`; the only other accepted production mode is `disabled`. Unknown backend values fail closed.
 
-The private native hooks are validated specifically for **Spotify 1.2.98.301 arm64**. Setup, CLI install/runtime, webapp startup, and doctor all check the bundle version, while `DecodeHook.mm` additionally checks the expected machine-code prologues before calling `DobbyHook`.
+Spotify compatibility is exact and registry-backed. Production launch accepts only arm64 versions recorded as `supported` in `compatibility/spotify-versions.json`; the observed min/max supported span is informational only. `DecodeHook.mm` independently checks the expected machine-code prologues before calling `DobbyHook`, and `get_capabilities` reports whether both decoder/Ogg hooks actually installed. Spotify 1.2.98.301 is currently supported; 1.2.99.317 is recorded as failed after both native prologue checks mismatched on 2026-09-08.
 
 ## End-to-end pipeline
 
@@ -44,6 +44,14 @@ The daemon uses `/tmp/soggfy_cli.sock` and `/tmp/Soggfy_cli` by default. A non-d
 The patched workspace copy is prepared with `LSBackgroundOnly=true`. In hidden runtime mode the injected payload also forces `NSApplicationActivationPolicyProhibited` and suppresses `NSWindow` ordering, giving the capture process a faceless/background lifecycle with no visible windows, Dock icon, or app-switcher entry. The stock Spotify application is not modified.
 
 The packaged daemon resolves its current bundle/executable and re-executes that artifact. It does not reference `../cli.ts` at runtime.
+
+## Spotify compatibility probing
+
+`soggfy compat probe [app-path]` is a developer-only validation path for new Spotify builds. It never patches the source application or the production `~/.soggfy/workspace/PatchedSpotify.app`; instead it creates an isolated clone under `~/.soggfy/compat/runs`, applies the current patch unchanged, rebuilds/installs the current payload, ad-hoc signs the clone, and launches it with an explicit compatibility-only `enforceSupportedVersion: false` option. Normal `SpotifyInstance` construction keeps exact registry enforcement enabled.
+
+The candidate must pass patch/sign verification, process launch, IPC, `get_capabilities` with `decoderHooksReady=true`, target playback confirmation, a real capture through the existing `captureTrack` path, existing media validation, and faceless WindowServer/Launch Services checks. `--record` writes the exact result into the tracked registry; only an all-green result becomes `supported`. Failed builds can be recorded for history.
+
+`soggfy compat list` reports exact supported entries plus an observed min/max span. The span never authorizes an untested intermediate version. The probe deliberately does not guess new offsets or signatures when native validation fails.
 
 ## Daemon-backed web runtime
 
@@ -91,23 +99,25 @@ The same principle is used by daemon/fallback CLI instances and interactive auth
 
 Automated verification on 2026-09-08:
 
-- `bun test`: 44 passed, 0 failed.
+- `bun test`: 103 passed, 0 failed.
 - root TypeScript: passed.
 - native StateManager/CapturePolicy fixture: passed.
 - native dylib build: passed.
 - bundled CLI build: passed.
 - webapp TypeScript + production build: passed.
-- doctor: all checks passed, including system/workspace Spotify 1.2.98.301.
+- compatibility registry/runtime checks: exact support resolves to 1.2.98.301; installed Spotify 1.2.99.317 remains explicitly unsupported.
 
 Live verification on the same date:
 
 - CLI captured `4PTG3Z6ehGkBFwjybzWkR8` as a 4,286,257-byte Ogg/Vorbis file, 44.1 kHz stereo, 213.573333 seconds. Signal validation passed with no warnings.
 - The first Spotify AppleEvent returned `-1708`; the retry path later returned success and capture proceeded, validating the startup retry behavior.
 - The combined daemon/web runtime was live-smoke-tested on 2026-09-08: HTTP health and UI both returned 200 while process inspection showed exactly one daemon-owned patched Spotify root process and no web-owned `instance_1` worker.
+- `soggfy compat probe` passed every check against an isolated clone of the known-good 1.2.98.301 workspace, including real Ogg capture/media validation and zero visible windows.
+- The same unchanged patch was applied to an isolated clone of Spotify 1.2.99.317. IPC initialized, but both `DecodeAudioData` and `ogg_stream_pagein` prologue validation failed; the exact build is recorded as `failed` and production support remains 1.2.98.301 only.
 
 ## Remaining intentional limitations
 
-- Spotify's private functions remain version-specific. A Spotify update requires deliberate re-analysis/new validated signatures; automatic best-effort hooking is intentionally not supported.
+- Spotify's private functions remain version-specific. `soggfy compat probe` can determine whether the current implementation survives an update unchanged, but a prologue mismatch still requires deliberate reverse engineering/new validated signatures; automatic best-effort hooking is intentionally not supported.
 - Spotify search uses a private web API and `SPOTIFY_COOKIE`; direct track capture does not depend on that search path.
 - IPC is still a compact string protocol rather than a typed/versioned protocol.
 - Web job scheduling and CLI download orchestration are still separate request layers around the same daemon-owned Spotify instance; high-level cross-client job serialization is not yet centralized.
