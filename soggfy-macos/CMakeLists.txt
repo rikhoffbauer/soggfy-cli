@@ -13,13 +13,14 @@ include(FetchContent)
 fetchcontent_declare(
     Dobby
     GIT_REPOSITORY https://github.com/jmpews/Dobby.git
-    GIT_TAG        master
+    GIT_TAG        5dfc8546954ce3b3198132ab13fddb89ee92cdd7
 )
 fetchcontent_makeavailable(Dobby)
 
 # Define the dynamic library payload
 add_library(soggfy SHARED 
     Payload/Main.mm
+    Payload/CapturePolicy.cpp
     Payload/DecodeHook.mm
     Payload/Scanner.cpp
     Payload/StateManager.cpp

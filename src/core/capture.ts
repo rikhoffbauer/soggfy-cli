@@ -1,8 +1,10 @@
 import { existsSync, statSync } from "fs";
 import { join } from "path";
 import { sendIPC } from "./ipc";
+import { parsePlaybackConfirmation, waitForTrackCompletion } from "./capture-control";
 import { log } from "./log";
 import { fetchTrackMetadata, type TrackMetadata } from "./metadata";
+import { validateAudioFile } from "./media";
 
 export interface CaptureResult {
   trackId: string;
@@ -33,18 +35,10 @@ export async function captureTrack(
   for (let i = 0; i < 30; i++) {
     await Bun.sleep(500);
     try {
-      const playingUri = await sendIPC(socketPath, "get_playing").catch(() => "");
-      if (playingUri && playingUri.includes(trackId)) {
+      const playingRaw = await sendIPC(socketPath, "get_playing").catch(() => "");
+      if (parsePlaybackConfirmation(playingRaw, trackId).confirmed) {
         trackConfirmed = true;
         break;
-      }
-      const notifyFile = join(savePath, "active_track.txt");
-      if (existsSync(notifyFile)) {
-        const fileContent = readFileSync(notifyFile, "utf-8").trim();
-        if (fileContent.includes(trackId)) {
-          trackConfirmed = true;
-          break;
-        }
       }
     } catch {}
 
@@ -55,7 +49,8 @@ export async function captureTrack(
   }
 
   if (!trackConfirmed) {
-    log.warn("Track not confirmed via notification, proceeding with fallback");
+    await sendIPC(socketPath, "pause").catch(() => {});
+    throw new Error(`Target track ${trackId} was not confirmed playing`);
   }
 
   // Wait for capture to start
@@ -135,7 +130,15 @@ export async function captureTrack(
   // Finalize
   if (status !== "completed") {
     await sendIPC(socketPath, `finish_track ${trackId}`).catch(() => {});
-    await Bun.sleep(500);
+    const completed = await waitForTrackCompletion(
+      (command) => sendIPC(socketPath, command, { retries: 1, timeoutMs: 1000 }),
+      trackId,
+    );
+    if (!completed) {
+      await sendIPC(socketPath, "pause").catch(() => {});
+      throw new Error(`Capture finalization timed out for ${trackId}`);
+    }
+    status = "completed";
   }
   await sendIPC(socketPath, "pause").catch(() => {});
 
@@ -145,7 +148,13 @@ export async function captureTrack(
   }
 
   const bytesWritten = statSync(finalPath).size;
-  log.ok(`Captured ${(bytesWritten / 1024 / 1024).toFixed(1)} MB of audio stream data`);
+  const validation = validateAudioFile(finalPath, durationMs);
+  if (!validation.ok) {
+    throw new Error(
+      `Captured audio failed validation (${validation.warnings.join(", ")}); preserved at ${finalPath}`,
+    );
+  }
+  log.ok(`Captured ${(bytesWritten / 1024 / 1024).toFixed(1)} MB of validated audio`);
 
   return {
     trackId,

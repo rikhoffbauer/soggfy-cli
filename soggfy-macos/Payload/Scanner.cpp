@@ -78,7 +78,7 @@ std::vector<uintptr_t> Scanner::FindAllPatterns(const char* image_name, const ch
                     for (uint32_t k = 0; k < seg->nsects; ++k) {
                         if (sec->size >= parsed_pattern.size()) {
                             uint8_t* start = (uint8_t*)(sec->addr + slide);
-                            for (size_t n = 0; n < sec->size - parsed_pattern.size(); ++n) {
+                            for (size_t n = 0; n <= sec->size - parsed_pattern.size(); ++n) {
                                 if (CompareData(start + n, parsed_pattern)) {
                                     results.push_back((uintptr_t)(start + n));
                                 }

@@ -1,3 +1,4 @@
+#include "CapturePolicy.h"
 #include "DecodeHook.h"
 #include "Scanner.h"
 #include "StateManager.h"
@@ -13,7 +14,9 @@
 #include <chrono>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <map>
@@ -191,7 +194,6 @@ static std::atomic<bool> g_watchdog_running{false};
 static std::string g_confirmed_playing_uri;
 static std::mutex g_playing_mutex;
 std::atomic<bool> g_capture_gated{true};
-static std::atomic<uint64_t> g_capture_gate_set_ms{0}; // when gate was last armed
 // ── DNS / Ad-Blocking Hook ──
 #include <netdb.h>
 typedef int (*getaddrinfo_t)(const char *nodename, const char *servname,
@@ -256,46 +258,6 @@ static bool EnvFlagEnabled(const char *name, bool defaultValue = false) {
   return value == "1" || value == "true" || value == "yes" || value == "on";
 }
 
-static std::string SelectedCaptureBackend() {
-  const char *raw = getenv("SOGGFY_CAPTURE_BACKEND");
-  std::string backend = raw ? raw : "pcm";
-  std::transform(backend.begin(), backend.end(), backend.begin(), ::tolower);
-  return backend;
-}
-
-static bool CaptureBackendAllows(const char *source) {
-  const std::string backend = SelectedCaptureBackend();
-  if (backend == "disabled") return false;
-  if (backend == "all") return true;
-  if (backend == "ogg") return strcmp(source, "ogg") == 0;
-  // PCM mode: accept all PCM sources
-  return true;
-}
-
-bool CaptureAudioBuffer(const char *source, const std::string &trackId,
-                               const char *data, size_t length) {
-  if (!data || length == 0) return false;
-  if (!CaptureBackendAllows(source)) return false;
-
-  // Ad-gate: only capture when we've confirmed the target track is playing.
-  // Fallback: if we haven't received a notification within 15s of arming,
-  // allow capture anyway (graceful degradation if notifications fail).
-  if (g_capture_gated.load()) {
-    uint64_t armed_at = g_capture_gate_set_ms.load();
-    if (armed_at > 0 && (now_ms() - armed_at) > 15000) {
-      printf("[Soggfy-AD] Capture gate fallback: no PlaybackStateChanged "
-             "notification received within 15s, allowing capture\n");
-      g_capture_gated.store(false);
-    } else {
-      return false; // Still gated — discard this audio buffer
-    }
-  }
-
-  StateManager::Instance().ReceiveAudioData(trackId, data, length);
-  g_last_audio_time_ms.store(now_ms());
-  return true;
-}
-
 static void MuteAudioBufferListIfRequested(AudioBufferList *ioData) {
   if (!ioData || !EnvFlagEnabled("SOGGFY_MUTE_OUTPUT", false)) return;
   for (UInt32 i = 0; i < ioData->mNumberBuffers; ++i) {
@@ -321,197 +283,9 @@ static std::string JsonEscape(const std::string &value) {
   return out;
 }
 
-// ── AVAssetDecompressor hooks ──
-
-// Hook for -[AVAssetDecompressor initWithURL:audioFormat:errorCode:]
-typedef id (*initWithURL_t)(id self, SEL _cmd, id url, void *format,
-                            void *errorCode);
-static initWithURL_t orig_initWithURL = nullptr;
-
-static id my_initWithURL(id self, SEL _cmd, id url, void *format,
-                         void *errorCode) {
-  id result = orig_initWithURL(self, _cmd, url, format, errorCode);
-
-  if (url) {
-    NSURL *nsUrl = (__bridge NSURL *)url;
-    const char *url_str = [[nsUrl absoluteString] UTF8String];
-    printf("[Soggfy-INFO] AVAssetDecompressor opened: %s\n",
-           url_str ? url_str : "(null)");
-
-    // When Spotify opens a new audio asset, finish the previous track and
-    // prepare for the new one
-    std::string track_id;
-    {
-      std::lock_guard<std::mutex> lock(g_track_mutex);
-      track_id = g_active_track_id;
-    }
-    // The first audio data will flow through decodeToBuffer shortly
-  }
-  return result;
-}
-
-// Hook for -[AVAssetDecompressor decodeToBuffer:numberOfFrames:]
-typedef int (*decodeToBuffer_t)(id self, SEL _cmd, float *buffer,
-                                int numberOfFrames);
-static decodeToBuffer_t orig_decodeToBuffer = nullptr;
-
-static int my_decodeToBuffer(id self, SEL _cmd, float *buffer,
-                             int numberOfFrames) {
-  int framesDecoded = orig_decodeToBuffer(self, _cmd, buffer, numberOfFrames);
-
-  if (framesDecoded > 0 && buffer) {
-    std::string track_id;
-    {
-      std::lock_guard<std::mutex> lock(g_track_mutex);
-      track_id = g_active_track_id;
-    }
-
-    // Stereo float PCM: framesDecoded frames × 2 channels × 4 bytes/sample.
-    // This write is gated by SOGGFY_CAPTURE_BACKEND to prevent duplicate writes
-    // from multiple simultaneously hooked paths.
-    size_t bytesCount = framesDecoded * 2 * sizeof(float);
-    CaptureAudioBuffer("avasset", track_id, (const char *)buffer, bytesCount);
-  }
-  return framesDecoded;
-}
-
-// ── AudioUnitRender hook (CoreAudio low-level fallback) ──
-
-typedef OSStatus (*AudioUnitRender_t)(AudioUnit inUnit,
-                                      AudioUnitRenderActionFlags *ioActionFlags,
-                                      const AudioTimeStamp *inTimeStamp,
-                                      UInt32 inOutputBusNumber,
-                                      UInt32 inNumberFrames,
-                                      AudioBufferList *ioData);
-static AudioUnitRender_t orig_AudioUnitRender = nullptr;
-static std::atomic<int> g_au_render_log_count{0};
-
-static OSStatus
-my_AudioUnitRender(AudioUnit inUnit, AudioUnitRenderActionFlags *ioActionFlags,
-                   const AudioTimeStamp *inTimeStamp, UInt32 inOutputBusNumber,
-                   UInt32 inNumberFrames, AudioBufferList *ioData) {
-  OSStatus result =
-      orig_AudioUnitRender(inUnit, ioActionFlags, inTimeStamp,
-                           inOutputBusNumber, inNumberFrames, ioData);
-
-  if (result == noErr && ioData && ioData->mNumberBuffers > 0 &&
-      inNumberFrames > 0) {
-    // Log first few hits for debugging
-    int logCount = g_au_render_log_count.fetch_add(1);
-    if (logCount < 10) {
-      printf("[Soggfy-AU] AudioUnitRender: bus=%u frames=%u buffers=%u "
-             "buf0_size=%u\n",
-             inOutputBusNumber, inNumberFrames, ioData->mNumberBuffers,
-             ioData->mBuffers[0].mDataByteSize);
-    }
-
-    // Only capture output bus 0 (main audio output)
-    if (inOutputBusNumber == 0) {
-      std::string track_id;
-      {
-        std::lock_guard<std::mutex> lock(g_track_mutex);
-        track_id = g_active_track_id;
-      }
-
-      // Interleave all buffers into a single PCM stream
-      // Spotify typically uses non-interleaved stereo (2 buffers of float)
-      if (ioData->mNumberBuffers == 2) {
-        // Non-interleaved stereo — interleave L+R into LRLRLR
-        uint32_t frames = inNumberFrames;
-        float *left = (float *)ioData->mBuffers[0].mData;
-        float *right = (float *)ioData->mBuffers[1].mData;
-        if (left && right && frames > 0) {
-          std::vector<float> interleaved(frames * 2);
-          for (uint32_t i = 0; i < frames; ++i) {
-            interleaved[i * 2] = left[i];
-            interleaved[i * 2 + 1] = right[i];
-          }
-          CaptureAudioBuffer("audiounit", track_id,
-                             (const char *)interleaved.data(),
-                             frames * 2 * sizeof(float));
-        }
-      } else if (ioData->mNumberBuffers == 1) {
-        // Already interleaved
-        float *data = (float *)ioData->mBuffers[0].mData;
-        uint32_t size = ioData->mBuffers[0].mDataByteSize;
-        if (data && size > 0) {
-          CaptureAudioBuffer("audiounit", track_id, (const char *)data, size);
-        }
-      }
-
-      MuteAudioBufferListIfRequested(ioData);
-    }
-  }
-  return result;
-}
-
-// ── AudioConverterFillComplexBuffer hook ──
-
-typedef OSStatus (*AudioConverterFillComplexBuffer_t)(
-    AudioConverterRef inAudioConverter,
-    AudioConverterComplexInputDataProc inInputDataProc,
-    void *inInputDataProcUserData, UInt32 *ioOutputDataPacketSize,
-    AudioBufferList *outOutputData,
-    AudioStreamPacketDescription *outPacketDescription);
-
-static AudioConverterFillComplexBuffer_t orig_AudioConverterFillComplexBuffer =
-    nullptr;
-static std::atomic<int> g_ac_log_count{0};
-
-static OSStatus my_AudioConverterFillComplexBuffer(
-    AudioConverterRef inAudioConverter,
-    AudioConverterComplexInputDataProc inInputDataProc,
-    void *inInputDataProcUserData, UInt32 *ioOutputDataPacketSize,
-    AudioBufferList *outOutputData,
-    AudioStreamPacketDescription *outPacketDescription) {
-
-  OSStatus result = orig_AudioConverterFillComplexBuffer(
-      inAudioConverter, inInputDataProc, inInputDataProcUserData,
-      ioOutputDataPacketSize, outOutputData, outPacketDescription);
-
-  if (result == noErr && outOutputData && outOutputData->mNumberBuffers > 0 &&
-      ioOutputDataPacketSize && *ioOutputDataPacketSize > 0) {
-    int logCount = g_ac_log_count.fetch_add(1);
-    if (logCount < 10) {
-      printf("[Soggfy-AC] AudioConverterFillComplexBuffer: frames=%u "
-             "buffers=%u buf0_size=%u\n",
-             *ioOutputDataPacketSize, outOutputData->mNumberBuffers,
-             outOutputData->mBuffers[0].mDataByteSize);
-    }
-
-    std::string track_id;
-    {
-      std::lock_guard<std::mutex> lock(g_track_mutex);
-      track_id = g_active_track_id;
-    }
-
-    if (outOutputData->mNumberBuffers == 2) {
-      uint32_t frames = *ioOutputDataPacketSize;
-      float *left = (float *)outOutputData->mBuffers[0].mData;
-      float *right = (float *)outOutputData->mBuffers[1].mData;
-      if (left && right && frames > 0) {
-        std::vector<float> interleaved(frames * 2);
-        for (uint32_t i = 0; i < frames; ++i) {
-          interleaved[i * 2] = left[i];
-          interleaved[i * 2 + 1] = right[i];
-        }
-        CaptureAudioBuffer("converter", track_id,
-                           (const char *)interleaved.data(),
-                           frames * 2 * sizeof(float));
-      }
-    } else if (outOutputData->mNumberBuffers == 1) {
-      float *data = (float *)outOutputData->mBuffers[0].mData;
-      uint32_t size = outOutputData->mBuffers[0].mDataByteSize;
-      if (data && size > 0) {
-        CaptureAudioBuffer("converter", track_id, (const char *)data, size);
-      }
-    }
-  }
-  return result;
-}
-
-// ── AudioUnitSetProperty hook (CoreAudio Output Render Callback) ──
-
+// ── Output muting hook ──
+// Ogg capture happens before decoded PCM reaches CoreAudio. This wrapper never
+// interprets audio bytes; it only zeroes the buffers after Spotify renders them.
 typedef OSStatus (*AudioUnitSetProperty_t)(
     AudioUnit inUnit, AudioUnitPropertyID inID, AudioUnitScope inScope,
     AudioUnitElement inElement, const void *inData, UInt32 inDataSize);
@@ -520,66 +294,23 @@ static AudioUnitSetProperty_t orig_AudioUnitSetProperty = nullptr;
 static std::map<void *, AURenderCallback> g_render_callbacks;
 static std::mutex g_cb_mutex;
 
-
-
 static OSStatus my_render_callback(void *inRefCon,
                                    AudioUnitRenderActionFlags *ioActionFlags,
                                    const AudioTimeStamp *inTimeStamp,
                                    UInt32 inBusNumber, UInt32 inNumberFrames,
                                    AudioBufferList *ioData) {
-
   AURenderCallback orig_cb = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_cb_mutex);
     auto it = g_render_callbacks.find(inRefCon);
-    if (it != g_render_callbacks.end())
-      orig_cb = it->second;
+    if (it != g_render_callbacks.end()) orig_cb = it->second;
   }
+  if (!orig_cb) return noErr;
 
-  if (!orig_cb)
-    return noErr;
-
-  std::string track_id;
-  {
-    std::lock_guard<std::mutex> lock(g_track_mutex);
-    track_id = g_active_track_id;
-  }
-
-  if (g_decoder_active.load()) {
-    // Fast Ogg stream capture active: pull single chunk to keep player thread ticking smoothly,
-    // and mute output so high-speed audio does not play to user speakers.
-    OSStatus res = orig_cb(inRefCon, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, ioData);
-    MuteAudioBufferListIfRequested(ioData);
-    return res;
-  }
-
-  OSStatus res = orig_cb(inRefCon, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, ioData);
-  if (res == noErr && ioData && ioData->mNumberBuffers > 0) {
-    if (ioData->mNumberBuffers == 2) {
-      uint32_t frames = inNumberFrames;
-      float *left = (float *)ioData->mBuffers[0].mData;
-      float *right = (float *)ioData->mBuffers[1].mData;
-      if (left && right && frames > 0) {
-        std::vector<float> interleaved(frames * 2);
-        for (uint32_t i = 0; i < frames; ++i) {
-          interleaved[i * 2] = left[i];
-          interleaved[i * 2 + 1] = right[i];
-        }
-        CaptureAudioBuffer("callback", track_id,
-                           (const char *)interleaved.data(),
-                           frames * 2 * sizeof(float));
-      }
-    } else if (ioData->mNumberBuffers == 1) {
-      float *data = (float *)ioData->mBuffers[0].mData;
-      uint32_t size = ioData->mBuffers[0].mDataByteSize;
-      if (data && size > 0) {
-        CaptureAudioBuffer("callback", track_id, (const char *)data, size);
-      }
-    }
-  }
-
-  MuteAudioBufferListIfRequested(ioData);
-  return res;
+  const OSStatus result = orig_cb(inRefCon, ioActionFlags, inTimeStamp,
+                                  inBusNumber, inNumberFrames, ioData);
+  if (result == noErr) MuteAudioBufferListIfRequested(ioData);
+  return result;
 }
 
 static OSStatus my_AudioUnitSetProperty(AudioUnit inUnit,
@@ -587,33 +318,20 @@ static OSStatus my_AudioUnitSetProperty(AudioUnit inUnit,
                                         AudioUnitScope inScope,
                                         AudioUnitElement inElement,
                                         const void *inData, UInt32 inDataSize) {
-
   if (inID == kAudioUnitProperty_SetRenderCallback &&
-      inDataSize == sizeof(AURenderCallbackStruct)) {
-    AURenderCallbackStruct *cbStruct = (AURenderCallbackStruct *)inData;
-    printf("[Soggfy-AU] AudioUnitSetProperty intercepted SetRenderCallback! "
-           "orig_cb=%p\n",
-           cbStruct->inputProc);
-
-    {
-      std::lock_guard<std::mutex> lock(g_cb_mutex);
-      g_render_callbacks[cbStruct->inputProcRefCon] = cbStruct->inputProc;
+      inData && inDataSize == sizeof(AURenderCallbackStruct)) {
+    const auto *cbStruct = static_cast<const AURenderCallbackStruct *>(inData);
+    if (cbStruct->inputProc) {
+      {
+        std::lock_guard<std::mutex> lock(g_cb_mutex);
+        g_render_callbacks[cbStruct->inputProcRefCon] = cbStruct->inputProc;
+      }
+      AURenderCallbackStruct replacement = *cbStruct;
+      replacement.inputProc = my_render_callback;
+      return orig_AudioUnitSetProperty(inUnit, inID, inScope, inElement,
+                                       &replacement, sizeof(replacement));
     }
-
-    std::string active_track;
-    {
-      std::lock_guard<std::mutex> lock(g_track_mutex);
-      active_track = g_active_track_id;
-    }
-
-    AURenderCallbackStruct myStruct;
-    myStruct.inputProc = my_render_callback;
-    myStruct.inputProcRefCon = cbStruct->inputProcRefCon;
-
-    return orig_AudioUnitSetProperty(inUnit, inID, inScope, inElement,
-                                     &myStruct, inDataSize);
   }
-
   return orig_AudioUnitSetProperty(inUnit, inID, inScope, inElement, inData,
                                    inDataSize);
 }
@@ -673,26 +391,36 @@ static bool SendResponse(int client_fd, const std::string &response) {
   return true;
 }
 
-static void PersistActiveTrackId(const std::string &track) {
+static std::string SharedSaveDir() {
   const char *env_save_path = getenv("SOGGFY_SAVE_PATH");
-  std::string save_dir = env_save_path ? env_save_path : "/tmp/Soggfy";
-  std::string track_file_path = save_dir + "/active_track.txt";
-  FILE *f = fopen(track_file_path.c_str(), "w");
-  if (!f) {
-    printf("[Soggfy-IPC] Failed to write active track file %s: %s\n",
-           track_file_path.c_str(), strerror(errno));
+  return env_save_path ? env_save_path : "/tmp/Soggfy";
+}
+
+static void WritePrivateSharedFile(const std::string &name, const std::string &value) {
+  const std::string path = SharedSaveDir() + "/" + name;
+  int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (fd < 0) {
+    printf("[Soggfy-IPC] Failed to write %s: %s\n", path.c_str(), strerror(errno));
     return;
   }
-  fprintf(f, "%s", track.c_str());
-  fclose(f);
+  (void)write(fd, value.data(), value.size());
+  close(fd);
+}
+
+static void PersistCaptureGate(bool gated) {
+  WritePrivateSharedFile("capture_gate.txt", gated ? "1\n" : "0\n");
+}
+
+static void PersistActiveTrackId(const std::string &track) {
+  WritePrivateSharedFile("active_track.txt",
+                         track + " " + std::to_string(now_ms()) + "\n");
 }
 
 static void ApplySetTrack(const std::string &track) {
   // Arm the capture gate — no audio is captured until the correct track
   // is confirmed playing via PlaybackStateChanged notification.
   g_capture_gated.store(true);
-  g_capture_gate_set_ms.store(now_ms());
-  g_decoder_active.store(false);
+  PersistCaptureGate(true);
   g_ogg_stream_active.store(false);
   g_active_ogg_serial = 0;
 
@@ -708,12 +436,18 @@ static void ApplySetTrack(const std::string &track) {
     if (prev_status == "downloading") {
       printf("[Soggfy-IPC] Finishing previous active track before switch: %s\n",
              prev_track.c_str());
-      StateManager::Instance().FinishPlayback(prev_track);
+      StateManager::Instance().PublishFinish(prev_track);
+      if (StateManager::Instance().OwnsWriter(prev_track))
+        StateManager::Instance().FinishPlayback(prev_track);
     }
   }
 
   g_last_audio_time_ms.store(0);
-  StateManager::Instance().MarkPlaybackActive(track);
+  {
+    std::lock_guard<std::mutex> lock(g_playing_mutex);
+    g_confirmed_playing_uri.clear();
+  }
+  StateManager::Instance().ResetPlayback(track);
   PersistActiveTrackId(track);
 }
 
@@ -742,6 +476,9 @@ void StartIPCServer() {
            strerror(errno));
     close(server_fd);
     return;
+  }
+  if (chmod(socket_path, 0600) != 0) {
+    printf("[Soggfy-WARN] IPC chmod(%s) failed: %s\n", socket_path, strerror(errno));
   }
   if (listen(server_fd, 16) < 0) {
     printf("[Soggfy-ERROR] IPC listen(%s) failed: %s\n", socket_path,
@@ -830,7 +567,7 @@ void StartIPCServer() {
       ApplySetTrack(track);
       SendResponse(client_fd, "ok");
       printf("[Soggfy-IPC] Received command: set_track %s (captureBackend=%s)\n",
-             track.c_str(), SelectedCaptureBackend().c_str());
+             track.c_str(), CaptureBackendName(SelectedCaptureBackend()));
     } else if (req.rfind("set_path ", 0) == 0) {
       std::string path = req.substr(9);
       TrimInPlace(path);
@@ -841,7 +578,9 @@ void StartIPCServer() {
       uint32_t duration_ms = 0;
       std::string args = req.substr(13);
       if (sscanf(args.c_str(), "%255s %u", track_buf, &duration_ms) == 2) {
-        StateManager::Instance().SetPlaybackDuration(track_buf, duration_ms);
+        auto &state = StateManager::Instance();
+        state.PublishDuration(track_buf, duration_ms);
+        if (state.OwnsWriter(track_buf)) state.SetPlaybackDuration(track_buf, duration_ms);
         SendResponse(client_fd, "duration set");
       } else {
         SendResponse(client_fd, "error invalid duration args");
@@ -857,7 +596,7 @@ void StartIPCServer() {
       snprintf(response, sizeof(response),
                "{\"ok\":true,\"trackId\":\"%s\",\"status\":\"%s\",\"captureBackend\":\"%s\",\"bytesWritten\":%llu,\"limitBytes\":%llu,\"fileName\":\"%s\"}",
                JsonEscape(track).c_str(), JsonEscape(status).c_str(),
-               JsonEscape(SelectedCaptureBackend()).c_str(),
+               JsonEscape(CaptureBackendName(SelectedCaptureBackend())).c_str(),
                (unsigned long long)bytes, (unsigned long long)limit,
                JsonEscape(file).c_str());
       SendResponse(client_fd, response);
@@ -869,12 +608,16 @@ void StartIPCServer() {
     } else if (req.rfind("cancel_track ", 0) == 0) {
       std::string track = req.substr(13);
       TrimInPlace(track);
-      StateManager::Instance().CancelPlayback(track);
+      auto &state = StateManager::Instance();
+      state.PublishCancel(track);
+      if (state.OwnsWriter(track)) state.CancelPlayback(track);
       SendResponse(client_fd, "track cancelled");
     } else if (req.rfind("finish_track ", 0) == 0) {
       std::string track = req.substr(13);
       TrimInPlace(track);
-      StateManager::Instance().FinishPlayback(track);
+      auto &state = StateManager::Instance();
+      state.PublishFinish(track);
+      if (state.OwnsWriter(track)) state.FinishPlayback(track);
       SendResponse(client_fd, "track finished");
     } else if (req.rfind("reset_track ", 0) == 0) {
       std::string track = req.substr(12);
@@ -908,10 +651,9 @@ void StartIPCServer() {
 
 void SetupImmediateHooks() {
   const char *keylog_env = getenv("SSLKEYLOGFILE");
-  if (!keylog_env || strlen(keylog_env) == 0) {
-    setenv("SSLKEYLOGFILE", "/tmp/sslkeylog.log", 1);
+  if (keylog_env && strlen(keylog_env) > 0) {
+    printf("[Soggfy-DEBUG] TLS key logging enabled at %s\n", keylog_env);
   }
-  printf("[Soggfy-INFO] SSLKEYLOGFILE configured at %s\n", getenv("SSLKEYLOGFILE"));
 
   printf("[Soggfy-DEBUG] Initializing immediate hooks (focus containment, "
          "window hiding, profile redirection)...\n");
@@ -1013,8 +755,6 @@ void SetupImmediateHooks() {
             (void **)&orig_getaddrinfo);
   printf("[Soggfy-INFO] Hooked getaddrinfo\n");
 
-  InstallDecoderHook();
-
   printf("[Soggfy-INFO] Immediate hooks setup complete.\n");
 }
 
@@ -1022,172 +762,109 @@ static std::atomic<bool> g_audio_hooks_installed{false};
 
 void SetupAudioHooks() {
   if (g_audio_hooks_installed.exchange(true)) return;
-  printf("[Soggfy-DEBUG] SetupAudioHooks called!\n");
-  fflush(stdout);
+  const CaptureBackend backend = SelectedCaptureBackend();
+  printf("[Soggfy-INFO] Configuring capture backend: %s\n",
+         CaptureBackendName(backend));
+
+  if (backend == CaptureBackend::Disabled) {
+    printf("[Soggfy-INFO] Capture is disabled; no audio hooks installed.\n");
+    return;
+  }
+  if (backend != CaptureBackend::Ogg) {
+    printf("[Soggfy-ERROR] Unsupported SOGGFY_CAPTURE_BACKEND; capture disabled.\n");
+    return;
+  }
+
   InstallDecoderHook();
 
-  // ── Strategy 1: Hook AVAssetDecompressor (Apple's native AAC decoder) ──
-  Class cls = objc_getClass("AVAssetDecompressor");
-  if (cls) {
-    printf("[Soggfy-INFO] Found AVAssetDecompressor class at %p\n", cls);
-
-    Method m1 = class_getInstanceMethod(
-        cls, sel_registerName("initWithURL:audioFormat:errorCode:"));
-    if (m1) {
-      IMP imp1 = method_getImplementation(m1);
-      int res1 = DobbyHook((void *)imp1, (void *)my_initWithURL,
-                           (void **)&orig_initWithURL);
-      printf("[Soggfy-INFO] Hooked initWithURL: result=%d (orig=%p)\n", res1,
-             (void *)orig_initWithURL);
+  if (EnvFlagEnabled("SOGGFY_MUTE_OUTPUT", false)) {
+    void *target = dlsym(RTLD_DEFAULT, "AudioUnitSetProperty");
+    const int result = target
+        ? DobbyHook(target, (void *)my_AudioUnitSetProperty,
+                    (void **)&orig_AudioUnitSetProperty)
+        : -1;
+    if (result == 0 && orig_AudioUnitSetProperty) {
+      printf("[Soggfy-INFO] Output muting hook installed.\n");
     } else {
-      printf("[Soggfy-WARN] initWithURL:audioFormat:errorCode: method not "
-             "found\n");
-    }
-
-    Method m2 = class_getInstanceMethod(
-        cls, sel_registerName("decodeToBuffer:numberOfFrames:"));
-    if (m2) {
-      IMP imp2 = method_getImplementation(m2);
-      int res2 = DobbyHook((void *)imp2, (void *)my_decodeToBuffer,
-                           (void **)&orig_decodeToBuffer);
-      printf("[Soggfy-INFO] Hooked decodeToBuffer: result=%d (orig=%p)\n", res2,
-             (void *)orig_decodeToBuffer);
-    } else {
-      printf("[Soggfy-WARN] decodeToBuffer:numberOfFrames: method not found\n");
-    }
-  } else {
-    printf("[Soggfy-WARN] AVAssetDecompressor class not found.\n");
-  }
-
-  // ── Strategy 2: Scan the entire ObjC runtime for audio-related classes ──
-  printf("[Soggfy-DEBUG] Scanning ObjC runtime for audio-related classes...\n");
-  unsigned int classCount = 0;
-  Class *allClasses = objc_copyClassList(&classCount);
-  printf("[Soggfy-DEBUG] Total ObjC classes loaded: %u\n", classCount);
-
-  for (unsigned int i = 0; i < classCount; ++i) {
-    const char *name = class_getName(allClasses[i]);
-    if (!name)
-      continue;
-
-    // Match any class with "audio", "Audio", "decode", "Decode", "decompress",
-    // "codec" in name
-    bool match = false;
-    if (strcasestr(name, "audio") || strcasestr(name, "decode") ||
-        strcasestr(name, "decompress") || strcasestr(name, "codec") ||
-        strcasestr(name, "pcm") || strcasestr(name, "render") ||
-        strcasestr(name, "ogg") || strcasestr(name, "vorbis") ||
-        strcasestr(name, "aac") || strcasestr(name, "media")) {
-      match = true;
-    }
-
-    if (match) {
-      // printf("[Soggfy-SCAN] Found class: %s\n", name);
-
-      // List methods that look like decode/render/buffer operations
-      unsigned int methodCount = 0;
-      Method *methods = class_copyMethodList(allClasses[i], &methodCount);
-      for (unsigned int j = 0; j < methodCount && j < 30; ++j) {
-        SEL sel = method_getName(methods[j]);
-        const char *selName = sel_getName(sel);
-        if (strcasestr(selName, "decode") || strcasestr(selName, "render") ||
-            strcasestr(selName, "buffer") || strcasestr(selName, "frame") ||
-            strcasestr(selName, "sample") || strcasestr(selName, "pcm") ||
-            strcasestr(selName, "init") || strcasestr(selName, "read") ||
-            strcasestr(selName, "write") || strcasestr(selName, "play") ||
-            strcasestr(selName, "output") || strcasestr(selName, "process")) {
-          // printf("[Soggfy-SCAN]   -> %s\n", selName);
-        }
-      }
-      free(methods);
+      orig_AudioUnitSetProperty = nullptr;
+      printf("[Soggfy-WARN] Output muting hook unavailable (result=%d).\n", result);
     }
   }
-  free(allClasses);
-
-  // ── Strategy 3: Hook CoreAudio AudioUnitRender ──
-  // This is the LOWEST level audio render function. All audio on macOS
-  // eventually passes through here. If Spotify uses AudioToolbox/CoreAudio
-  // (which it does), this WILL fire.
-  void *auRender = dlsym(RTLD_DEFAULT, "AudioUnitRender");
-  if (auRender) {
-    printf("[Soggfy-INFO] Found AudioUnitRender at %p — hooking as fallback\n",
-           auRender);
-    int res = DobbyHook(auRender, (void *)my_AudioUnitRender,
-                        (void **)&orig_AudioUnitRender);
-    printf("[Soggfy-INFO] Hooked AudioUnitRender: result=%d\n", res);
-  } else {
-    printf("[Soggfy-WARN] AudioUnitRender not found via dlsym\n");
-  }
-
-  // ── Strategy 4: Hook AudioConverterFillComplexBuffer ──
-  void *acFill = dlsym(RTLD_DEFAULT, "AudioConverterFillComplexBuffer");
-  if (acFill) {
-    printf("[Soggfy-INFO] Found AudioConverterFillComplexBuffer at %p\n",
-           acFill);
-    int res = DobbyHook(acFill, (void *)my_AudioConverterFillComplexBuffer,
-                        (void **)&orig_AudioConverterFillComplexBuffer);
-    printf("[Soggfy-INFO] Hooked AudioConverterFillComplexBuffer: result=%d\n",
-           res);
-  } else {
-    printf(
-        "[Soggfy-WARN] AudioConverterFillComplexBuffer not found via dlsym\n");
-  }
-
-  // ── Strategy 5: Hook AudioUnitSetProperty (Render Callback Interception) ──
-  void *auSetProp = dlsym(RTLD_DEFAULT, "AudioUnitSetProperty");
-  if (auSetProp) {
-    printf("[Soggfy-INFO] Found AudioUnitSetProperty at %p\n", auSetProp);
-    int res = DobbyHook(auSetProp, (void *)my_AudioUnitSetProperty,
-                        (void **)&orig_AudioUnitSetProperty);
-    printf("[Soggfy-INFO] Hooked AudioUnitSetProperty: result=%d\n", res);
-  } else {
-    printf("[Soggfy-WARN] AudioUnitSetProperty not found via dlsym\n");
-  }
-
-  printf("[Soggfy-INFO] Audio hooks setup complete.\n");
 }
 
 // ── Entry Point ──
 
+static bool ReadSharedCaptureGate(const std::string &save_dir) {
+  std::ifstream in(save_dir + "/capture_gate.txt");
+  char value = '1';
+  if (in) in >> value;
+  return value != '0';
+}
+
 static void SyncTrackIdThread() {
-  const char *env_save_path = getenv("SOGGFY_SAVE_PATH");
-  std::string save_dir = env_save_path ? env_save_path : "/tmp/Soggfy";
-  std::string track_file_path = save_dir + "/active_track.txt";
+  const std::string save_dir = SharedSaveDir();
+  const std::string track_file_path = save_dir + "/active_track.txt";
+  std::string last_token;
 
   while (true) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    FILE *f = fopen(track_file_path.c_str(), "r");
-    if (f) {
-      char buf[256] = {0};
-      if (fgets(buf, sizeof(buf), f)) {
-        std::string tid(buf);
-        // trim newline
-        if (!tid.empty() && tid.back() == '\n')
-          tid.pop_back();
-        std::string current_id;
+
+    std::ifstream track_file(track_file_path);
+    std::string token;
+    if (track_file) std::getline(track_file, token);
+    TrimInPlace(token);
+    if (!token.empty() && token != last_token) {
+      std::istringstream parsed(token);
+      std::string track;
+      parsed >> track;
+      if (!track.empty()) {
+        std::string previous;
         {
           std::lock_guard<std::mutex> lock(g_track_mutex);
-          current_id = g_active_track_id;
+          previous = g_active_track_id;
         }
-        if (!tid.empty() && tid != current_id) {
+        if (!previous.empty() && previous != "prototype_track" &&
+            StateManager::Instance().OwnsWriter(previous)) {
+          StateManager::Instance().ApplySharedControls(previous);
+          if (StateManager::Instance().GetPlaybackStatus(previous) == "downloading")
+            StateManager::Instance().FinishPlayback(previous);
+        }
+        StateManager::Instance().ResetLocalPlayback(track);
+        {
           std::lock_guard<std::mutex> lock(g_track_mutex);
-          g_active_track_id = tid;
-          g_capture_gated.store(false);
+          g_active_track_id = track;
         }
+              g_ogg_stream_active.store(false);
+        g_active_ogg_serial = 0;
+        last_token = token;
       }
-      fclose(f);
     }
+
+    g_capture_gated.store(ReadSharedCaptureGate(save_dir));
+    std::string active;
+    {
+      std::lock_guard<std::mutex> lock(g_track_mutex);
+      active = g_active_track_id;
+    }
+    if (!active.empty() && active != "prototype_track")
+      StateManager::Instance().ApplySharedControls(active);
   }
 }
 
 __attribute__((constructor)) void SoggfyEntryPoint() {
-  freopen("/tmp/soggfy.log", "a", stdout);
-  freopen("/tmp/soggfy.log", "a", stderr);
+  const std::string save_dir = SharedSaveDir();
+  mkdir(save_dir.c_str(), 0700);
+  chmod(save_dir.c_str(), 0700);
+  const std::string log_path = save_dir + "/payload-" + std::to_string(getpid()) + ".log";
+  int log_fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
+  if (log_fd >= 0) {
+    dup2(log_fd, STDOUT_FILENO);
+    dup2(log_fd, STDERR_FILENO);
+    close(log_fd);
+  }
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
 
-  // Setup focus, window and directory redirection hooks immediately at load
-  // time
   SetupImmediateHooks();
 
   bool is_main_process = true;
@@ -1204,11 +881,6 @@ __attribute__((constructor)) void SoggfyEntryPoint() {
   printf("[Soggfy-INFO] Soggfy payload v2.0 active (PID %d, Main=%d)\n",
          getpid(), is_main_process);
 
-  // Create Soggfy dir if it doesn't exist
-  const char *env_save_path = getenv("SOGGFY_SAVE_PATH");
-  std::string save_dir = env_save_path ? env_save_path : "/tmp/Soggfy";
-  mkdir(save_dir.c_str(), 0777);
-
   if (is_main_process) {
     // Register for Spotify's PlaybackStateChanged notifications to detect
     // ads vs target tracks. This gates audio capture so only the requested
@@ -1220,7 +892,6 @@ __attribute__((constructor)) void SoggfyEntryPoint() {
         usingBlock:^(NSNotification *note) {
           NSDictionary *info = note.userInfo;
           NSString *trackIdNS = info[@"Track ID"];
-          NSString *playerState = info[@"Player State"];
           if (!trackIdNS) return;
 
           std::string uri = [trackIdNS UTF8String];
@@ -1241,15 +912,18 @@ __attribute__((constructor)) void SoggfyEntryPoint() {
 
           if (is_ad) {
             g_capture_gated.store(true);
+            PersistCaptureGate(true);
             printf("[Soggfy-AD] Advertisement detected: %s — capture gated\n",
                    uri.c_str());
           } else if (matches_target) {
             g_capture_gated.store(false);
+            PersistCaptureGate(false);
             printf("[Soggfy-AD] Target track confirmed playing: %s\n",
                    uri.c_str());
           } else {
             // Non-target, non-ad track (e.g. autoplay next song) — keep gated
             g_capture_gated.store(true);
+            PersistCaptureGate(true);
             printf("[Soggfy-AD] Non-target track playing: %s (target: %s) "
                    "— capture gated\n",
                    uri.c_str(), target.c_str());

@@ -1,7 +1,8 @@
 import { homedir } from "os";
+import { chmodSync, mkdirSync } from "fs";
 import { join } from "path";
 
-export const SOGGFY_HOME = join(homedir(), ".soggfy");
+export const SOGGFY_HOME = process.env.SOGGFY_HOME || join(homedir(), ".soggfy");
 export const SOGGFY_DATA = join(SOGGFY_HOME, "data");
 export const WORKSPACE_DIR = join(SOGGFY_HOME, "workspace");
 export const PATCHED_APP = join(WORKSPACE_DIR, "PatchedSpotify.app");
@@ -21,11 +22,12 @@ export const SPOTIFY_APP = "/Applications/Spotify.app";
 export const SPOTIFY_INSTALLER_URL = "https://download.scdn.co/SpotifyInstaller.zip";
 export const DOBBY_REPO = "https://github.com/jmpews/Dobby.git";
 
-export const CAPTURE_BACKEND = process.env.SOGGFY_CAPTURE_BACKEND || "pcm";
+export const CAPTURE_BACKEND = process.env.SOGGFY_CAPTURE_BACKEND || "ogg";
 
 export function ensureDirs() {
   const dirs = [SOGGFY_HOME, SOGGFY_DATA, WORKSPACE_DIR, PROFILES_DIR, OUTPUT_DIR, AUTH_DIR, PAYLOAD_DIR, LOG_DIR];
   for (const dir of dirs) {
-    Bun.spawnSync(["mkdir", "-p", dir]);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
   }
 }

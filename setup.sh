@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Soggfy macOS safe setup script.
-# Mutates only this repository/workspace unless the user explicitly installs Spotify via the official installer.
+# Mutates only this repository and ~/.soggfy unless the user explicitly installs Spotify via the official installer.
 
 set -euo pipefail
 
@@ -11,6 +11,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 SPOTIFY_INSTALLER_URL="https://download.scdn.co/SpotifyInstaller.zip"
+SUPPORTED_SPOTIFY_VERSION="1.2.98.301"
 SKIP_SPOTIFY_INSTALL=0
 SKIP_LOGIN=0
 REBUILD=0
@@ -24,7 +25,7 @@ Options:
   --skip-spotify-install  Fail if /Applications/Spotify.app is missing instead of launching Spotify's installer.
   --skip-login            Do not open Spotify for first-time login/profile preparation.
   --rebuild               Reconfigure CMake from scratch.
-  --reset-workspace       Remove this repo's workspace/PatchedSpotify.app and workspace/profiles before patching.
+  --reset-workspace       Remove the Soggfy patched app and profiles before patching.
   -h, --help              Show this help.
 
 Safety invariant: this script never deletes /Applications/Spotify.app.
@@ -44,7 +45,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_DIR="$ROOT_DIR/workspace"
+SOGGFY_HOME="${SOGGFY_HOME:-$HOME/.soggfy}"
+WORKSPACE_DIR="$SOGGFY_HOME/workspace"
 PATCHED_APP="$WORKSPACE_DIR/PatchedSpotify.app"
 PROFILE_TEMPLATE="$WORKSPACE_DIR/profile_template"
 
@@ -56,6 +58,33 @@ require_command() {
   fi
 }
 
+terminate_process_tree() {
+  local root_pid="$1"
+  local table descendants pid
+  table="$(ps -axo pid=,ppid=)"
+  descendants="$(awk -v root="$root_pid" '
+    { parent[$1]=$2 }
+    END {
+      for (pid in parent) {
+        current=pid
+        while (current in parent) {
+          if (parent[current] == root) { print pid; break }
+          current=parent[current]
+        }
+      }
+    }
+  ' <<<"$table")"
+  while read -r pid; do
+    [[ -n "$pid" ]] && kill -TERM "$pid" >/dev/null 2>&1 || true
+  done <<<"$descendants"
+  kill -TERM "$root_pid" >/dev/null 2>&1 || true
+  sleep 1
+  while read -r pid; do
+    [[ -n "$pid" ]] && kill -KILL "$pid" >/dev/null 2>&1 || true
+  done <<<"$descendants"
+  kill -KILL "$root_pid" >/dev/null 2>&1 || true
+}
+
 echo -e "${BLUE}=== Soggfy macOS Setup ===${NC}"
 
 if ! command -v brew >/dev/null 2>&1; then
@@ -64,7 +93,7 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 echo -e "\n${BLUE}[1/6] Checking dependencies${NC}"
-BREW_DEPS=(cmake ffmpeg capstone pkg-config)
+BREW_DEPS=(cmake ffmpeg chromaprint)
 for dep in "${BREW_DEPS[@]}"; do
   if ! brew list "$dep" >/dev/null 2>&1 && ! command -v "$dep" >/dev/null 2>&1; then
     echo -e "${YELLOW}Installing $dep via Homebrew...${NC}"
@@ -100,23 +129,30 @@ if [[ ! -d "/Applications/Spotify.app" ]]; then
   until [[ -d "/Applications/Spotify.app" ]]; do sleep 2; done
 fi
 echo -e "${GREEN}✓ Spotify.app present${NC}"
+SPOTIFY_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Spotify.app/Contents/Info.plist 2>/dev/null || true)"
+if [[ "$SPOTIFY_VERSION" != "$SUPPORTED_SPOTIFY_VERSION" ]]; then
+  echo -e "${RED}Unsupported Spotify build ${SPOTIFY_VERSION:-unknown}; capture hooks are validated for $SUPPORTED_SPOTIFY_VERSION arm64.${NC}"
+  exit 1
+fi
+echo -e "${GREEN}✓ Spotify build $SPOTIFY_VERSION is capture-compatible${NC}"
 
-mkdir -p "$WORKSPACE_DIR" "$PROFILE_TEMPLATE"
+mkdir -p "$SOGGFY_HOME" "$WORKSPACE_DIR" "$PROFILE_TEMPLATE"
+chmod 700 "$SOGGFY_HOME" "$WORKSPACE_DIR" "$PROFILE_TEMPLATE"
 
 if [[ "$SKIP_LOGIN" -eq 0 ]]; then
   echo -e "\n${BLUE}[3/6] Login/profile preparation${NC}"
   echo "Spotify will open once. Log in, wait for the main UI, then return here."
-  open -n -a "/Applications/Spotify.app" --args --user-data-dir="$PROFILE_TEMPLATE"
+  "/Applications/Spotify.app/Contents/MacOS/Spotify" --user-data-dir="$PROFILE_TEMPLATE" >/dev/null 2>&1 &
+  SPOTIFY_LOGIN_PID=$!
   read -r -p "Press [Enter] after Spotify is logged in and loaded..."
-  killall Spotify >/dev/null 2>&1 || true
-  sleep 2
+  terminate_process_tree "$SPOTIFY_LOGIN_PID"
 else
   echo -e "\n${BLUE}[3/6] Login/profile preparation skipped${NC}"
 fi
 
 echo -e "\n${BLUE}[4/6] Preparing patched workspace app${NC}"
 if [[ "$RESET_WORKSPACE" -eq 1 ]]; then
-  echo "Resetting repo-local workspace state..."
+  echo "Resetting Soggfy workspace state..."
   rm -rf "$PATCHED_APP" "$WORKSPACE_DIR/profiles"
 fi
 
@@ -126,7 +162,7 @@ ditto "/Applications/Spotify.app" "$PATCHED_APP"
 adhoc_sign_if_present() {
   local target="$1"
   if [[ -e "$target" ]]; then
-    codesign -f -s - "$target" >/dev/null 2>&1 || true
+    codesign -f -s - "$target" >/dev/null
     echo -e "${GREEN}✓ ad-hoc signed $target${NC}"
   else
     echo -e "${YELLOW}warning: signature target missing: $target${NC}"
@@ -149,12 +185,14 @@ cmake -S . -B build
 cmake --build build
 mkdir -p "$PATCHED_APP/Contents/MacOS"
 cp "$ROOT_DIR/soggfy-macos/build/libsoggfy.dylib" "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib"
-codesign -f -s - "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib" >/dev/null 2>&1 || true
+codesign -f -s - "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib" >/dev/null
+codesign -f -s - --deep "$PATCHED_APP" >/dev/null
+codesign --verify --deep --strict "$PATCHED_APP"
 cd "$ROOT_DIR"
 
 echo -e "\n${BLUE}[6/6] Installing webapp dependencies${NC}"
 cd "$ROOT_DIR/webapp"
-bun install
+bun install --frozen-lockfile
 cd "$ROOT_DIR"
 
 echo -e "\n${GREEN}=== Setup complete ===${NC}"

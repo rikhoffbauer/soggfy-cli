@@ -1,4 +1,5 @@
 #include "StateManager.h"
+#include "CapturePolicy.h"
 
 #include <cmath>
 #include <cstdint>
@@ -8,6 +9,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -43,6 +46,30 @@ int main() {
 
     auto& manager = StateManager::Instance();
     manager.SetBaseSavePath(base.string());
+
+    setenv("SOGGFY_CAPTURE_BACKEND", "disabled", 1);
+    if (CaptureBackendAllowsSource("avasset") || CaptureBackendAllowsSource("ogg") ||
+        CaptureBackendAllowsDecoderMutation()) return 10;
+
+    setenv("SOGGFY_CAPTURE_BACKEND", "pcm", 1);
+    if (SelectedCaptureBackend() != CaptureBackend::Invalid ||
+        CaptureBackendAllowsSource("avasset") || CaptureBackendAllowsDecoderMutation()) return 11;
+
+    setenv("SOGGFY_CAPTURE_BACKEND", "ogg", 1);
+    if (!CaptureBackendAllowsSource("ogg") || CaptureBackendAllowsSource("avasset") ||
+        !CaptureBackendAllowsDecoderMutation()) return 12;
+
+    const std::string ownerTrack = "owner-track";
+    manager.ResetPlayback(ownerTrack);
+    if (!manager.TryClaimWriter(ownerTrack, "ogg")) return 13;
+    if (manager.TryClaimWriter(ownerTrack, "avasset")) return 14;
+    const pid_t child = fork();
+    if (child == 0) _exit(manager.TryClaimWriter(ownerTrack, "ogg") ? 1 : 0);
+    int childStatus = 0;
+    if (child < 0 || waitpid(child, &childStatus, 0) != child || !WIFEXITED(childStatus) ||
+        WEXITSTATUS(childStatus) != 0) return 15;
+    manager.ResetPlayback(ownerTrack);
+
     manager.SetPlaybackDuration(trackId, 1000);
     manager.ReceiveAudioData(trackId, reinterpret_cast<const char*>(pcm.data()), pcm.size() * sizeof(float));
     manager.FinishPlayback(trackId);

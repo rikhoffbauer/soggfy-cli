@@ -1,44 +1,105 @@
 # Known Failure Modes
 
-## Historical failures from the old Ogg hook path
+Current as of 2026-09-08.
 
-- Dobby hooks against guessed `DecodeAudioData` functions fired but did not prove correct ABI interpretation.
-- The server frequently saw missing IPC sockets (`ENOENT`) after Spotify disappeared or the payload crashed.
-- Tiny invalid `.ogg` outputs proved that bytes were intercepted, not that a valid stream was captured.
-- Heap scans and pointer probing were crash-prone and should remain historical/reference work unless deliberately revived.
+## Spotify version mismatch
 
-## Current PCM/CoreAudio path risks
+The Ogg/decode hooks are validated for Spotify **1.2.98.301 arm64**. A different installed or patched version is treated as unsupported.
 
-- Hook readiness can still be false if Spotify updates internal classes/functions.
-- Audio duplication risk is reduced by `SOGGFY_CAPTURE_BACKEND`, which gates writes to a single backend, but each backend still needs live macOS validation.
-- Audio may be incomplete if capture starts late or duration detection fails.
-- WAV headers can be inconsistent if the process exits before `FinishPlayback`.
-- ffmpeg can fail on malformed or silent WAV files; the server records validation warnings and falls back only to structurally valid WAV files.
-- Search can fail when `SPOTIFY_COOKIE` is missing/expired.
-- Pool startup can partially succeed; `/api/instances` must be checked before assuming parallel capacity.
+Expected behavior:
 
-## Recovery behavior added
+- `setup.sh` and `soggfy install` stop before preparing an unsupported app.
+- doctor reports the system/workspace version mismatch.
+- CLI/webapp runtime refuses an unsupported patched bundle.
+- native hook installation also verifies the expected prologues and fails closed if the binary does not match.
 
-- Startup surfaces per-instance errors instead of hiding them.
-- Idle instances are pinged and recycled when unresponsive.
-- Active jobs fail after bounded attempts instead of remaining permanently queued.
-- Validation prevents obviously malformed WAV captures from being marked completed.
-- MP3 failure falls back to a validated WAV output.
+Do not "fix" this by removing the checks or installing guessed offsets. Re-analyze the new Spotify binary, establish new signatures/offsets, and live-test capture before updating `SUPPORTED_SPOTIFY_VERSION`.
 
+## Spotify startup / AppleEvent `-1708`
 
-## Cancellation and retry caveats
+A newly launched hidden Spotify process may initially return AppleEvent result `-1708` for `play`. This happened during the successful live smoke test.
 
-- Queued jobs are cancelled without touching Spotify.
-- Active jobs are cancelled by sending `cancel_track <trackId>`, which drops the partial temp WAV, then pausing/recycling the owning instance as a defensive cleanup step.
-- Retrying a failed/cancelled job creates a replacement job record; old failed/cancelled records remain for auditability.
-- The UI can request cancel/retry, but live correctness still depends on the macOS payload responding to IPC and the instance recycle path working under `DYLD_INSERT_LIBRARIES`.
+Both capture clients retry the target `play` request while waiting for `get_playing` confirmation. If the requested track is never confirmed, capture fails instead of proceeding from `active_track.txt` or another intent-only signal.
 
-## Build/consistency fixes added on 2026-06-19
+## Private hook readiness
 
-- Added the missing shadcn alias helpers: `webapp/src/lib/utils.ts` and `webapp/src/hooks/use-mobile.ts`.
-- Server root paths are derived from `import.meta.url` instead of `process.cwd()`.
-- The IPC server now checks `socket`, `bind`, `listen`, `accept`, `read`, and `send` errors and uses exact prefix parsing.
-- Duplicate `set_track` parsing was merged into one path that finishes the previous active track, resets the watchdog, persists the active track ID, and starts the selected backend.
-- `soggfy-cli` now joins all command arguments and honors `SOGGFY_SOCKET_PATH`.
-- `StateManager` sanitizes playback IDs before using them as filenames.
-- A local `StateManager` sine-wave fixture verifies WAV header/data sizing without Spotify.
+A successful IPC `ping` proves the payload/server is alive, not that arbitrary private offsets are valid. The Ogg backend handles this by checking the exact decode and Ogg function prologues before hook installation.
+
+If either check fails, the backend logs the mismatch and does not capture. This is preferable to crashing or interpreting an unknown ABI.
+
+## Helper-process injection
+
+Spotify spawns multiple processes. Some platform helper processes can have a different architecture/security posture and may reject an inserted arm64 dylib. The capture design does not require every helper to become a writer: the first compatible injected process that sees the Ogg stream atomically claims the track writer, and all others are excluded.
+
+A helper injection error is therefore not automatically a capture failure; the final media validation and shared completion state remain authoritative.
+
+## Capture never starts
+
+Likely causes:
+
+- authentication/session state is missing or stale;
+- target playback never becomes confirmed;
+- Spotify version/prologues are unsupported;
+- the Ogg stream never reaches an injected compatible process;
+- IPC or the owning Spotify process exits.
+
+The client pauses and fails after bounded startup/IPC timeouts. It does not manufacture a successful output from a partial file.
+
+## Capture finalization stalls
+
+`finish_track` is asynchronous across injected processes. Clients now poll shared `get_status` until `completed` rather than assuming a 500 ms delay is enough.
+
+If completion never arrives, the job fails and preserves the capture for diagnosis instead of validating a file while its writer may still be active.
+
+## Invalid, truncated, or silent media
+
+A file existing on disk is not success. `validateAudioFile` checks:
+
+- ffprobe readability/container;
+- duration against expected metadata when available;
+- actual ffmpeg decodeability;
+- decoded RMS/peak;
+- silence ratio.
+
+Malformed, near-silent, mostly-silent, or clearly wrong-duration captures are rejected. Webapp transcode fallback is allowed only after the source capture itself has passed validation.
+
+## `raw` output with the Ogg backend
+
+`raw` means raw PCM. The production capture is compressed Ogg/Vorbis, so its bytes cannot be copied directly to a `.raw` stream. The CLI rejects this combination rather than corrupting output. Request WAV/FLAC/MP3/Ogg instead.
+
+## Search failures
+
+Webapp Spotify search depends on `SPOTIFY_COOKIE` and private Spotify web APIs. Missing/expired cookies or upstream API changes can break search independently of capture.
+
+Direct track IDs/URIs/URLs can still be captured when the local authenticated Spotify runtime is healthy.
+
+## Pool partial readiness
+
+A webapp pool may have fewer ready instances than configured. Check `/api/health` (`readyInstances`) and `/api/instances`; do not infer capacity from `poolSize` alone.
+
+The readiness loop now exits immediately if the launched Spotify root process dies rather than waiting the entire socket timeout.
+
+## Cancellation and retries
+
+- Queued jobs cancel without touching Spotify.
+- Active jobs publish `cancel_track`, pause, and recycle the exact owning instance/process tree as defensive cleanup.
+- Failed/cancelled jobs remain for auditability; retry creates a replacement job record.
+- Cancellation can preserve diagnostic partial files, but they are never surfaced as completed output without validation.
+
+## Signing failures
+
+Adding/replacing `libsoggfy.dylib` changes the app bundle seal. Setup, CLI install, and webapp payload refresh therefore sign the payload, re-sign the **completed app bundle**, and then run strict deep verification.
+
+A signing or verification error is fatal. Do not downgrade it to a warning: DYLD injection behavior otherwise becomes environment-dependent and difficult to diagnose.
+
+## Disk usage
+
+Do not clone all of Spotify `PersistentCache` for each isolated process. It can contain hundreds of megabytes of updater data and quickly fill the system volume.
+
+The shared login-state helper copies only preferences/`Users`, clone-on-write copies `PersistentCache/Users`, and copies `PersistentCache/user_settings`. `PersistentCache/Update` is intentionally excluded.
+
+## Process cleanup
+
+Runtime and login cleanup track exact root/descendant PIDs. Broad `killall Spotify`, `pkill`, or `pgrep -f` cleanup is intentionally absent because another Spotify/Soggfy-based application may be running concurrently.
+
+If a crash occurs before the owner can clean up, inspect the recorded PID/tree and runtime directory rather than restoring broad name-based termination.

@@ -1,0 +1,142 @@
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+} from "fs";
+import { homedir } from "os";
+import { join } from "path";
+
+export interface LoginStateCloneResult {
+  copiedPrefs: boolean;
+  copiedUsers: boolean;
+  copiedSessionCache: boolean;
+}
+
+export const SUPPORTED_SPOTIFY_VERSION = "1.2.98.301";
+
+export function readSpotifyBundleVersion(appPath: string): string | null {
+  const infoPlist = join(appPath, "Contents/Info.plist");
+  if (!existsSync(infoPlist)) return null;
+  const result = Bun.spawnSync([
+    "/usr/libexec/PlistBuddy",
+    "-c",
+    "Print :CFBundleShortVersionString",
+    infoPlist,
+  ], { stdout: "pipe", stderr: "pipe" });
+  if (result.exitCode !== 0) return null;
+  return result.stdout.toString().trim() || null;
+}
+
+export function assertSupportedSpotifyBundle(appPath: string): void {
+  const version = readSpotifyBundleVersion(appPath);
+  if (version !== SUPPORTED_SPOTIFY_VERSION) {
+    throw new Error(
+      `Unsupported Spotify build ${version ?? "unknown"}; capture hooks are validated for ${SUPPORTED_SPOTIFY_VERSION} arm64`,
+    );
+  }
+}
+
+function ensurePrivateDir(path: string): void {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  chmodSync(path, 0o700);
+}
+
+function cloneDirectoryCow(source: string, destination: string): void {
+  rmSync(destination, { recursive: true, force: true });
+  const clone = Bun.spawnSync(["cp", "-cR", source, destination], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (clone.exitCode !== 0) {
+    throw new Error(`copy-on-write clone failed: ${clone.stderr.toString().trim()}`);
+  }
+}
+
+export function cloneSpotifyLoginState(
+  appSupportDest: string,
+  sourceDir = join(homedir(), "Library/Application Support/Spotify"),
+): LoginStateCloneResult {
+  ensurePrivateDir(appSupportDest);
+  let copiedPrefs = false;
+  let copiedUsers = false;
+  let copiedSessionCache = false;
+
+  const prefsPath = join(sourceDir, "prefs");
+  if (existsSync(prefsPath)) {
+    copyFileSync(prefsPath, join(appSupportDest, "prefs"));
+    copiedPrefs = true;
+  }
+
+  const usersPath = join(sourceDir, "Users");
+  if (existsSync(usersPath)) {
+    const dest = join(appSupportDest, "Users");
+    rmSync(dest, { recursive: true, force: true });
+    cpSync(usersPath, dest, { recursive: true });
+    copiedUsers = true;
+  }
+
+  const sessionCacheUsers = join(sourceDir, "PersistentCache/Users");
+  if (existsSync(sessionCacheUsers)) {
+    const persistentCacheDest = join(appSupportDest, "PersistentCache");
+    ensurePrivateDir(persistentCacheDest);
+    cloneDirectoryCow(sessionCacheUsers, join(persistentCacheDest, "Users"));
+    copiedSessionCache = true;
+
+    const userSettings = join(sourceDir, "PersistentCache/user_settings");
+    if (existsSync(userSettings)) {
+      copyFileSync(userSettings, join(persistentCacheDest, "user_settings"));
+    }
+  }
+
+  return { copiedPrefs, copiedUsers, copiedSessionCache };
+}
+
+export function descendantPidsFromProcessTable(rootPid: number, table: string): number[] {
+  const children = new Map<number, number[]>();
+  for (const line of table.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const ppid = Number(match[2]);
+    const list = children.get(ppid) ?? [];
+    list.push(pid);
+    children.set(ppid, list);
+  }
+
+  const descendants: number[] = [];
+  const visit = (pid: number) => {
+    for (const child of children.get(pid) ?? []) visit(child);
+    if (pid !== rootPid) descendants.push(pid);
+  };
+  visit(rootPid);
+  return descendants;
+}
+
+export function collectDescendantPids(rootPid: number): number[] {
+  const ps = Bun.spawnSync(["ps", "-axo", "pid=,ppid="], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (ps.exitCode !== 0) return [];
+  return descendantPidsFromProcessTable(rootPid, ps.stdout.toString());
+}
+
+export async function terminateProcessTree(
+  rootPid: number,
+  rootExited?: Promise<number>,
+): Promise<void> {
+  const targets = [...collectDescendantPids(rootPid), rootPid];
+  for (const targetPid of targets) {
+    try { process.kill(targetPid, "SIGTERM"); } catch {}
+  }
+  await Promise.race([rootExited ?? Bun.sleep(750), Bun.sleep(750)]).catch(() => undefined);
+  for (const targetPid of targets) {
+    try { process.kill(targetPid, "SIGKILL"); } catch {}
+  }
+  if (rootExited) {
+    await Promise.race([rootExited, Bun.sleep(250)]).catch(() => undefined);
+  }
+}

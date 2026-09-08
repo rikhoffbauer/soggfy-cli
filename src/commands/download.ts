@@ -9,7 +9,7 @@ import { SpotifyInstance } from "../core/instance";
 import { ping } from "../core/ipc";
 import { IPC_SOCKET, SAVE_PATH, ensureDirs } from "../core/paths";
 
-interface StreamOptions {
+export interface DownloadOptions {
   output?: string;
   format?: OutputFormat;
   keepWav?: boolean;
@@ -51,16 +51,25 @@ function formatTrackFileName(
   return `${prefix}${trackId}.${format}`;
 }
 
-function parseArgs(args: string[]): { inputs: string[]; opts: StreamOptions } {
+export function parseDownloadArgs(args: string[]): { inputs: string[]; opts: DownloadOptions } {
   const inputs: string[] = [];
-  const opts: StreamOptions = {};
+  const opts: DownloadOptions = {};
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "-o" || arg === "--output") {
-      opts.output = expandHome(args[++i]);
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) throw new Error(`${arg} requires an output path`);
+      opts.output = expandHome(value);
+      i++;
     } else if (arg === "-f" || arg === "--format") {
-      opts.format = args[++i] as OutputFormat;
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) throw new Error(`${arg} requires an output format`);
+      if (!["wav", "mp3", "flac", "ogg", "raw"].includes(value)) {
+        throw new Error(`Unsupported output format: ${value}`);
+      }
+      opts.format = value as OutputFormat;
+      i++;
     } else if (arg === "--keep-wav") {
       opts.keepWav = true;
     } else if (arg === "--no-daemon") {
@@ -68,7 +77,9 @@ function parseArgs(args: string[]): { inputs: string[]; opts: StreamOptions } {
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
-    } else if (!arg.startsWith("-")) {
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown download option: ${arg}`);
+    } else {
       inputs.push(arg);
     }
   }
@@ -92,7 +103,7 @@ function parseArgs(args: string[]): { inputs: string[]; opts: StreamOptions } {
 
 function printHelp(): void {
   console.error(`
-Usage: soggfy stream [options] <track-url|track-id|album-url|playlist-url>
+Usage: soggfy download [options] <track-url|track-id|album-url|playlist-url>
 
 Capture Spotify audio and stream to stdout or save to a file/directory.
 
@@ -105,24 +116,24 @@ Options:
 
 Examples:
   # Single track to stdout
-  soggfy stream 4PTG3Z6ehGkBFwjybzWkR8 > song.mp3
+  soggfy download 4PTG3Z6ehGkBFwjybzWkR8 > song.mp3
 
   # Single track to file
-  soggfy stream -o song.flac https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8
+  soggfy download -o song.flac https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8
 
   # Entire playlist to a directory
-  soggfy stream -o ~/Music/ https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
+  soggfy download -o ~/Music/ https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
 
   # Album in FLAC format to a folder
-  soggfy stream -o ./album/ -f flac https://open.spotify.com/album/4eLPsYPBmXABThSJ821sqY
+  soggfy download -o ./album/ -f flac https://open.spotify.com/album/4eLPsYPBmXABThSJ821sqY
 `);
 }
 
-export async function streamCommand(args: string[]): Promise<void> {
-  const { inputs, opts } = parseArgs(args);
+export async function downloadCommand(args: string[]): Promise<void> {
+  const { inputs, opts } = parseDownloadArgs(args);
 
   if (inputs.length === 0) {
-    log.error("No track or playlist specified. Use 'soggfy stream --help' for usage.");
+    log.error("No track or playlist specified. Use 'soggfy download --help' for usage.");
     process.exit(1);
   }
 
@@ -162,8 +173,8 @@ export async function streamCommand(args: string[]): Promise<void> {
   }
 
   if (!opts.useDaemon) {
-    const tmpSocket = `/tmp/soggfy_stream_${process.pid}.sock`;
-    const tmpSave = `/tmp/Soggfy_stream_${process.pid}`;
+    const tmpSocket = `/tmp/soggfy_download_${process.pid}.sock`;
+    const tmpSave = `/tmp/Soggfy_download_${process.pid}`;
     tempInstance = new SpotifyInstance(tmpSocket, tmpSave);
     try {
       await tempInstance.start();
@@ -184,49 +195,40 @@ export async function streamCommand(args: string[]): Promise<void> {
         log.header(`[${i + 1}/${allTrackIds.length}] Processing ${trackId}`);
       }
 
-      // Capture the track
       const result = await captureTrack(socketPath, savePath, trackId);
+      try {
+        if (opts.output) {
+          let outputPath: string;
+          if (isDirOutput) {
+            const fileName = formatTrackFileName(
+              trackId, result.metadata, opts.format!, i, allTrackIds.length,
+            );
+            outputPath = join(opts.output, fileName);
+          } else {
+            outputPath = allTrackIds.length > 1
+              ? opts.output.replace(/(\.\w+)$/, `_${i + 1}$1`)
+              : opts.output;
+          }
 
-      // Output the audio
-      if (opts.output) {
-        let outputPath: string;
-        if (isDirOutput) {
-          const fileName = formatTrackFileName(trackId, result.metadata, opts.format!, i, allTrackIds.length);
-          outputPath = join(opts.output, fileName);
+          log.info(`Transcoding to ${opts.format}...`);
+          if (!transcode(result.wavPath, outputPath, opts.format!)) {
+            throw new Error(`Transcoding failed for ${trackId}`);
+          }
+          if (opts.format === "mp3" && result.metadata) {
+            await tagMp3(outputPath, result.metadata);
+          }
+          log.ok(`Saved: ${outputPath}`);
         } else {
-          outputPath = allTrackIds.length > 1
-            ? opts.output.replace(/(\.\w+)$/, `_${i + 1}$1`)
-            : opts.output;
+          const stdout = new WritableStream<Uint8Array>({
+            write(chunk) { process.stdout.write(chunk); },
+            close() {},
+          });
+          await streamToWriter(result.wavPath, stdout, opts.format!);
         }
-
-        log.info(`Transcoding to ${opts.format}...`);
-        const ok = transcode(result.wavPath, outputPath, opts.format!);
-        if (!ok) {
-          log.error(`Transcoding failed for ${trackId}`);
-          continue;
+      } finally {
+        if (!opts.keepWav && existsSync(result.wavPath)) {
+          try { unlinkSync(result.wavPath); } catch {}
         }
-
-        // Tag MP3 files with ID3 tags
-        if (opts.format === "mp3" && result.metadata) {
-          await tagMp3(outputPath, result.metadata);
-        }
-
-        log.ok(`Saved: ${outputPath}`);
-      } else {
-        // Stream to stdout
-        const stdout = new WritableStream<Uint8Array>({
-          write(chunk) {
-            process.stdout.write(chunk);
-          },
-          close() {},
-        });
-
-        await streamToWriter(result.wavPath, stdout, opts.format!);
-      }
-
-      // Cleanup intermediate WAV
-      if (!opts.keepWav && existsSync(result.wavPath)) {
-        try { unlinkSync(result.wavPath); } catch {}
       }
     }
   } finally {

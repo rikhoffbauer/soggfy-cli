@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "fs";
-import { join, resolve } from "path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "fs";
+import { join, resolve, sep } from "path";
 import { homedir } from "os";
 import { log } from "../core/log";
 import { AUTH_DIR, SPOTIFY_APP } from "../core/paths";
+import { terminateProcessTree } from "../core/spotify-runtime";
 
 const SPOTIFY_SUPPORT = join(homedir(), "Library/Application Support/Spotify");
 const PREFS_FILE = join(SPOTIFY_SUPPORT, "prefs");
@@ -56,11 +57,17 @@ function readUsersDir(): Record<string, string> | null {
 }
 
 function restoreUsersDir(users: Record<string, string>): void {
-  mkdirSync(USERS_DIR, { recursive: true });
+  mkdirSync(USERS_DIR, { recursive: true, mode: 0o700 });
+  const usersRoot = `${resolve(USERS_DIR)}${sep}`;
   for (const [relPath, base64Content] of Object.entries(users)) {
-    const fullPath = join(USERS_DIR, relPath);
-    mkdirSync(join(fullPath, ".."), { recursive: true });
-    writeFileSync(fullPath, Buffer.from(base64Content, "base64"));
+    if (typeof base64Content !== "string") throw new Error(`Invalid auth entry: ${relPath}`);
+    const fullPath = resolve(USERS_DIR, relPath);
+    if (!fullPath.startsWith(usersRoot)) {
+      throw new Error(`Refusing auth path outside Spotify Users: ${relPath}`);
+    }
+    mkdirSync(join(fullPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(fullPath, Buffer.from(base64Content, "base64"), { mode: 0o600 });
+    chmodSync(fullPath, 0o600);
   }
 }
 
@@ -110,8 +117,9 @@ async function authLogin(): Promise<void> {
   log.info("then return here and press Enter.");
   console.error();
 
-  // Open official Spotify (not patched) so login works cleanly
-  Bun.spawnSync(["open", "-a", SPOTIFY_APP]);
+  // Launch the official Spotify binary directly so cleanup can target only this process tree.
+  const spotifyBinary = join(SPOTIFY_APP, "Contents/MacOS/Spotify");
+  const spotify = Bun.spawn([spotifyBinary], { stdout: "ignore", stderr: "ignore" });
 
   // Wait for user to press Enter
   process.stderr.write("Press Enter after Spotify is logged in and loaded... ");
@@ -119,9 +127,8 @@ async function authLogin(): Promise<void> {
     break; // consume one line
   }
 
-  // Kill Spotify after login
-  Bun.spawnSync(["killall", "Spotify"]);
-  await Bun.sleep(2000);
+  // Stop only the Spotify process tree launched by this command.
+  await terminateProcessTree(spotify.pid, spotify.exited);
 
   // Verify login state
   const prefs = readPrefs();
@@ -191,7 +198,8 @@ function authExport(outputPath?: string): void {
   };
 
   const outFile = outputPath ? resolve(outputPath) : resolve("soggfy-auth.json");
-  writeFileSync(outFile, JSON.stringify(snapshot, null, 2));
+  writeFileSync(outFile, JSON.stringify(snapshot, null, 2), { mode: 0o600 });
+  chmodSync(outFile, 0o600);
   log.ok(`Credentials exported to: ${outFile}`);
 
   const username = parseUsername(prefs);
@@ -228,7 +236,8 @@ function authImport(inputPath?: string): void {
   mkdirSync(SPOTIFY_SUPPORT, { recursive: true });
 
   if (snapshot.prefs) {
-    writeFileSync(PREFS_FILE, snapshot.prefs);
+    writeFileSync(PREFS_FILE, snapshot.prefs, { mode: 0o600 });
+    chmodSync(PREFS_FILE, 0o600);
     log.ok("Prefs restored.");
   }
 

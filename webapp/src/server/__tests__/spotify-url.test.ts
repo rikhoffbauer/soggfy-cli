@@ -13,3 +13,12 @@ test("parseTrackId accepts URLs, URIs, and bare IDs", () => {
 test("extractTrackIds deduplicates IDs across Spotify markup shapes", () => {
   expect(extractTrackIds(`spotify:track:${id} https://open.spotify.com/track/${id} \"uri\":\"spotify:track:${id}\"`)).toEqual([id]);
 });
+
+
+test("collection parsers accept Spotify URLs and URIs", async () => {
+  const { parsePlaylistId, parseAlbumId } = await import("../spotify-url");
+  expect(parsePlaylistId(`https://open.spotify.com/playlist/${id}?si=x`)).toBe(id);
+  expect(parsePlaylistId(`spotify:playlist:${id}`)).toBe(id);
+  expect(parseAlbumId(`https://open.spotify.com/album/${id}`)).toBe(id);
+  expect(parseAlbumId(`spotify:album:${id}`)).toBe(id);
+});
