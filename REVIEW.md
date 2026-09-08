@@ -4,6 +4,53 @@ Reviewed: 2026-09-08
 Branch: `main`
 Commit: `dccafa5f978664b8f7a2ca8733fa7d11aa284a4c`
 
+## Resolution status — 2026-09-08
+
+The review below is preserved as the baseline assessment of `main` at `dccafa5f`. The findings were addressed on branch `fix/review-findings` in these implementation checkpoints:
+
+- `4474ad3` — build reproducibility, CI/typechecking, credentials, TLS logging, signing checks, architecture claims, fixture coverage.
+- `071a5f2` — release-safe daemon re-exec/readiness/logging/process cleanup and removal of the daemon binary-stream route.
+- `b7cfdec` — media validation, strict stream options, safe transcoding/raw behavior.
+- `187cf1c` — Ogg-only production capture policy, cross-process single-writer ownership/shared controls, private-hook validation, scanner fix.
+- `77e410a` — shared CLI/webapp runtime, exact lifecycle/login cleanup, playback/finalization confirmation, isolated webapp state, completed-bundle signing, Spotify version gating.
+
+| Finding | Status | Resolution |
+|---|---|---|
+| P0.1 backend not enforced | **Fixed** | `CapturePolicy` accepts only `ogg`/`disabled`; raw Ogg, decoder mutation, and hook installation use the same policy; unsafe PCM capture families were removed. |
+| P0.2 multiple writers | **Fixed** | Atomic `.capture-owner`, shared generation/gate/status/control files, and owner checks enforce one writer across injected processes. |
+| P0.3 packaged daemon source dependency | **Fixed** | Daemon re-executes the current bundled executable instead of `../cli.ts`. |
+| P0.4 binary stream into daemon log | **Fixed** | Legacy daemon `/api/stream` path was removed. |
+| P1.1 hard-coded addresses unchecked | **Fixed / intentionally version-bound** | Only Spotify 1.2.98.301 arm64 is accepted; both private hook prologues are checked before `DobbyHook`. Unknown builds fail closed. |
+| P1.2 unsafe PCM format assumptions | **Fixed** | Production PCM capture backends were removed. The retained CoreAudio wrapper only mutes output and does not interpret/capture PCM. |
+| P1.3 corrupt/truncated/silent success | **Fixed** | Container/duration/decode/signal validation gates success; finalization waits for shared `completed`. |
+| P1.4 CI green while TS fails | **Fixed** | Root/webapp typechecks, native fixture, webapp build, and deterministic tests are CI/build gates. |
+| P1.5 divergent runtime models | **Substantially fixed** | CLI/webapp now share paths, backend config, IPC, media, login cloning, compatibility checks, and process lifecycle. Their higher-level daemon vs pool/job orchestration intentionally remains separate. |
+| P1.6 non-reproducible builds | **Fixed** | Bun lockfiles are tracked/frozen and Dobby is pinned to a commit. |
+| P1.7 incorrect Intel claim | **Fixed** | Requirements/documentation state Apple Silicon arm64. |
+| P1.8 auth traversal/permissions | **Fixed** | Imports are constrained below Spotify `Users`; snapshots are owner-only. |
+| P1.9 TLS key logging default-on | **Fixed** | Key logging is opt-in via `SOGGFY_SSL_KEYLOG_FILE`. |
+| P1.10 signing failures ignored | **Fixed** | Setup/install/webapp sign the completed bundle and strictly verify it; failure is fatal. |
+| P2.1 option validation | **Fixed** | Stream parser rejects missing values, unknown flags, and unsupported formats. |
+| P2.2 raw corrupts Ogg | **Fixed** | Raw PCM output rejects compressed captures. |
+| P2.3 scanner final match | **Fixed** | Scan loop includes the final legal offset. |
+| P2.4 daemon readiness returns success | **Fixed** | Readiness timeout returns failure and cleans up. |
+| P2.5 broad process cleanup | **Fixed** | CLI, webapp, auth, and setup terminate exact launched process trees; no runtime `pkill`/`killall` remains. |
+| P2.6 temp/log permissions | **Fixed** | Runtime/profile/save/log/control directories/files use private ownership modes. |
+| P2.7 native fixture not gated | **Fixed** | Native fixture is part of automated verification/CI. |
+| P2.8 fake skip | **Fixed** | Fingerprint test is deterministic instead of a passing pseudo-skip. |
+| P2.9 stale setup dependencies | **Fixed** | Setup/doctor use the current dependency and workspace model. |
+| P2.10 duplicate version sources | **Fixed** | Package versioning was consolidated; Spotify compatibility has an explicit runtime constant plus the shell setup mirror. |
+| P2.11 decoder mutation uncoupled | **Fixed** | Decoder acceleration is allowed only for the Ogg backend, active track, open gate, and elected writer. |
+| P2.12 output cleanup | **Fixed** | Stream/capture cleanup is exception-safe and invalid source captures are preserved for diagnosis rather than mislabeled as success. |
+
+### Post-fix verification
+
+Automated verification after the fixes: `bun test` **44 passed / 0 failed**, root and webapp TypeScript passed, native fixture/build passed, CLI/webapp production builds passed, doctor passed every check, `bash -n setup.sh` passed, and `git diff --check` passed.
+
+Live macOS verification against Spotify 1.2.98.301 also passed. A CLI capture of `4PTG3Z6ehGkBFwjybzWkR8` produced a validated 4,286,257-byte Ogg/Vorbis stream (44.1 kHz stereo, 213.573333 s). An isolated webapp run captured the same track in one attempt, passed signal validation without warnings, transcoded/tagged a same-duration MP3, and shut down without leaked capture processes. The CLI smoke also exercised the intended startup recovery: the first AppleEvent returned `-1708`, a later retry succeeded, and only then did capture proceed.
+
+The remaining release constraint is explicit rather than accidental: private hooks currently support only Spotify 1.2.98.301 arm64. A Spotify update requires new binary analysis/signatures and live validation before the supported-version constant should change.
+
 ## Verdict
 
 The project has a useful prototype core and several good defensive pieces, but it is **not release-ready** in its current form. The largest risks are in the exact area the project depends on most: capture-source isolation, multi-process ownership of captured files, and packaged daemon execution.
