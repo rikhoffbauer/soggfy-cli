@@ -3,6 +3,7 @@ import { join } from "path";
 import { sendIPC } from "./ipc";
 import { log } from "./log";
 import { fetchTrackMetadata, type TrackMetadata } from "./metadata";
+import { validateAudioFile } from "./media";
 
 export interface CaptureResult {
   trackId: string;
@@ -145,7 +146,13 @@ export async function captureTrack(
   }
 
   const bytesWritten = statSync(finalPath).size;
-  log.ok(`Captured ${(bytesWritten / 1024 / 1024).toFixed(1)} MB of audio stream data`);
+  const validation = validateAudioFile(finalPath, durationMs);
+  if (!validation.ok) {
+    throw new Error(
+      `Captured audio failed validation (${validation.warnings.join(", ")}); preserved at ${finalPath}`,
+    );
+  }
+  log.ok(`Captured ${(bytesWritten / 1024 / 1024).toFixed(1)} MB of validated audio`);
 
   return {
     trackId,

@@ -1,70 +1,74 @@
 import { spawnSync } from "child_process";
-import { existsSync, statSync, readFileSync, copyFileSync, mkdirSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { dirname, extname } from "path";
 import { log } from "./log";
+import { validateAudioFile, validateWavFile } from "./media";
 
 export type OutputFormat = "wav" | "mp3" | "flac" | "ogg" | "raw";
 
-/**
- * Transcode a WAV file to the requested format, writing to outputPath.
- * Returns true on success.
- */
+const FORMAT_ARGS: Record<Exclude<OutputFormat, "raw">, string[]> = {
+  wav: ["-f", "wav"],
+  mp3: ["-b:a", "320k", "-f", "mp3"],
+  flac: ["-compression_level", "5", "-f", "flac"],
+  ogg: ["-c:a", "vorbis", "-strict", "-2", "-f", "ogg"],
+};
+
+function extension(path: string): string {
+  return extname(path).toLowerCase().replace(".", "");
+}
+
+function canExposeRawPcm(inputPath: string): boolean {
+  if (extension(inputPath) !== "wav") return false;
+  const validation = validateWavFile(inputPath);
+  return Boolean(
+    validation.riffHeader &&
+    validation.waveHeader &&
+    validation.fmtChunk &&
+    validation.dataChunk &&
+    (validation.actualDataBytes || 0) > 0,
+  );
+}
+
 export function transcode(inputPath: string, outputPath: string, format: OutputFormat): boolean {
   mkdirSync(dirname(outputPath), { recursive: true });
+  const inputExt = extension(inputPath);
 
-  const inputExt = extname(inputPath).toLowerCase().replace(".", "");
-  if (inputExt === format) {
-    copyFileSync(inputPath, outputPath);
+  if (format === "raw") {
+    if (!canExposeRawPcm(inputPath)) return false;
+    const data = readFileSync(inputPath);
+    Bun.write(outputPath, data.subarray(44));
     return existsSync(outputPath) && statSync(outputPath).size > 0;
   }
 
-  if (format === "raw") {
-    // Strip WAV header (44 bytes), output raw PCM
-    const data = readFileSync(inputPath);
-    Bun.write(outputPath, data.subarray(44));
-    return existsSync(outputPath);
+  if (inputExt === format) {
+    copyFileSync(inputPath, outputPath);
+  } else {
+    const args = [
+      "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+      "-threads", "0", "-i", inputPath,
+      ...FORMAT_ARGS[format],
+      outputPath,
+    ];
+    const result = spawnSync(args[0]!, args.slice(1), {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    if (result.status !== 0) return false;
   }
 
-  const formatArgs: Record<string, string[]> = {
-    mp3: ["-b:a", "320k"],
-    flac: ["-compression_level", "5"],
-    ogg: ["-c:a", "vorbis", "-strict", "-2"],
-  };
-
-  const args = [
-    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-    "-threads", "0",
-    "-i", inputPath,
-    ...(formatArgs[format] || []),
-    outputPath,
-  ];
-
-  const result = spawnSync(args[0], args.slice(1), {
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-
-  return result.status === 0 && existsSync(outputPath) && statSync(outputPath).size > 0;
+  return existsSync(outputPath) && validateAudioFile(outputPath).ok;
 }
 
-/**
- * Stream a WAV (or transcoded audio) to a writable stream (e.g. stdout).
- * For non-WAV formats, pipes through ffmpeg.
- */
 export async function streamToWriter(
-  wavPath: string,
+  inputPath: string,
   writer: WritableStream<Uint8Array>,
   format: OutputFormat,
 ): Promise<void> {
-  if (format === "wav") {
-    const file = Bun.file(wavPath);
-    const stream = file.stream();
-    await stream.pipeTo(writer);
-    return;
-  }
-
+  const inputExt = extension(inputPath);
   if (format === "raw") {
-    // Stream raw PCM (skip 44-byte WAV header)
-    const file = Bun.file(wavPath);
+    if (!canExposeRawPcm(inputPath)) {
+      throw new Error(`Raw PCM output requires a validated WAV capture, got .${inputExt || "unknown"}`);
+    }
+    const file = Bun.file(inputPath);
     const data = new Uint8Array(await file.arrayBuffer());
     const w = writer.getWriter();
     await w.write(data.subarray(44));
@@ -72,28 +76,21 @@ export async function streamToWriter(
     return;
   }
 
-  // Pipe through ffmpeg for format conversion
-  const formatArgs: Record<string, string[]> = {
-    mp3: ["-b:a", "320k", "-f", "mp3"],
-    flac: ["-compression_level", "5", "-f", "flac"],
-    ogg: ["-c:a", "vorbis", "-strict", "-2", "-f", "ogg"],
-  };
+  if (inputExt === format) {
+    await Bun.file(inputPath).stream().pipeTo(writer);
+    return;
+  }
 
   const proc = Bun.spawn([
     "ffmpeg", "-hide_banner", "-loglevel", "error",
-    "-i", wavPath,
-    ...(formatArgs[format] || []),
+    "-i", inputPath,
+    ...FORMAT_ARGS[format],
     "pipe:1",
-  ], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  ], { stdout: "pipe", stderr: "pipe" });
 
   const w = writer.getWriter();
   try {
-    for await (const chunk of proc.stdout) {
-      await w.write(chunk);
-    }
+    for await (const chunk of proc.stdout) await w.write(chunk);
   } finally {
     await w.close();
   }
@@ -105,9 +102,6 @@ export async function streamToWriter(
   }
 }
 
-/**
- * Tag an MP3 file with metadata.
- */
 export async function tagMp3(
   mp3Path: string,
   meta: { title?: string; artist?: string; coverUrl?: string },
@@ -120,13 +114,14 @@ export async function tagMp3(
     if (meta.coverUrl) {
       try {
         const imgRes = await fetch(meta.coverUrl);
-        const buffer = Buffer.from(await imgRes.arrayBuffer());
-        tags.image = {
-          mime: "image/jpeg",
-          type: { id: 3, name: "front cover" },
-          description: "Cover",
-          imageBuffer: buffer,
-        };
+        if (imgRes.ok) {
+          tags.image = {
+            mime: imgRes.headers.get("content-type") || "image/jpeg",
+            type: { id: 3, name: "front cover" },
+            description: "Cover",
+            imageBuffer: Buffer.from(await imgRes.arrayBuffer()),
+          };
+        }
       } catch {}
     }
     NodeID3.write(tags, mp3Path);
