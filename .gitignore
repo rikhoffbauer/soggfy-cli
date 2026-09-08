@@ -5,3 +5,5 @@ dist/
 *.log
 .env
 .DS_Store
+
+.worktrees/
