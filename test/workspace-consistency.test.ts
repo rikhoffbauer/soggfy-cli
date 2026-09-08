@@ -37,9 +37,11 @@ test("webapp runtime state is scoped under the shared SOGGFY_HOME", () => {
 });
 
 
-test("setup and doctor reject unsupported Spotify builds before capture", () => {
-  expect(setup).toContain('SUPPORTED_SPOTIFY_VERSION="1.2.98.301"');
-  expect(setup).toContain('if [[ "$SPOTIFY_VERSION" != "$SUPPORTED_SPOTIFY_VERSION" ]]');
-  expect(doctor).toContain('SUPPORTED_SPOTIFY_VERSION');
+test("setup and doctor use the tracked exact-version compatibility registry", () => {
+  expect(setup).toContain('compatibility/spotify-versions.json');
+  expect(setup).not.toContain('SUPPORTED_SPOTIFY_VERSION="1.2.98.301"');
+  expect(setup).toContain('isSpotifyVersionSupported');
+  expect(doctor).toContain('isSpotifyVersionSupported');
+  expect(doctor).toContain('supportedSpotifyVersions');
   expect(doctor).toContain('workspace:version');
 });

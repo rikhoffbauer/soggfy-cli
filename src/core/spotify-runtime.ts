@@ -8,6 +8,7 @@ import {
 } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { isSpotifyVersionSupported, latestSupportedSpotifyVersion, supportedSpotifyVersions } from "./spotify-compatibility";
 
 export interface LoginStateCloneResult {
   copiedPrefs: boolean;
@@ -15,7 +16,7 @@ export interface LoginStateCloneResult {
   copiedSessionCache: boolean;
 }
 
-export const SUPPORTED_SPOTIFY_VERSION = "1.2.98.301";
+export const SUPPORTED_SPOTIFY_VERSION = latestSupportedSpotifyVersion();
 
 export function readSpotifyBundleVersion(appPath: string): string | null {
   const infoPlist = join(appPath, "Contents/Info.plist");
@@ -32,9 +33,9 @@ export function readSpotifyBundleVersion(appPath: string): string | null {
 
 export function assertSupportedSpotifyBundle(appPath: string): void {
   const version = readSpotifyBundleVersion(appPath);
-  if (version !== SUPPORTED_SPOTIFY_VERSION) {
+  if (!version || !isSpotifyVersionSupported(version)) {
     throw new Error(
-      `Unsupported Spotify build ${version ?? "unknown"}; capture hooks are validated for ${SUPPORTED_SPOTIFY_VERSION} arm64`,
+      `Unsupported Spotify build ${version ?? "unknown"}; capture hooks are validated for exact arm64 builds: ${supportedSpotifyVersions().join(", ")}`,
     );
   }
 }

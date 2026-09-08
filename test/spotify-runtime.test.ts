@@ -51,3 +51,10 @@ test("supported Spotify bundle version is read and enforced", () => {
   writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>0.0.0</string></dict></plist>`);
   expect(() => assertSupportedSpotifyBundle(versionRoot)).toThrow("Unsupported Spotify build 0.0.0");
 });
+
+
+test("production support guard is registry-backed", () => {
+  const source = require("fs").readFileSync(join(import.meta.dir, "../src/core/spotify-runtime.ts"), "utf8");
+  expect(source).toContain("isSpotifyVersionSupported(version)");
+  expect(source).toContain("supportedSpotifyVersions()");
+});

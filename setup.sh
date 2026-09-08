@@ -11,7 +11,6 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 SPOTIFY_INSTALLER_URL="https://download.scdn.co/SpotifyInstaller.zip"
-SUPPORTED_SPOTIFY_VERSION="1.2.98.301"
 SKIP_SPOTIFY_INSTALL=0
 SKIP_LOGIN=0
 REBUILD=0
@@ -45,6 +44,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SPOTIFY_COMPATIBILITY_REGISTRY="$ROOT_DIR/compatibility/spotify-versions.json"
 SOGGFY_HOME="${SOGGFY_HOME:-$HOME/.soggfy}"
 WORKSPACE_DIR="$SOGGFY_HOME/workspace"
 PATCHED_APP="$WORKSPACE_DIR/PatchedSpotify.app"
@@ -113,6 +113,22 @@ require_command codesign
 require_command cmake
 require_command ffmpeg
 
+isSpotifyVersionSupported() {
+  local version="$1"
+  SPOTIFY_VERSION_TO_CHECK="$version" SPOTIFY_COMPATIBILITY_REGISTRY="$SPOTIFY_COMPATIBILITY_REGISTRY" bun -e '
+    const registry = await Bun.file(process.env.SPOTIFY_COMPATIBILITY_REGISTRY).json();
+    const version = process.env.SPOTIFY_VERSION_TO_CHECK;
+    process.exit(registry.versions.some((entry) => entry.version === version && entry.architecture === "arm64" && entry.status === "supported") ? 0 : 1);
+  ' >/dev/null
+}
+
+supportedSpotifyVersions() {
+  SPOTIFY_COMPATIBILITY_REGISTRY="$SPOTIFY_COMPATIBILITY_REGISTRY" bun -e '
+    const registry = await Bun.file(process.env.SPOTIFY_COMPATIBILITY_REGISTRY).json();
+    console.log(registry.versions.filter((entry) => entry.architecture === "arm64" && entry.status === "supported").map((entry) => entry.version).join(", "));
+  '
+}
+
 echo -e "\n${BLUE}[2/6] Checking Spotify.app${NC}"
 if [[ ! -d "/Applications/Spotify.app" ]]; then
   if [[ "$SKIP_SPOTIFY_INSTALL" -eq 1 ]]; then
@@ -130,8 +146,8 @@ if [[ ! -d "/Applications/Spotify.app" ]]; then
 fi
 echo -e "${GREEN}✓ Spotify.app present${NC}"
 SPOTIFY_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Spotify.app/Contents/Info.plist 2>/dev/null || true)"
-if [[ "$SPOTIFY_VERSION" != "$SUPPORTED_SPOTIFY_VERSION" ]]; then
-  echo -e "${RED}Unsupported Spotify build ${SPOTIFY_VERSION:-unknown}; capture hooks are validated for $SUPPORTED_SPOTIFY_VERSION arm64.${NC}"
+if ! isSpotifyVersionSupported "$SPOTIFY_VERSION"; then
+  echo -e "${RED}Unsupported Spotify build ${SPOTIFY_VERSION:-unknown}; capture hooks are validated for exact arm64 builds: $(supportedSpotifyVersions).${NC}"
   exit 1
 fi
 echo -e "${GREEN}✓ Spotify build $SPOTIFY_VERSION is capture-compatible${NC}"

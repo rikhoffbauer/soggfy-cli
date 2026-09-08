@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "versions": [
+    {
+      "version": "1.2.98.301",
+      "architecture": "arm64",
+      "status": "supported",
+      "validatedAt": "2026-09-08T17:16:30Z",
+      "commit": "81f3526",
+      "checks": {
+        "patching": true,
+        "signing": true,
+        "processLaunch": true,
+        "ipc": true,
+        "decoderHooks": true,
+        "playback": true,
+        "capture": true,
+        "mediaValidation": true,
+        "headless": true
+      },
+      "notes": "Validated with daemon startup, zero visible windows, and real Ogg capture."
+    }
+  ]
+}
