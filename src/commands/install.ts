@@ -194,5 +194,5 @@ export async function installCommand(args: string[]): Promise<void> {
   log.info("Next steps:");
   log.info("  1. soggfy auth login    # authenticate with Spotify");
   log.info("  2. soggfy daemon start  # start background instance");
-  log.info("  3. soggfy stream <track> > output.mp3");
+  log.info("  3. soggfy download <track> > output.mp3");
 }

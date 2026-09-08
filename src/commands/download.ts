@@ -9,7 +9,7 @@ import { SpotifyInstance } from "../core/instance";
 import { ping } from "../core/ipc";
 import { IPC_SOCKET, SAVE_PATH, ensureDirs } from "../core/paths";
 
-export interface StreamOptions {
+export interface DownloadOptions {
   output?: string;
   format?: OutputFormat;
   keepWav?: boolean;
@@ -51,9 +51,9 @@ function formatTrackFileName(
   return `${prefix}${trackId}.${format}`;
 }
 
-export function parseStreamArgs(args: string[]): { inputs: string[]; opts: StreamOptions } {
+export function parseDownloadArgs(args: string[]): { inputs: string[]; opts: DownloadOptions } {
   const inputs: string[] = [];
-  const opts: StreamOptions = {};
+  const opts: DownloadOptions = {};
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -78,7 +78,7 @@ export function parseStreamArgs(args: string[]): { inputs: string[]; opts: Strea
       printHelp();
       process.exit(0);
     } else if (arg.startsWith("-")) {
-      throw new Error(`Unknown stream option: ${arg}`);
+      throw new Error(`Unknown download option: ${arg}`);
     } else {
       inputs.push(arg);
     }
@@ -103,7 +103,7 @@ export function parseStreamArgs(args: string[]): { inputs: string[]; opts: Strea
 
 function printHelp(): void {
   console.error(`
-Usage: soggfy stream [options] <track-url|track-id|album-url|playlist-url>
+Usage: soggfy download [options] <track-url|track-id|album-url|playlist-url>
 
 Capture Spotify audio and stream to stdout or save to a file/directory.
 
@@ -116,24 +116,24 @@ Options:
 
 Examples:
   # Single track to stdout
-  soggfy stream 4PTG3Z6ehGkBFwjybzWkR8 > song.mp3
+  soggfy download 4PTG3Z6ehGkBFwjybzWkR8 > song.mp3
 
   # Single track to file
-  soggfy stream -o song.flac https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8
+  soggfy download -o song.flac https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8
 
   # Entire playlist to a directory
-  soggfy stream -o ~/Music/ https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
+  soggfy download -o ~/Music/ https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
 
   # Album in FLAC format to a folder
-  soggfy stream -o ./album/ -f flac https://open.spotify.com/album/4eLPsYPBmXABThSJ821sqY
+  soggfy download -o ./album/ -f flac https://open.spotify.com/album/4eLPsYPBmXABThSJ821sqY
 `);
 }
 
-export async function streamCommand(args: string[]): Promise<void> {
-  const { inputs, opts } = parseStreamArgs(args);
+export async function downloadCommand(args: string[]): Promise<void> {
+  const { inputs, opts } = parseDownloadArgs(args);
 
   if (inputs.length === 0) {
-    log.error("No track or playlist specified. Use 'soggfy stream --help' for usage.");
+    log.error("No track or playlist specified. Use 'soggfy download --help' for usage.");
     process.exit(1);
   }
 
@@ -173,8 +173,8 @@ export async function streamCommand(args: string[]): Promise<void> {
   }
 
   if (!opts.useDaemon) {
-    const tmpSocket = `/tmp/soggfy_stream_${process.pid}.sock`;
-    const tmpSave = `/tmp/Soggfy_stream_${process.pid}`;
+    const tmpSocket = `/tmp/soggfy_download_${process.pid}.sock`;
+    const tmpSave = `/tmp/Soggfy_download_${process.pid}`;
     tempInstance = new SpotifyInstance(tmpSocket, tmpSave);
     try {
       await tempInstance.start();
