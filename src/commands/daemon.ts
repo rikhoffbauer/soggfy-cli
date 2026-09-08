@@ -81,6 +81,7 @@ function spawnDaemonProcess(): number {
   chmodSync(DAEMON_LOG, 0o600);
   try {
     const child = spawn(process.execPath, [cliEntry, "daemon", "run"], {
+      cwd: resolveWebappWorkingDirectory(),
       detached: true,
       env: process.env,
       stdio: ["ignore", logFd, logFd],
@@ -201,6 +202,19 @@ function appendDaemonLog(message: string): void {
     mode: 0o600,
   });
   chmodSync(DAEMON_LOG, 0o600);
+}
+
+export function resolveWebappWorkingDirectory(
+  moduleDir = dirname(fileURLToPath(import.meta.url)),
+): string | undefined {
+  const candidates = [
+    resolve(moduleDir, "../../webapp"),
+    resolve(moduleDir, "../webapp"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(resolve(candidate, "bunfig.toml"))) return candidate;
+  }
+  return undefined;
 }
 
 export function resolveWebappServerEntry(moduleDir = dirname(fileURLToPath(import.meta.url))): string {

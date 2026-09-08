@@ -28,6 +28,11 @@ test("daemon-owned UI and API share the default 127.0.0.1:8085 listener", () => 
   expect(webSource).toContain("const HTTP_CONFIG = getHttpConfig()");
 });
 
+test("daemon subprocess starts in webapp so Bun loads serve.static plugins", () => {
+  expect(daemonSource).toContain("cwd: resolveWebappWorkingDirectory()");
+  expect(daemonSource).toContain('existsSync(resolve(candidate, "bunfig.toml"))');
+});
+
 test("daemon startup and status include web API health", () => {
   expect(daemonSource).toContain("isWebServerHealthy(httpOrigin)");
   expect(daemonSource).toContain("Daemon ready: Spotify IPC and web UI/API are responsive.");
