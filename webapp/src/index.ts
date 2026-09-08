@@ -56,8 +56,8 @@ const REPO_ROOT = join(WEBAPP_DIR, "..");
 const USE_DAEMON_INSTANCE = process.env.SOGGFY_USE_DAEMON_INSTANCE === "1";
 const POOL_SIZE = USE_DAEMON_INSTANCE ? 1 : Number.parseInt(process.env.SOGGFY_POOL_SIZE || "1", 10);
 const SOGGFY_HIDDEN = process.env.SOGGFY_HIDDEN !== "0";
-const MAX_ATTEMPTS = Number.parseInt(process.env.SOGGFY_MAX_ATTEMPTS || "2", 10);
-const BASE_DEBUG_PORT = Number.parseInt(process.env.SOGGFY_DEBUG_PORT_BASE || "9222", 10);
+const MAX_ATTEMPTS = Number.parseInt(process.env.SOGGFY_MAX_ATTEMPTS || "3", 10);
+const BASE_DEBUG_PORT = Number.parseInt(process.env.SOGGFY_DEBUG_PORT_BASE || "9223", 10);
 const MUTE_OUTPUT = process.env.SOGGFY_MUTE_OUTPUT || "1";
 const RUNTIME_DIR = join(SOGGFY_HOME, "runtime");
 
