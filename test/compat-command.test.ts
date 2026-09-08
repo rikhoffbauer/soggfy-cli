@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { parseCompatArgs, formatCompatibilityList } from "../src/commands/compat";
 import type { SpotifyCompatibilityRegistry } from "../src/core/spotify-compatibility";
 
-const trackId = "0lsvPqWmOrmqxORWrRiU52";
+const trackId = "4PTG3Z6ehGkBFwjybzWkR8";
 
 test("compat probe parses candidate path and validation options", () => {
   expect(parseCompatArgs(["probe", "/tmp/Spotify.app", "--track", trackId, "--record", "--keep", "--json"])).toEqual({
@@ -15,7 +15,7 @@ test("compat probe parses candidate path and validation options", () => {
   });
 });
 
-test("compat probe defaults to system Spotify and a stable short smoke track", () => {
+test("compat probe defaults to system Spotify and a stable smoke track", () => {
   const parsed = parseCompatArgs(["probe"]);
   expect(parsed.appPath).toBe("/Applications/Spotify.app");
   expect(parsed.trackId).toBe(trackId);

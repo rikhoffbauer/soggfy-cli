@@ -58,3 +58,9 @@ test("production support guard is registry-backed", () => {
   expect(source).toContain("isSpotifyVersionSupported(version)");
   expect(source).toContain("supportedSpotifyVersions()");
 });
+
+
+test("runtime client-version metadata has a non-throwing empty-registry fallback", () => {
+  const source = require("fs").readFileSync(join(import.meta.dir, "../src/core/spotify-runtime.ts"), "utf8");
+  expect(source).toContain('latestSupportedSpotifyVersion() ?? "0.0.0"');
+});

@@ -85,8 +85,7 @@ export function upsertCompatibilityEntry(
 
 export function latestSupportedSpotifyVersion(
   registry: SpotifyCompatibilityRegistry = SPOTIFY_COMPATIBILITY_REGISTRY,
-): string {
+): string | null {
   const span = supportedSpotifySpan(registry);
-  if (!span) throw new Error("Spotify compatibility registry contains no supported arm64 versions");
-  return span.max;
+  return span?.max ?? null;
 }

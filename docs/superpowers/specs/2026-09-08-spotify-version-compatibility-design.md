@@ -21,7 +21,7 @@ soggfy compat probe [app-path] [--track <track-id>] [--record] [--keep] [--json]
 soggfy compat list [--json]
 ```
 
-`app-path` defaults to `/Applications/Spotify.app`. The probe uses a short known Spotify track by default and accepts an override for reproducibility if that track disappears.
+`app-path` defaults to `/Applications/Spotify.app`. The probe uses a stable known Spotify track by default and accepts an override for reproducibility if that track disappears. The default should be long enough that normal Ogg/container timing variance does not dominate duration validation.
 ## Compatibility registry
 
 The canonical tracked registry is `compatibility/spotify-versions.json`.

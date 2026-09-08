@@ -16,7 +16,7 @@ export interface LoginStateCloneResult {
   copiedSessionCache: boolean;
 }
 
-export const SUPPORTED_SPOTIFY_VERSION = latestSupportedSpotifyVersion();
+export const SUPPORTED_SPOTIFY_VERSION = latestSupportedSpotifyVersion() ?? "0.0.0";
 
 export function readSpotifyBundleVersion(appPath: string): string | null {
   const infoPlist = join(appPath, "Contents/Info.plist");

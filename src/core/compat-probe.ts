@@ -12,7 +12,7 @@ import {
 } from "./spotify-compatibility";
 import { readSpotifyBundleVersion } from "./spotify-runtime";
 
-export const DEFAULT_COMPAT_TRACK_ID = "0lsvPqWmOrmqxORWrRiU52";
+export const DEFAULT_COMPAT_TRACK_ID = "4PTG3Z6ehGkBFwjybzWkR8";
 export const SPOTIFY_COMPATIBILITY_REGISTRY_PATH = resolve(
   import.meta.dir,
   "../../compatibility/spotify-versions.json",

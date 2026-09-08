@@ -5,6 +5,7 @@ import {
   supportedSpotifySpan,
   supportedSpotifyVersions,
   upsertCompatibilityEntry,
+  latestSupportedSpotifyVersion,
   type SpotifyCompatibilityRegistry,
 } from "../src/core/spotify-compatibility";
 
@@ -41,4 +42,10 @@ test("registry updates replace exact versions and remain deterministically sorte
   expect(replaced.versions).toHaveLength(3);
   expect(replaced.versions[1]?.status).toBe("failed");
   expect(replaced.versions[1]?.commit).toBe("c");
+});
+
+
+test("an empty registry has no latest supported version instead of throwing", () => {
+  const empty: SpotifyCompatibilityRegistry = { schemaVersion: 1, versions: [] };
+  expect(latestSupportedSpotifyVersion(empty)).toBeNull();
 });

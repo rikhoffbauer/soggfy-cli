@@ -9,7 +9,7 @@ soggfy compat list [--json]
 soggfy compat probe [app-path] [--track <track>] [--record] [--keep] [--json]
 ```
 
-`app-path` defaults to `/Applications/Spotify.app`. The default smoke track is `0lsvPqWmOrmqxORWrRiU52`.
+`app-path` defaults to `/Applications/Spotify.app`. The default smoke track is `4PTG3Z6ehGkBFwjybzWkR8`, a longer track chosen so normal Ogg/container timing variance does not create false compatibility failures.
 
 ## `compat list`
 

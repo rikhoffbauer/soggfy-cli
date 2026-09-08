@@ -86,7 +86,7 @@
 - `CompatProbeOptions { appPath: string; trackId: string; record: boolean; keep: boolean; json: boolean }`
 - `CompatibilityProbeResult` contains version, architecture, status, run directory, git commit, timestamps, per-check booleans, and optional failure reason.
 - `probeSpotifyCompatibility(options): Promise<CompatibilityProbeResult>`
-- Default smoke track: `0lsvPqWmOrmqxORWrRiU52`.
+- Default smoke track: `4PTG3Z6ehGkBFwjybzWkR8`.
 
 - [ ] Write failing CLI parsing/list-output tests and pure probe-result/registry-recording tests.
 - [ ] Run focused tests and verify RED.
@@ -106,7 +106,7 @@
 - Modify: `compatibility/spotify-versions.json` only through recorded probe results when requested by the live outcome.
 
 - [ ] Run `soggfy compat list --json` and verify `1.2.98.301` is exact-supported.
-- [ ] Probe the existing patched/supported `1.2.98.301` app with a real short capture and verify all checks pass.
+- [ ] Probe the existing patched/supported `1.2.98.301` app with a real validated capture and verify all checks pass.
 - [ ] Probe `/Applications/Spotify.app` (currently observed as `1.2.99.317`) without modifying production state; record the actual result rather than assuming compatibility.
 - [ ] Confirm a failed candidate does not become production-supported and a successful recorded candidate does.
 - [ ] Document the workflow, exact-support semantics, observed-span semantics, and reverse-engineering next step for prologue mismatches.
