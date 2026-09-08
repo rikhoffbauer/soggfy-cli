@@ -11,7 +11,11 @@
     "build:cli": "bun build src/cli.ts --outdir dist --target bun",
     "build": "bun run build:payload && bun run build:cli",
     "start": "bun run src/cli.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit --pretty",
+    "test:native": "./scripts/run-state-manager-fixture.sh",
+    "test:webapp": "cd webapp && bun test src/server/__tests__",
+    "typecheck:webapp": "cd webapp && bun run typecheck"
   },
   "dependencies": {
     "@types/react": "^19.2.18",
@@ -21,6 +25,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^6.0.3"
   }
 }

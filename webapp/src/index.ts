@@ -14,7 +14,7 @@ import { createConnection } from "net";
 import index from "./index.html";
 import { homedir } from "os";
 import NodeID3 from "node-id3";
-import * as archiver from "archiver";
+import { ZipArchive } from "archiver";
 import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./server/http";
 import { extractTrackIds, parseTrackId } from "./server/spotify-url";
 import {
@@ -673,6 +673,7 @@ class SpotifyPoolManager {
     const queuedIndex = this.queue.findIndex((queued) => queued.job.id === jobId);
     if (queuedIndex >= 0) {
       const [queued] = this.queue.splice(queuedIndex, 1);
+      if (!queued) throw new Error(`Queued job disappeared before cancellation: ${jobId}`);
       jobs.cancel(job, reason);
       queued.reject(new JobCancelledError(job));
       return job;
@@ -966,7 +967,7 @@ const server = Bun.serve({
     },
     "/api/download-all": {
       GET: () => {
-        const archive = archiver("zip", { zlib: { level: 9 } });
+        const archive = new ZipArchive({ zlib: { level: 9 } });
         const stream = new ReadableStream({
           start(controller) {
             archive.on("data", (chunk: Buffer) => controller.enqueue(chunk));

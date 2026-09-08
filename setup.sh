@@ -64,7 +64,7 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 echo -e "\n${BLUE}[1/6] Checking dependencies${NC}"
-BREW_DEPS=(cmake ffmpeg capstone pkg-config)
+BREW_DEPS=(cmake ffmpeg chromaprint)
 for dep in "${BREW_DEPS[@]}"; do
   if ! brew list "$dep" >/dev/null 2>&1 && ! command -v "$dep" >/dev/null 2>&1; then
     echo -e "${YELLOW}Installing $dep via Homebrew...${NC}"
@@ -126,7 +126,7 @@ ditto "/Applications/Spotify.app" "$PATCHED_APP"
 adhoc_sign_if_present() {
   local target="$1"
   if [[ -e "$target" ]]; then
-    codesign -f -s - "$target" >/dev/null 2>&1 || true
+    codesign -f -s - "$target" >/dev/null
     echo -e "${GREEN}✓ ad-hoc signed $target${NC}"
   else
     echo -e "${YELLOW}warning: signature target missing: $target${NC}"
@@ -149,7 +149,8 @@ cmake -S . -B build
 cmake --build build
 mkdir -p "$PATCHED_APP/Contents/MacOS"
 cp "$ROOT_DIR/soggfy-macos/build/libsoggfy.dylib" "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib"
-codesign -f -s - "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib" >/dev/null 2>&1 || true
+codesign -f -s - "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib" >/dev/null
+codesign --verify --deep --strict "$PATCHED_APP"
 cd "$ROOT_DIR"
 
 echo -e "\n${BLUE}[6/6] Installing webapp dependencies${NC}"

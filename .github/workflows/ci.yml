@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-test:
@@ -24,8 +24,21 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install dependencies
-        run: bun install
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install webapp dependencies
+        working-directory: webapp
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck root CLI
+        run: bun run typecheck
+
+      - name: Typecheck webapp
+        run: bun run typecheck:webapp
+
+      - name: Install system test dependencies
+        run: brew install chromaprint
 
       - name: Build Native Payload (libsoggfy.dylib)
         run: bun run build:payload
@@ -37,6 +50,13 @@ jobs:
 
       - name: Run Unit Tests
         run: bun test
+
+      - name: Run Native StateManager Fixture
+        run: bun run test:native
+
+      - name: Build webapp
+        working-directory: webapp
+        run: bun run build
 
       - name: Build CLI Bundle
         run: bun run build:cli
@@ -62,6 +82,8 @@ jobs:
   release:
     name: Publish Release
     runs-on: macos-latest
+    permissions:
+      contents: write
     needs: build-and-test
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

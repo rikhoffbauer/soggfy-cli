@@ -75,7 +75,7 @@ export class SpotifyInstance {
       try { const p = join(this.profileDir, lf); if (existsSync(p)) unlinkSync(p); } catch {}
     }
 
-    const sslKeyLogPath = process.env.SSLKEYLOGFILE || "/tmp/sslkeylog.log";
+    const sslKeyLogPath = process.env.SOGGFY_SSL_KEYLOG_FILE;
 
     const tmpDir = join(this.profileDir, "tmp");
     mkdirSync(tmpDir, { recursive: true });
@@ -91,7 +91,7 @@ export class SpotifyInstance {
       SOGGFY_HIDDEN: "1",
       SOGGFY_CAPTURE_BACKEND: CAPTURE_BACKEND,
       SOGGFY_MUTE_OUTPUT: "1",
-      SSLKEYLOGFILE: sslKeyLogPath,
+      ...(sslKeyLogPath ? { SSLKEYLOGFILE: sslKeyLogPath } : {}),
     };
 
     const cefFlags = [
@@ -103,7 +103,7 @@ export class SpotifyInstance {
       "--disable-background-networking",
       `--cache-path=${this.profileDir}`,
       `--user-data-dir=${this.profileDir}`,
-      `--ssl-key-log-file=${sslKeyLogPath}`,
+      ...(sslKeyLogPath ? [`--ssl-key-log-file=${sslKeyLogPath}`] : []),
     ];
 
 

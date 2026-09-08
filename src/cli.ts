@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 import { log } from "./core/log";
+import packageJson from "../package.json";
 
-const VERSION = "1.0.0";
+const VERSION = packageJson.version;
 
 function printUsage(): void {
   console.error(`

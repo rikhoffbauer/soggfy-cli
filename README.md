@@ -28,7 +28,7 @@ soggfy stream --format wav 4PTG3Z6ehGkBFwjybzWkR8 | ffplay -
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
+- macOS on Apple Silicon (arm64)
 - [Homebrew](https://brew.sh/)
 - [Bun](https://bun.sh/) runtime
 
@@ -53,7 +53,7 @@ bun run src/cli.ts --help
 
 Downloads and configures all required components:
 
-- Installs brew dependencies (cmake, ffmpeg, capstone, pkg-config)
+- Installs brew dependencies (cmake, ffmpeg, chromaprint)
 - Downloads Spotify if not already installed
 - Creates a patched copy of Spotify.app (never modifies the original)
 - Builds the injection payload (libsoggfy.dylib)

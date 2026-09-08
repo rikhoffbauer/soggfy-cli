@@ -908,10 +908,9 @@ void StartIPCServer() {
 
 void SetupImmediateHooks() {
   const char *keylog_env = getenv("SSLKEYLOGFILE");
-  if (!keylog_env || strlen(keylog_env) == 0) {
-    setenv("SSLKEYLOGFILE", "/tmp/sslkeylog.log", 1);
+  if (keylog_env && strlen(keylog_env) > 0) {
+    printf("[Soggfy-DEBUG] TLS key logging enabled at %s\n", keylog_env);
   }
-  printf("[Soggfy-INFO] SSLKEYLOGFILE configured at %s\n", getenv("SSLKEYLOGFILE"));
 
   printf("[Soggfy-DEBUG] Initializing immediate hooks (focus containment, "
          "window hiding, profile redirection)...\n");

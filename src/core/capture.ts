@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { sendIPC } from "./ipc";
 import { log } from "./log";

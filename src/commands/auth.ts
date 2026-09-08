@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "fs";
-import { join, resolve } from "path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "fs";
+import { join, resolve, sep } from "path";
 import { homedir } from "os";
 import { log } from "../core/log";
 import { AUTH_DIR, SPOTIFY_APP } from "../core/paths";
@@ -56,11 +56,17 @@ function readUsersDir(): Record<string, string> | null {
 }
 
 function restoreUsersDir(users: Record<string, string>): void {
-  mkdirSync(USERS_DIR, { recursive: true });
+  mkdirSync(USERS_DIR, { recursive: true, mode: 0o700 });
+  const usersRoot = `${resolve(USERS_DIR)}${sep}`;
   for (const [relPath, base64Content] of Object.entries(users)) {
-    const fullPath = join(USERS_DIR, relPath);
-    mkdirSync(join(fullPath, ".."), { recursive: true });
-    writeFileSync(fullPath, Buffer.from(base64Content, "base64"));
+    if (typeof base64Content !== "string") throw new Error(`Invalid auth entry: ${relPath}`);
+    const fullPath = resolve(USERS_DIR, relPath);
+    if (!fullPath.startsWith(usersRoot)) {
+      throw new Error(`Refusing auth path outside Spotify Users: ${relPath}`);
+    }
+    mkdirSync(join(fullPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(fullPath, Buffer.from(base64Content, "base64"), { mode: 0o600 });
+    chmodSync(fullPath, 0o600);
   }
 }
 
@@ -191,7 +197,8 @@ function authExport(outputPath?: string): void {
   };
 
   const outFile = outputPath ? resolve(outputPath) : resolve("soggfy-auth.json");
-  writeFileSync(outFile, JSON.stringify(snapshot, null, 2));
+  writeFileSync(outFile, JSON.stringify(snapshot, null, 2), { mode: 0o600 });
+  chmodSync(outFile, 0o600);
   log.ok(`Credentials exported to: ${outFile}`);
 
   const username = parseUsername(prefs);
@@ -228,7 +235,8 @@ function authImport(inputPath?: string): void {
   mkdirSync(SPOTIFY_SUPPORT, { recursive: true });
 
   if (snapshot.prefs) {
-    writeFileSync(PREFS_FILE, snapshot.prefs);
+    writeFileSync(PREFS_FILE, snapshot.prefs, { mode: 0o600 });
+    chmodSync(PREFS_FILE, 0o600);
     log.ok("Prefs restored.");
   }
 

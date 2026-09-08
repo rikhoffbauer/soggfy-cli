@@ -50,7 +50,7 @@ export async function installCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const deps = ["cmake", "ffmpeg", "capstone", "pkg-config"];
+  const deps = ["cmake", "ffmpeg", "chromaprint"];
   for (const dep of deps) {
     if (!brewInstalled(dep) && !commandExists(dep)) {
       log.info(`Installing ${dep} via Homebrew...`);
@@ -124,7 +124,7 @@ export async function installCommand(args: string[]): Promise<void> {
 
   for (const target of signTargets) {
     if (existsSync(target)) {
-      Bun.spawnSync(["codesign", "-f", "-s", "-", target]);
+      run(["codesign", "-f", "-s", "-", target], `codesign ${target}`);
       log.ok(`Signed: ${target.split("/").pop()}`);
     } else {
       log.warn(`Signature target missing: ${target}`);
@@ -177,7 +177,8 @@ export async function installCommand(args: string[]): Promise<void> {
   const destDylib = join(destDir, "libsoggfy.dylib");
   run(["cp", dylibPath, destDylib], "copy dylib");
   run(["codesign", "-f", "-s", "-", destDylib], "sign dylib");
-  log.ok("Payload installed and signed");
+  run(["codesign", "--verify", "--deep", "--strict", PATCHED_APP], "verify patched Spotify bundle");
+  log.ok("Payload installed, signed, and verified");
 
   log.header("Installation Complete");
   log.ok("Patched app ready at: " + PATCHED_APP);
