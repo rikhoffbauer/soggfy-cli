@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { normalizeSearchResponse, normalizeSearchTypes, clampSearchLimit } from "../src/core/spotify-search";
+import {
+  normalizeSearchResponse, normalizeSearchTypes, clampSearchLimit,
+  generateSpotifyWebTOTP, invalidateSpotifySearchTokens, searchSpotify,
+} from "../src/core/spotify-search";
 
 const response = {
   data: {
@@ -31,6 +34,17 @@ test("normalizes track, artist, and playlist results", () => {
   ]);
 });
 
+test("normalizes current tracksV2 search responses", () => {
+  const current = structuredClone(response) as any;
+  current.data.searchV2.tracksV2 = current.data.searchV2.tracks;
+  delete current.data.searchV2.tracks;
+
+  const tracks = normalizeSearchResponse(current).filter((item) => item.type === "track");
+
+  expect(tracks).toHaveLength(1);
+  expect(tracks[0]?.name).toBe("Song One");
+});
+
 test("normalization ignores malformed entries without discarding valid results", () => {
   const malformed = structuredClone(response) as any;
   malformed.data.searchV2.tracks.items.unshift({ item: { data: null } });
@@ -45,6 +59,62 @@ test("search type and limit helpers are strict and deterministic", () => {
   expect(clampSearchLimit(0)).toBe(1);
   expect(clampSearchLimit(500)).toBe(50);
   expect(clampSearchLimit(12)).toBe(12);
+});
+
+
+test("Spotify web TOTP v61 matches a deterministic vector", () => {
+  expect(generateSpotifyWebTOTP(1_800_000_000_000)).toBe("346094");
+});
+
+test("cookie search acquires modern web and client tokens before Pathfinder", async () => {
+  const saved = {
+    access: process.env.SPOTIFY_ACCESS_TOKEN, client: process.env.SPOTIFY_CLIENT_TOKEN,
+    cookie: process.env.SPOTIFY_COOKIE, version: process.env.SPOTIFY_TOTP_VERSION,
+    cipher: process.env.SPOTIFY_TOTP_SECRET_CIPHER_BYTES,
+  };
+  delete process.env.SPOTIFY_ACCESS_TOKEN;
+  delete process.env.SPOTIFY_CLIENT_TOKEN;
+  process.env.SPOTIFY_COOKIE = "sp_dc=test-cookie";
+  delete process.env.SPOTIFY_TOTP_VERSION;
+  delete process.env.SPOTIFY_TOTP_SECRET_CIPHER_BYTES;
+  invalidateSpotifySearchTokens();
+  const calls: Array<{ url: URL; init?: RequestInit }> = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    calls.push({ url, init });
+    if (url.pathname === "/api/token") return new Response(JSON.stringify({
+      accessToken: "web-access", clientId: "web-client",
+      accessTokenExpirationTimestampMs: Date.now() + 3_600_000,
+    }));
+    if (url.hostname === "clienttoken.spotify.com") return new Response(JSON.stringify({
+      granted_token: { token: "client-token" },
+    }));
+    return new Response(JSON.stringify(response));
+  }) as typeof fetch;
+  try {
+    await searchSpotify("one", { types: ["track"], limit: 5, fetchImpl });
+    expect(calls).toHaveLength(3);
+    const tokenURL = calls[0]!.url;
+    expect(`${tokenURL.origin}${tokenURL.pathname}`).toBe("https://open.spotify.com/api/token");
+    expect(tokenURL.searchParams.get("reason")).toBe("init");
+    expect(tokenURL.searchParams.get("productType")).toBe("web-player");
+    expect(tokenURL.searchParams.get("totpVer")).toBe("61");
+    expect(tokenURL.searchParams.get("totp")).toMatch(/^\d{6}$/);
+    expect(tokenURL.searchParams.get("totpServer")).toBe(tokenURL.searchParams.get("totp"));
+    expect(new Headers(calls[0]!.init?.headers).get("Cookie")).toBe("sp_dc=test-cookie");
+    expect(calls[1]!.url.href).toBe("https://clienttoken.spotify.com/v1/clienttoken");
+    expect(JSON.parse(String(calls[1]!.init?.body)).client_data.client_id).toBe("web-client");
+    const pathfinderHeaders = new Headers(calls[2]!.init?.headers);
+    expect(pathfinderHeaders.get("authorization")).toBe("Bearer web-access");
+    expect(pathfinderHeaders.get("client-token")).toBe("client-token");
+  } finally {
+    invalidateSpotifySearchTokens();
+    const restore = (key: string, value: string | undefined) => value === undefined
+      ? delete process.env[key] : void (process.env[key] = value);
+    restore("SPOTIFY_ACCESS_TOKEN", saved.access); restore("SPOTIFY_CLIENT_TOKEN", saved.client);
+    restore("SPOTIFY_COOKIE", saved.cookie); restore("SPOTIFY_TOTP_VERSION", saved.version);
+    restore("SPOTIFY_TOTP_SECRET_CIPHER_BYTES", saved.cipher);
+  }
 });
 
 test("searchSpotify filters result types using a supplied transport", async () => {

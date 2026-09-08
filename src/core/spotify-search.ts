@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHmac, randomUUID } from "crypto";
 import { SUPPORTED_SPOTIFY_VERSION } from "./spotify-runtime";
 
 export type SpotifySearchType = "track" | "artist" | "playlist";
@@ -25,8 +25,52 @@ interface SearchTokens {
 }
 
 const SEARCH_HASH = "eff59fa0a3d026b88b56fddbcf4bdfa16a186b8175a5c1a358c072e053c2e5b0";
+const SPOTIFY_TOTP_VERSION = 61;
+const SPOTIFY_TOTP_CIPHER_BYTES = [
+  44, 55, 47, 42, 70, 40, 34, 114, 76, 74, 50, 111, 120,
+  97, 75, 76, 94, 102, 43, 69, 49, 120, 118, 80, 64, 78,
+] as const;
 const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
 let cachedTokens: SearchTokens | null = null;
+
+function spotifyTotpVersion(): number {
+  const value = Number.parseInt(process.env.SPOTIFY_TOTP_VERSION ?? "", 10);
+  return Number.isInteger(value) && value > 0 ? value : SPOTIFY_TOTP_VERSION;
+}
+
+function spotifyTotpCipherBytes(): number[] {
+  const override = process.env.SPOTIFY_TOTP_SECRET_CIPHER_BYTES?.trim();
+  if (!override) return [...SPOTIFY_TOTP_CIPHER_BYTES];
+  try {
+    const value = JSON.parse(override);
+    if (Array.isArray(value) && value.length > 0
+        && value.every((entry) => Number.isInteger(entry) && entry >= 0 && entry <= 255)) {
+      return value;
+    }
+  } catch {}
+  const values = override.split(/[\s,]+/).filter(Boolean).map(Number);
+  if (values.length > 0 && values.every((entry) => Number.isInteger(entry) && entry >= 0 && entry <= 255)) {
+    return values;
+  }
+  throw new Error("SPOTIFY_TOTP_SECRET_CIPHER_BYTES must be a JSON array or comma-separated byte list");
+}
+
+export function generateSpotifyWebTOTP(nowMs = Date.now()): string {
+  const secret = spotifyTotpCipherBytes()
+    .map((value, index) => value ^ ((index % 33) + 9))
+    .map(String).join("");
+  const counter = BigInt(Math.floor(nowMs / 30_000));
+  const counterBytes = Buffer.alloc(8);
+  counterBytes.writeBigUInt64BE(counter);
+  const digest = createHmac("sha1", Buffer.from(secret, "utf8")).update(counterBytes).digest();
+  const offset = digest[digest.length - 1]! & 0x0f;
+  const binary = (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000;
+  return binary.toString().padStart(6, "0");
+}
+
+export function invalidateSpotifySearchTokens(): void {
+  cachedTokens = null;
+}
 
 export function normalizeSearchTypes(value = "all"): SpotifySearchType[] {
   if (value === "all") return ["track", "artist", "playlist"];
@@ -144,12 +188,13 @@ export function normalizeSearchResponse(response: unknown): SpotifySearchResult[
   const search = asObject(asObject(asObject(response)?.data)?.searchV2);
   if (!search) return [];
   const results: SpotifySearchResult[] = [];
-  for (const [key, normalize] of [
-    ["tracks", normalizeTrack],
-    ["artists", normalizeArtist],
-    ["playlists", normalizePlaylist],
+  for (const [keys, normalize] of [
+    [["tracksV2", "tracks"], normalizeTrack],
+    [["artists"], normalizeArtist],
+    [["playlists"], normalizePlaylist],
   ] as const) {
-    const items = asObject(search[key])?.items;
+    const section = keys.map((key) => asObject(search[key])).find(Boolean);
+    const items = section?.items;
     if (!Array.isArray(items)) continue;
     for (const item of items) {
       const normalized = normalize(item);
@@ -173,10 +218,22 @@ async function acquireSearchTokens(fetchImpl: typeof fetch): Promise<SearchToken
     );
   }
 
-  const tokenRes = await fetchImpl(
-    "https://open.spotify.com/get_access_token?reason=transport&productType=web_player",
-    { headers: { Cookie: cookie, "User-Agent": USER_AGENT } },
-  );
+  const totp = generateSpotifyWebTOTP();
+  const tokenURL = new URL("https://open.spotify.com/api/token");
+  tokenURL.searchParams.set("reason", "init");
+  tokenURL.searchParams.set("productType", "web-player");
+  tokenURL.searchParams.set("totp", totp);
+  tokenURL.searchParams.set("totpServer", totp);
+  tokenURL.searchParams.set("totpVer", String(spotifyTotpVersion()));
+  const tokenRes = await fetchImpl(tokenURL, {
+    headers: {
+      Accept: "application/json",
+      "App-Platform": "WebPlayer",
+      Cookie: cookie,
+      Referer: "https://open.spotify.com/",
+      "User-Agent": USER_AGENT,
+    },
+  });
   if (!tokenRes.ok) {
     throw new Error(`Spotify web token request failed with HTTP ${tokenRes.status}`);
   }
