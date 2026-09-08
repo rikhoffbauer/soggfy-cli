@@ -20,6 +20,7 @@ fetchcontent_makeavailable(Dobby)
 # Define the dynamic library payload
 add_library(soggfy SHARED 
     Payload/Main.mm
+    Payload/CapturePolicy.cpp
     Payload/DecodeHook.mm
     Payload/Scanner.cpp
     Payload/StateManager.cpp

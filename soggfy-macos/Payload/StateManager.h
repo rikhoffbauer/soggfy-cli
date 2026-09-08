@@ -18,9 +18,7 @@ public:
         uint32_t sampleRate = 44100;
         uint16_t channels = 2;
         uint32_t durationMs = 0;
-        bool isRawOgg = false;
         uint64_t limitBytes = 0; // 0 means no limit
-        bool active = false;
 
         std::string oggFileName;
         std::ofstream oggFileStream;
@@ -33,7 +31,6 @@ public:
 
     static StateManager& Instance();
 
-    void MarkPlaybackActive(const std::string& playbackId);
     void ReceiveAudioData(const std::string& playbackId, const char* data, size_t length);
     void ReceiveOggData(const std::string& playbackId, const char* data, size_t length);
     void FinishPlayback(const std::string& playbackId);
@@ -45,6 +42,13 @@ public:
     void ResetPlayback(const std::string& playbackId);
     void CancelPlayback(const std::string& playbackId);
     void SetPlaybackDuration(const std::string& playbackId, uint32_t durationMs);
+    bool TryClaimWriter(const std::string& playbackId, const std::string& source);
+    bool OwnsWriter(const std::string& playbackId, const std::string& source = "") const;
+    void ResetLocalPlayback(const std::string& playbackId);
+    void PublishDuration(const std::string& playbackId, uint32_t durationMs);
+    void PublishFinish(const std::string& playbackId);
+    void PublishCancel(const std::string& playbackId);
+    void ApplySharedControls(const std::string& playbackId);
 
 private:
     StateManager();
@@ -52,8 +56,15 @@ private:
 
     Playback* GetPlayback(const std::string& playbackId);
     void WriteWavHeader(std::ofstream& stream, uint64_t dataSize, uint32_t sampleRate, uint16_t channels);
+    std::string SharedPath(const std::string& playbackId, const char* suffix) const;
+    void PersistStatus(const std::string& playbackId, const std::string& status) const;
+    std::string ReadSharedStatus(const std::string& playbackId) const;
+    void ClearSharedFiles(const std::string& playbackId);
 
     std::string _baseSavePath;
-    std::mutex _mutex;
+    mutable std::mutex _mutex;
     std::unordered_map<std::string, Playback*> _playbacks;
+    std::string _ownedTrack;
+    std::string _ownedSource;
+    int _ownerPid = 0;
 };

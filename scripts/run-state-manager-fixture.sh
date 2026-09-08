@@ -10,6 +10,7 @@ tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/soggfy-state-fixture.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 $compiler -std=c++20 -Isoggfy-macos/Payload \
   soggfy-macos/Payload/StateManager.cpp \
+  soggfy-macos/Payload/CapturePolicy.cpp \
   soggfy-macos/tests/state_manager_fixture.cpp \
   -o "$tmpdir/state_manager_fixture"
 "$tmpdir/state_manager_fixture"
