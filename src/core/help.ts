@@ -1,5 +1,6 @@
 import downloadHelp from "../../docs/cli/download.md" with { type: "text" };
 import searchHelp from "../../docs/cli/search.md" with { type: "text" };
+import lyricsHelp from "../../docs/cli/lyrics.md" with { type: "text" };
 import authHelp from "../../docs/cli/auth.md" with { type: "text" };
 import daemonHelp from "../../docs/cli/daemon.md" with { type: "text" };
 import installHelp from "../../docs/cli/install.md" with { type: "text" };
@@ -12,6 +13,7 @@ import troubleshootingHelp from "../../docs/guides/troubleshooting.md" with { ty
 const TOPICS: Readonly<Record<string, string>> = {
   download: downloadHelp,
   search: searchHelp,
+  lyrics: lyricsHelp,
   auth: authHelp,
   daemon: daemonHelp,
   install: installHelp,

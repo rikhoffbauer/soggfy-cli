@@ -29,17 +29,19 @@ test("command help is loaded from canonical Markdown topics", () => {
   const streamAlias = getHelpTopic("stream");
   const search = getHelpTopic("search");
   const daemon = getHelpTopic("daemon");
+  const lyrics = getHelpTopic("lyrics");
   expect(download).toContain("soggfy download");
   expect(streamAlias).toBe(download);
   expect(search).toContain("soggfy search");
   expect(daemon).toContain("web UI/API");
+  expect(lyrics).toContain("soggfy lyrics");
   expect(getHelpTopic("web")).toBeNull();
   expect(getHelpTopic("webapp")).toBeNull();
 });
 
 test("help topic index includes commands and practical guides", () => {
   const topics = listHelpTopics();
-  for (const topic of ["download", "search", "auth", "daemon", "scripting", "configuration", "troubleshooting"]) {
+  for (const topic of ["download", "search", "lyrics", "auth", "daemon", "scripting", "configuration", "troubleshooting"]) {
     expect(topics).toContain(topic);
   }
 });

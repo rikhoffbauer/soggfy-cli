@@ -19,6 +19,7 @@ import { getDaemonSpotifyInstance } from "../../src/core/daemon-runtime";
 import { getHttpConfig } from "../../src/core/http-config";
 import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
 import { groupSearchResults, searchSpotify } from "../../src/core/spotify-search";
+import { fetchSpotifyLyrics } from "../../src/core/spotify-lyrics";
 import {
   CAPTURE_BACKEND,
   OUTPUT_DIR,
@@ -870,6 +871,22 @@ const server = Bun.serve({
           return jsonResponse(groupSearchResults(results));
         } catch (err: any) {
           return jsonResponse({ error: err.message }, { status: 500 });
+        }
+      },
+    },
+    "/api/lyrics": {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const trackParam = url.searchParams.get("track");
+        if (!trackParam) return jsonResponse({ error: "Missing track" }, { status: 400 });
+        const trackId = parseTrackId(trackParam);
+        if (!trackId) return jsonResponse({ error: "Invalid Spotify track" }, { status: 400 });
+        try {
+          const lyrics = await fetchSpotifyLyrics(trackId);
+          if (!lyrics) return jsonResponse({ available: false, source: "spotify", trackId }, { status: 404 });
+          return jsonResponse(lyrics);
+        } catch (err: any) {
+          return jsonResponse({ error: err.message, source: "spotify", trackId }, { status: 502 });
         }
       },
     },

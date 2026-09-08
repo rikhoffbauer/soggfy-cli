@@ -20,9 +20,9 @@ Soggfy intentionally has a small configuration surface. Runtime state defaults t
 
 The normal runtime has one daemon-owned Spotify instance. The daemon and web UI/API share that same instance in-process; no additional web worker is created.
 
-## Spotify catalog search
+## Spotify web data
 
-`Soggfy search` and the GUI's catalog search share one transport. Supply one of these credential sets:
+`Soggfy search`, `soggfy lyrics`, and the daemon lyrics/search APIs share Spotify Web Player authentication. Supply one of these credential sets:
 
 ```sh
 export SPOTIFY_COOKIE='sp_dc=...; sp_key=...'
@@ -36,6 +36,8 @@ export SPOTIFY_CLIENT_TOKEN='...'
 ```
 
 Search credentials are not written into Soggfy's auth export. Avoid placing them in shell history, source control, or world-readable files.
+
+Cookie-based authentication works for both search and lyrics. When supplying tokens directly, provide both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`.
 
 ## Output and runtime state
 

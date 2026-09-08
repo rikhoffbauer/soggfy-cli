@@ -155,6 +155,7 @@ The daemon owns the patched Spotify process and serves the web UI and `/api/*` r
 
 ```bash
 soggfy daemon start
+soggfy lyrics --format lrc spotify:track:3z8h0TU7ReDPLIbEnYhWZb
 ```
 
 The web layer uses the daemon's live `SpotifyInstance` through an internal in-process API; it does not launch a second Spotify worker. UI and API both use `http://127.0.0.1:8085` by default. Set `SOGGFY_HOST` or `SOGGFY_PORT` before starting/restarting the daemon to override the bind address.
@@ -167,6 +168,7 @@ Important endpoints:
 - `GET /api/instances`
 - `GET /api/jobs`
 - `GET /api/search?q=<query>`
+- `GET /api/lyrics?track=<track>`
 - `POST /api/jobs/action`
 - `POST /api/download`
 - `GET /api/status`
