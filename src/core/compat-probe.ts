@@ -1,0 +1,290 @@
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { join, resolve } from "path";
+import { captureTrack } from "./capture";
+import { parsePlaybackConfirmation } from "./capture-control";
+import { SpotifyInstance } from "./instance";
+import { SOGGFY_HOME } from "./paths";
+import {
+  type SpotifyCompatibilityChecks,
+  type SpotifyCompatibilityEntry,
+  type SpotifyCompatibilityRegistry,
+  upsertCompatibilityEntry,
+} from "./spotify-compatibility";
+import { readSpotifyBundleVersion } from "./spotify-runtime";
+
+export const DEFAULT_COMPAT_TRACK_ID = "0lsvPqWmOrmqxORWrRiU52";
+export const SPOTIFY_COMPATIBILITY_REGISTRY_PATH = resolve(
+  import.meta.dir,
+  "../../compatibility/spotify-versions.json",
+);
+
+export interface CompatProbeOptions {
+  appPath: string;
+  trackId: string;
+  record: boolean;
+  keep: boolean;
+  json: boolean;
+}
+
+export interface CompatibilityProbeResult {
+  version: string;
+  architecture: "arm64";
+  status: "supported" | "failed";
+  runDir: string;
+  commit: string;
+  startedAt: string;
+  validatedAt: string;
+  checks: Required<SpotifyCompatibilityChecks>;
+  failureReason?: string;
+}
+
+export interface CompatibilityRunPaths {
+  appPath: string;
+  savePath: string;
+  profileDir: string;
+}
+
+const REQUIRED_CHECKS: ReadonlyArray<keyof Required<SpotifyCompatibilityChecks>> = [
+  "patching", "signing", "processLaunch", "ipc", "decoderHooks",
+  "playback", "capture", "mediaValidation", "headless",
+];
+
+export function createCompatibilityRunPaths(runDir: string): CompatibilityRunPaths {
+  return {
+    appPath: join(runDir, "PatchedSpotify.app"),
+    savePath: join(runDir, "save"),
+    profileDir: join(runDir, "profile"),
+  };
+}
+
+function emptyChecks(): Required<SpotifyCompatibilityChecks> {
+  return {
+    patching: false,
+    signing: false,
+    processLaunch: false,
+    ipc: false,
+    decoderHooks: false,
+    playback: false,
+    capture: false,
+    mediaValidation: false,
+    headless: false,
+  };
+}
+
+function allChecksPassed(checks: Required<SpotifyCompatibilityChecks>): boolean {
+  return REQUIRED_CHECKS.every((name) => checks[name] === true);
+}
+
+export function compatibilityEntryFromProbe(
+  result: Omit<CompatibilityProbeResult, "status"> | CompatibilityProbeResult,
+): SpotifyCompatibilityEntry {
+  const status = allChecksPassed(result.checks) ? "supported" : "failed";
+  return {
+    version: result.version,
+    architecture: result.architecture,
+    status,
+    validatedAt: result.validatedAt,
+    commit: result.commit,
+    checks: { ...result.checks },
+    ...(result.failureReason ? { failureReason: result.failureReason } : {}),
+  };
+}
+
+function runChecked(command: string, args: string[], label: string, cwd?: string): string {
+  const result = Bun.spawnSync([command, ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`${label} failed (${result.exitCode}): ${result.stderr.toString().trim() || result.stdout.toString().trim()}`);
+  }
+  return result.stdout.toString().trim();
+}
+
+function gitCommit(repoRoot: string): string {
+  return runChecked("git", ["rev-parse", "HEAD"], "read git commit", repoRoot);
+}
+
+function verifyArm64(appPath: string): void {
+  const binaryPath = join(appPath, "Contents/MacOS/Spotify");
+  const archs = runChecked("lipo", ["-archs", binaryPath], "inspect Spotify architecture");
+  if (!archs.split(/\s+/).includes("arm64")) {
+    throw new Error(`Candidate Spotify is not arm64-compatible: ${archs || "unknown architecture"}`);
+  }
+}
+
+function configureBackgroundOnly(appPath: string): void {
+  const plist = join(appPath, "Contents/Info.plist");
+  Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSUIElement", plist]);
+  Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSBackgroundOnly", plist]);
+  runChecked("/usr/libexec/PlistBuddy", ["-c", "Add :LSBackgroundOnly bool true", plist], "set LSBackgroundOnly");
+}
+
+function applyCurrentPatch(sourceApp: string, candidateApp: string, repoRoot: string, checks: Required<SpotifyCompatibilityChecks>): void {
+  const payloadRoot = join(repoRoot, "soggfy-macos");
+  const cmakeLists = join(payloadRoot, "CMakeLists.txt");
+  if (!existsSync(cmakeLists)) {
+    throw new Error("Spotify compatibility probing requires a source checkout with soggfy-macos/CMakeLists.txt");
+  }
+
+  runChecked("ditto", [sourceApp, candidateApp], "clone candidate Spotify app");
+  configureBackgroundOnly(candidateApp);
+
+  runChecked("cmake", ["-S", payloadRoot, "-B", join(payloadRoot, "build")], "configure native payload", repoRoot);
+  runChecked("cmake", ["--build", join(payloadRoot, "build")], "build native payload", repoRoot);
+
+  const spotifyBinary = join(candidateApp, "Contents/MacOS/Spotify");
+  checks.patching = true;
+  const cef = join(candidateApp, "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework");
+  if (existsSync(cef)) runChecked("codesign", ["-f", "-s", "-", cef], "sign Chromium Embedded Framework");
+  runChecked("codesign", ["-f", "-s", "-", spotifyBinary], "sign Spotify binary");
+
+  const builtPayload = join(payloadRoot, "build/libsoggfy.dylib");
+  const installedPayload = join(candidateApp, "Contents/MacOS/libsoggfy.dylib");
+  copyFileSync(builtPayload, installedPayload);
+  runChecked("codesign", ["-f", "-s", "-", installedPayload], "sign compatibility payload");
+  runChecked("codesign", ["-f", "-s", "-", "--deep", candidateApp], "sign candidate Spotify bundle");
+  runChecked("codesign", ["--verify", "--deep", "--strict", candidateApp], "verify candidate Spotify bundle");
+  checks.signing = true;
+}
+
+async function verifyTargetPlayback(instance: SpotifyInstance, trackId: string): Promise<boolean> {
+  await instance.sendCommand(`reset_track ${trackId}`);
+  await instance.sendCommand(`set_track ${trackId}`);
+  await instance.sendCommand(`play spotify:track:${trackId}`);
+  try {
+    for (let i = 0; i < 30; i++) {
+      await Bun.sleep(500);
+      const raw = await instance.sendCommand("get_playing").catch(() => "");
+      if (parsePlaybackConfirmation(raw, trackId).confirmed) return true;
+      if (i > 0 && i % 6 === 0) {
+        await instance.sendCommand(`play spotify:track:${trackId}`).catch(() => undefined);
+      }
+    }
+    return false;
+  } finally {
+    await instance.sendCommand("pause").catch(() => undefined);
+  }
+}
+
+function verifyHeadlessProcess(pid: number): boolean {
+  const launchInfo = Bun.spawnSync(["lsappinfo", "info", "-only", "pid", String(pid)], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const faceless = launchInfo.exitCode === 0 && launchInfo.stdout.toString().includes("!cgsConnection");
+  const swift = `import CoreGraphics; import Foundation; let pid:Int = ${pid}; let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements], kCGNullWindowID) as? [[String:Any]] ?? []).filter { (($0[kCGWindowOwnerPID as String] as? Int) ?? -1) == pid }; print(windows.count)`;
+  const windowCheck = Bun.spawnSync(["swift", "-e", swift], { stdout: "pipe", stderr: "pipe" });
+  const windowCount = Number.parseInt(windowCheck.stdout.toString().trim(), 10);
+  return faceless && windowCheck.exitCode === 0 && windowCount === 0;
+}
+
+export function recordCompatibilityProbe(
+  result: CompatibilityProbeResult,
+  registryPath = SPOTIFY_COMPATIBILITY_REGISTRY_PATH,
+): SpotifyCompatibilityRegistry {
+  if (!existsSync(registryPath)) {
+    throw new Error(`Compatibility registry not found: ${registryPath}`);
+  }
+  const registry = JSON.parse(readFileSync(registryPath, "utf8")) as SpotifyCompatibilityRegistry;
+  const updated = upsertCompatibilityEntry(registry, compatibilityEntryFromProbe(result));
+  writeFileSync(registryPath, `${JSON.stringify(updated, null, 2)}\n`);
+  return updated;
+}
+
+function makeRunDir(version: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const runDir = join(SOGGFY_HOME, "compat", "runs", `${stamp}-${version}-${process.pid}`);
+  mkdirSync(runDir, { recursive: true, mode: 0o700 });
+  return runDir;
+}
+
+function finalResult(
+  base: Omit<CompatibilityProbeResult, "status" | "validatedAt">,
+): CompatibilityProbeResult {
+  const validatedAt = new Date().toISOString();
+  const status = allChecksPassed(base.checks) ? "supported" : "failed";
+  return { ...base, status, validatedAt };
+}
+
+export async function probeSpotifyCompatibility(
+  options: CompatProbeOptions,
+): Promise<CompatibilityProbeResult> {
+  const repoRoot = resolve(import.meta.dir, "../..");
+  if (!existsSync(options.appPath)) throw new Error(`Spotify app not found: ${options.appPath}`);
+  const version = readSpotifyBundleVersion(options.appPath);
+  if (!version) throw new Error(`Could not read Spotify version from ${options.appPath}`);
+  verifyArm64(options.appPath);
+
+  const runDir = makeRunDir(version);
+  const paths = createCompatibilityRunPaths(runDir);
+  const socketPath = `/tmp/soggfy-compat-${process.pid}-${Date.now()}.sock`;
+  const checks = emptyChecks();
+  const startedAt = new Date().toISOString();
+  const commit = gitCommit(repoRoot);
+  let instance: SpotifyInstance | null = null;
+  let result: CompatibilityProbeResult | null = null;
+
+  try {
+    applyCurrentPatch(options.appPath, paths.appPath, repoRoot, checks);
+    instance = new SpotifyInstance(socketPath, paths.savePath, paths.profileDir, {
+      appPath: paths.appPath,
+      enforceSupportedVersion: false,
+    });
+    await instance.start();
+    checks.processLaunch = instance.pid !== null;
+    checks.ipc = (await instance.sendCommand("ping")) === "pong";
+
+    const capabilities = JSON.parse(await instance.sendCommand("get_capabilities")) as {
+      hooksInitialized?: boolean;
+      decoderHooksReady?: boolean;
+      captureBackend?: string;
+    };
+    checks.decoderHooks = capabilities.hooksInitialized === true
+      && capabilities.decoderHooksReady === true
+      && capabilities.captureBackend === "ogg";
+    if (!checks.decoderHooks) {
+      throw new Error(`Native capture hooks are not compatible: ${JSON.stringify(capabilities)}`);
+    }
+
+    if (!instance.pid) throw new Error("Candidate Spotify process did not report a PID");
+    checks.headless = verifyHeadlessProcess(instance.pid);
+    if (!checks.headless) throw new Error("Candidate Spotify exposed a visible GUI/window registration");
+
+    checks.playback = await verifyTargetPlayback(instance, options.trackId);
+    if (!checks.playback) throw new Error(`Candidate could not confirm target playback for ${options.trackId}`);
+
+    const capture = await captureTrack(socketPath, paths.savePath, options.trackId);
+    checks.capture = capture.bytesWritten > 0;
+    checks.mediaValidation = true;
+    result = finalResult({
+      version,
+      architecture: "arm64",
+      runDir,
+      commit,
+      startedAt,
+      checks,
+    });
+
+  } catch (error) {
+    const failureReason = error instanceof Error ? error.message : String(error);
+    result = finalResult({
+      version,
+      architecture: "arm64",
+      runDir,
+      commit,
+      startedAt,
+      checks,
+      failureReason,
+    });
+  } finally {
+    if (instance) await instance.stop().catch(() => undefined);
+    try { if (existsSync(socketPath)) rmSync(socketPath, { force: true }); } catch {}
+  }
+
+  if (!result) throw new Error("Compatibility probe did not produce a result");
+  if (options.record) recordCompatibilityProbe(result);
+  if (!options.keep) rmSync(runDir, { recursive: true, force: true });
+  return result;
+}

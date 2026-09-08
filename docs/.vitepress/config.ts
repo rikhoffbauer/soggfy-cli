@@ -23,6 +23,7 @@ export default defineConfig({
           { text: "download", link: "/cli/download" },
           { text: "search", link: "/cli/search" },
           { text: "lyrics", link: "/cli/lyrics" },
+          { text: "compat", link: "/cli/compat" },
           { text: "auth", link: "/cli/auth" },
           { text: "daemon", link: "/cli/daemon" },
           { text: "install", link: "/cli/install" },

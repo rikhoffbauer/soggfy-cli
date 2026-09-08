@@ -78,6 +78,11 @@ async function main(): Promise<void> {
       await lyricsCommand(subArgs);
       break;
     }
+    case "compat": {
+      const { compatCommand } = await import("./commands/compat");
+      await compatCommand(subArgs);
+      break;
+    }
     case "daemon": {
       const { daemonCommand } = await import("./commands/daemon");
       await daemonCommand(subArgs);
