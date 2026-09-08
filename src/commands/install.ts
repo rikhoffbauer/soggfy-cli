@@ -122,6 +122,22 @@ export async function installCommand(args: string[]): Promise<void> {
   log.info("Cloning Spotify.app...");
   run(["ditto", SPOTIFY_APP, PATCHED_APP], "ditto copy Spotify.app");
 
+  // The patched runtime is daemon-owned and must remain faceless. Background-only
+  // prevents Launch Services/AppKit from exposing it in the Dock or app switcher.
+  const infoPlist = join(PATCHED_APP, "Contents/Info.plist");
+  Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSUIElement", infoPlist], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSBackgroundOnly", infoPlist], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  run(
+    ["/usr/libexec/PlistBuddy", "-c", "Add :LSBackgroundOnly bool true", infoPlist],
+    "configure patched Spotify as background-only",
+  );
+
   // Step 4: Strip and re-sign
   log.step(4, totalSteps, "Stripping signatures and ad-hoc signing");
 

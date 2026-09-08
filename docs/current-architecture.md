@@ -41,6 +41,8 @@ The root CLI uses `src/core/*` for paths, IPC, capture control, media validation
 
 The daemon uses `/tmp/soggfy_cli.sock` and `/tmp/Soggfy_cli` by default. A non-daemon CLI download uses PID-specific temporary socket/save paths and always tears down the exact process tree it started.
 
+The patched workspace copy is prepared with `LSBackgroundOnly=true`. In hidden runtime mode the injected payload also forces `NSApplicationActivationPolicyProhibited` and suppresses `NSWindow` ordering, giving the capture process a faceless/background lifecycle with no visible windows, Dock icon, or app-switcher entry. The stock Spotify application is not modified.
+
 The packaged daemon resolves its current bundle/executable and re-executes that artifact. It does not reference `../cli.ts` at runtime.
 
 ## Daemon-backed web runtime

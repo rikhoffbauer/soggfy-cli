@@ -159,6 +159,12 @@ fi
 rm -rf "$PATCHED_APP"
 ditto "/Applications/Spotify.app" "$PATCHED_APP"
 
+# The patched daemon runtime is deliberately faceless. Do this before signing,
+# because changing Info.plist after codesign invalidates the app bundle seal.
+/usr/libexec/PlistBuddy -c 'Delete :LSUIElement' "$PATCHED_APP/Contents/Info.plist" >/dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c 'Delete :LSBackgroundOnly' "$PATCHED_APP/Contents/Info.plist" >/dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c 'Add :LSBackgroundOnly bool true' "$PATCHED_APP/Contents/Info.plist"
+
 adhoc_sign_if_present() {
   local target="$1"
   if [[ -e "$target" ]]; then
@@ -197,5 +203,5 @@ cd "$ROOT_DIR"
 
 echo -e "\n${GREEN}=== Setup complete ===${NC}"
 echo -e "Run diagnostics: ${YELLOW}bun run scripts/doctor.ts${NC}"
-echo -e "Start server:    ${YELLOW}cd webapp && bun run src/index.ts${NC}"
+echo -e "Start daemon:    ${YELLOW}soggfy daemon start${NC}"
 echo -e "${YELLOW}Note:${NC} /Applications/Spotify.app was left untouched."

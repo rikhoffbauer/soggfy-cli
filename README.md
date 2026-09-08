@@ -159,6 +159,8 @@ soggfy daemon start
 
 The web layer uses the daemon's live `SpotifyInstance` through an internal in-process API; it does not launch a second Spotify worker. UI and API both use `http://127.0.0.1:8085` by default. Set `SOGGFY_HOST` or `SOGGFY_PORT` before starting/restarting the daemon to override the bind address.
 
+The daemon-owned patched Spotify copy runs as a macOS background-only application. It has no Dock/app-switcher presence and the injected payload suppresses window ordering/activation, so capture runs without a visible Spotify GUI. The normal `/Applications/Spotify.app` remains unchanged and is still used when interactive login is required.
+
 Important endpoints:
 
 - `GET /api/health`

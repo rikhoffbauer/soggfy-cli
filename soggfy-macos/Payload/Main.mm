@@ -39,10 +39,10 @@ my_setActivationPolicy(id self, SEL _cmd,
                        NSApplicationActivationPolicy activationPolicy) {
   const char *env_hidden = getenv("SOGGFY_HIDDEN");
   if (env_hidden && std::string(env_hidden) == "1") {
-    printf("[Soggfy-INFO] setActivationPolicy: Forcing Accessory activation "
-           "policy to hide Dock icon.\n");
+    printf("[Soggfy-INFO] setActivationPolicy: Forcing prohibited activation "
+           "policy for faceless daemon runtime.\n");
     return orig_setActivationPolicy(self, _cmd,
-                                    NSApplicationActivationPolicyAccessory);
+                                    NSApplicationActivationPolicyProhibited);
   }
   return orig_setActivationPolicy(self, _cmd, activationPolicy);
 }
@@ -87,33 +87,41 @@ typedef void (*makeKeyAndOrderFront_t)(id self, SEL _cmd, id sender);
 static makeKeyAndOrderFront_t orig_makeKeyAndOrderFront = nullptr;
 
 static void my_makeKeyAndOrderFront(id self, SEL _cmd, id sender) {
-  orig_makeKeyAndOrderFront(self, _cmd, sender);
   const char *env_hidden = getenv("SOGGFY_HIDDEN");
-  if (env_hidden && std::string(env_hidden) == "1") {
-    [(NSWindow *)self setFrameOrigin:NSMakePoint(-20000, -20000)];
-  }
+  if (env_hidden && std::string(env_hidden) == "1") return;
+  orig_makeKeyAndOrderFront(self, _cmd, sender);
 }
 
 typedef void (*orderFront_t)(id self, SEL _cmd, id sender);
 static orderFront_t orig_orderFront = nullptr;
 
 static void my_orderFront(id self, SEL _cmd, id sender) {
-  orig_orderFront(self, _cmd, sender);
   const char *env_hidden = getenv("SOGGFY_HIDDEN");
-  if (env_hidden && std::string(env_hidden) == "1") {
-    [(NSWindow *)self setFrameOrigin:NSMakePoint(-20000, -20000)];
-  }
+  if (env_hidden && std::string(env_hidden) == "1") return;
+  orig_orderFront(self, _cmd, sender);
 }
 
 typedef void (*orderFrontRegardless_t)(id self, SEL _cmd);
 static orderFrontRegardless_t orig_orderFrontRegardless = nullptr;
 
 static void my_orderFrontRegardless(id self, SEL _cmd) {
-  orig_orderFrontRegardless(self, _cmd);
   const char *env_hidden = getenv("SOGGFY_HIDDEN");
-  if (env_hidden && std::string(env_hidden) == "1") {
-    [(NSWindow *)self setFrameOrigin:NSMakePoint(-20000, -20000)];
+  if (env_hidden && std::string(env_hidden) == "1") return;
+  orig_orderFrontRegardless(self, _cmd);
+}
+
+typedef void (*orderWindow_t)(id self, SEL _cmd, NSWindowOrderingMode place,
+                              NSInteger relativeTo);
+static orderWindow_t orig_orderWindow = nullptr;
+
+static void my_orderWindow(id self, SEL _cmd, NSWindowOrderingMode place,
+                           NSInteger relativeTo) {
+  const char *env_hidden = getenv("SOGGFY_HIDDEN");
+  if (env_hidden && std::string(env_hidden) == "1" && place != NSWindowOut) {
+    orig_orderWindow(self, _cmd, NSWindowOut, relativeTo);
+    return;
   }
+  orig_orderWindow(self, _cmd, place, relativeTo);
 }
 
 // ── Directory and Home Redirection Hooks ──
@@ -665,6 +673,15 @@ void SetupImmediateHooks() {
   // ── Strategy 6: Focus Suppression & Headless/Hidden Window Hooks ──
   Class appCls = objc_getClass("NSApplication");
   if (appCls) {
+    Method activationPolicyMethod = class_getInstanceMethod(
+        appCls, sel_registerName("setActivationPolicy:"));
+    if (activationPolicyMethod) {
+      IMP imp = method_getImplementation(activationPolicyMethod);
+      int res = DobbyHook((void *)imp, (void *)my_setActivationPolicy,
+                          (void **)&orig_setActivationPolicy);
+      printf("[Soggfy-INFO] Hooked setActivationPolicy: result=%d\n", res);
+    }
+
     Method m = class_getInstanceMethod(
         appCls, sel_registerName("activateIgnoringOtherApps:"));
     if (m) {
@@ -716,6 +733,14 @@ void SetupImmediateHooks() {
       int res = DobbyHook((void *)imp, (void *)my_orderFrontRegardless,
                           (void **)&orig_orderFrontRegardless);
       printf("[Soggfy-INFO] Hooked orderFrontRegardless: result=%d\n", res);
+    }
+    Method m4 = class_getInstanceMethod(
+        winCls, sel_registerName("orderWindow:relativeTo:"));
+    if (m4) {
+      IMP imp = method_getImplementation(m4);
+      int res = DobbyHook((void *)imp, (void *)my_orderWindow,
+                          (void **)&orig_orderWindow);
+      printf("[Soggfy-INFO] Hooked orderWindow:relativeTo: result=%d\n", res);
     }
   }
 
