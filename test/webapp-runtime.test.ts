@@ -16,3 +16,16 @@ test("webapp readiness fails immediately when the launched process exits", () =>
   expect(source).toContain('try { process.kill(this.process.pid, 0); }');
   expect(source).toContain('catch { return false; }');
 });
+
+test("webapp uses the shared Spotify input resolver so unavailable track IDs are relinked", () => {
+  expect(source).toContain('resolveInput as resolveSpotifyInput');
+  expect(source).toContain('return resolveSpotifyInput(input);');
+});
+
+test("stream route resolves unavailable track IDs before looking up or queuing output", () => {
+  const start = source.indexOf('"/api/stream"');
+  const end = source.indexOf('"/api/download"', start);
+  const streamRoute = source.slice(start, end);
+  expect(streamRoute).toContain("const resolvedTrackIds = await resolveSpotifyInput(trackParam);");
+  expect(streamRoute).toContain("const trackId = resolvedTrackIds[0];");
+});

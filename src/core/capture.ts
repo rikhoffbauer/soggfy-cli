@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "fs";
 import { join } from "path";
 import { sendIPC } from "./ipc";
-import { parsePlaybackConfirmation, waitForTrackCompletion } from "./capture-control";
+import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "./capture-control";
 import { log } from "./log";
 import { fetchTrackMetadata, type TrackMetadata } from "./metadata";
 import { validateAudioFile } from "./media";
@@ -27,7 +27,7 @@ export async function captureTrack(
   await sendIPC(socketPath, `set_track ${trackId}`);
 
   // Tell Spotify to play the track
-  await sendIPC(socketPath, `play spotify:track:${trackId}`);
+  await requestTrackPlayback((command) => sendIPC(socketPath, command), trackId);
   log.info(`Playback started for ${trackId}`);
 
   // Wait for the correct track to be confirmed playing
@@ -42,10 +42,9 @@ export async function captureTrack(
       }
     } catch {}
 
-    // Re-nudge play every 3 seconds if not confirmed yet
-    if (i > 0 && i % 6 === 0 && !trackConfirmed) {
-      await sendIPC(socketPath, `play spotify:track:${trackId}`).catch(() => {});
-    }
+    // Never blindly re-send `play`: Spotify treats repeated play-context events
+    // as seeks back to 0 for some tracks. A late playback notification should
+    // time out rather than turning playback into a restart loop.
   }
 
   if (!trackConfirmed) {
@@ -60,10 +59,9 @@ export async function captureTrack(
     status = await sendIPC(socketPath, `get_status ${trackId}`, { retries: 1 }).catch(() => "idle");
     if (status === "downloading" || status === "completed") break;
 
-    // If still idle, re-nudge play
-    if (i > 0 && i % 6 === 0) {
-      await sendIPC(socketPath, `play spotify:track:${trackId}`).catch(() => {});
-    }
+    // Do not re-send `play` after the target is confirmed. Spotify treats that
+    // command as a restart for some tracks, producing a 0s -> ~2s loop while
+    // the capture backend is still waiting to claim the stream.
   }
 
   if (status !== "downloading" && status !== "completed") {

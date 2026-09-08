@@ -532,7 +532,8 @@ void StartIPCServer() {
       TrimInPlace(uri);
       printf("[Soggfy-IPC] Received command: play %s\n", uri.c_str());
 
-      dispatch_async(dispatch_get_main_queue(), ^{
+      __block OSStatus playErr = noErr;
+      dispatch_sync(dispatch_get_main_queue(), ^{
         NSAppleEventDescriptor *target = [NSAppleEventDescriptor currentProcessDescriptor];
         NSAppleEventDescriptor *event = [NSAppleEventDescriptor
             appleEventWithEventClass:'spfy'
@@ -547,20 +548,29 @@ void StartIPCServer() {
                        forKeyword:'cotx'];
 
         AppleEvent reply;
-        OSStatus err = AESendMessage([event aeDesc], &reply, kAENoReply,
-                                     kAEDefaultTimeout);
-        printf("[Soggfy-INFO] Sent play event to self. Result: %d\n", (int)err);
+        playErr = AESendMessage([event aeDesc], &reply, kAENoReply,
+                                kAEDefaultTimeout);
+        printf("[Soggfy-INFO] Sent play event to self. Result: %d\n", (int)playErr);
 
-        // Also send 'Play' unpause event in case track was paused at EOS
-        NSAppleEventDescriptor *unpauseEvent = [NSAppleEventDescriptor
-            appleEventWithEventClass:'spfy'
-                             eventID:'Play'
-                    targetDescriptor:target
-                            returnID:kAutoGenerateReturnID
-                       transactionID:kAnyTransactionID];
-        AESendMessage([unpauseEvent aeDesc], &reply, kAENoReply, kAEDefaultTimeout);
+        if (playErr == noErr) {
+          // Also send 'Play' unpause event in case track was paused at EOS.
+          NSAppleEventDescriptor *unpauseEvent = [NSAppleEventDescriptor
+              appleEventWithEventClass:'spfy'
+                               eventID:'Play'
+                      targetDescriptor:target
+                              returnID:kAutoGenerateReturnID
+                         transactionID:kAnyTransactionID];
+          AESendMessage([unpauseEvent aeDesc], &reply, kAENoReply, kAEDefaultTimeout);
+        }
       });
-      SendResponse(client_fd, "ok");
+
+      if (playErr == noErr) {
+        SendResponse(client_fd, "ok");
+      } else {
+        char response[64];
+        snprintf(response, sizeof(response), "error:%d", (int)playErr);
+        SendResponse(client_fd, response);
+      }
     } else if (req == "pause") {
       printf("[Soggfy-IPC] Received command: pause\n");
       dispatch_async(dispatch_get_main_queue(), ^{

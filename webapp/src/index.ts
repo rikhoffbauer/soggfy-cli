@@ -19,6 +19,7 @@ import { getDaemonSpotifyInstance } from "../../src/core/daemon-runtime";
 import { getHttpConfig } from "../../src/core/http-config";
 import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
 import { groupSearchResults, searchSpotify } from "../../src/core/spotify-search";
+import { resolveInput as resolveSpotifyInput } from "../../src/core/metadata";
 import { fetchSpotifyLyrics } from "../../src/core/spotify-lyrics";
 import {
   CAPTURE_BACKEND,
@@ -775,32 +776,7 @@ class SpotifyPoolManager {
 const pool = new SpotifyPoolManager(POOL_SIZE);
 
 async function resolveSpotifyUrl(input: string): Promise<string[]> {
-  const trackId = parseTrackId(input);
-  if (trackId) return [trackId];
-
-  const playlistId = parsePlaylistId(input);
-  if (playlistId) {
-    try {
-      const res = await fetch(`https://open.spotify.com/embed/playlist/${playlistId}`);
-      const text = await res.text();
-      return extractTrackIds(text);
-    } catch (e: any) {
-      console.warn(`[Server] Failed to fetch playlist tracks: ${e.message}`);
-    }
-  }
-
-  const albumId = parseAlbumId(input);
-  if (albumId) {
-    try {
-      const res = await fetch(`https://open.spotify.com/embed/album/${albumId}`);
-      const text = await res.text();
-      return extractTrackIds(text);
-    } catch (e: any) {
-      console.warn(`[Server] Failed to fetch album tracks: ${e.message}`);
-    }
-  }
-
-  return [];
+  return resolveSpotifyInput(input);
 }
 
 function findOutputForTrack(trackId: string): { path: string; format: "mp3" | "wav" | "ogg" } | null {
@@ -932,7 +908,8 @@ const server = Bun.serve({
         const url = new URL(req.url);
         const trackParam = url.searchParams.get("track");
         if (!trackParam) return new Response("Missing track", { status: 400, headers: CORS_HEADERS });
-        const trackId = parseTrackId(trackParam);
+        const resolvedTrackIds = await resolveSpotifyInput(trackParam);
+        const trackId = resolvedTrackIds[0];
         if (!trackId) return new Response("Invalid track", { status: 400, headers: CORS_HEADERS });
 
         const output = findOutputForTrack(trackId);

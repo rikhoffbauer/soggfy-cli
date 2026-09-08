@@ -24,6 +24,24 @@ export function parsePlaybackConfirmation(response: string, trackId: string): Pl
   return { confirmed: raw.includes(trackId), isAd: false, gated: false, uri: raw };
 }
 
+
+export async function requestTrackPlayback(
+  sendCommand: (command: string) => Promise<string>,
+  trackId: string,
+  { attempts = 3, delayMs = 500 }: { attempts?: number; delayMs?: number } = {},
+): Promise<void> {
+  let lastResponse = "";
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    lastResponse = (await sendCommand(`play spotify:track:${trackId}`)).trim();
+    if (lastResponse === "ok") return;
+    if (!lastResponse.startsWith("error:")) {
+      throw new Error(`Unexpected Spotify play response: ${lastResponse || "<empty>"}`);
+    }
+    if (attempt + 1 < attempts) await Bun.sleep(delayMs);
+  }
+  throw new Error(`Spotify play command failed after ${attempts} attempt(s): ${lastResponse}`);
+}
+
 export async function waitForTrackCompletion(
   sendCommand: (command: string) => Promise<string>,
   trackId: string,

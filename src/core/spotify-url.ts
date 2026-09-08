@@ -13,9 +13,9 @@ export function parseTrackId(input: string): string | null {
 
 export function extractTrackIds(text: string): string[] {
   const ids = [
-    ...[...text.matchAll(/spotify:track:([a-zA-Z0-9]{22})/g)].map((m) => m[1]),
-    ...[...text.matchAll(/open\.spotify\.com\/track\/([a-zA-Z0-9]{22})/g)].map((m) => m[1]),
-    ...[...text.matchAll(/"uri":"spotify:track:([a-zA-Z0-9]{22})"/g)].map((m) => m[1]),
+    ...[...text.matchAll(/spotify:track:([a-zA-Z0-9]{22})/g)].map((m) => m[1]!),
+    ...[...text.matchAll(/open\.spotify\.com\/track\/([a-zA-Z0-9]{22})/g)].map((m) => m[1]!),
+    ...[...text.matchAll(/"uri":"spotify:track:([a-zA-Z0-9]{22})"/g)].map((m) => m[1]!),
   ];
   return [...new Set(ids)];
 }
