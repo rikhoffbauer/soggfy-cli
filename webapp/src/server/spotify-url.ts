@@ -19,3 +19,18 @@ export function extractTrackIds(text: string): string[] {
   ];
   return [...new Set(ids)];
 }
+
+
+export function parsePlaylistId(input: string): string | null {
+  const urlMatch = input.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]{22})/);
+  if (urlMatch?.[1]) return urlMatch[1];
+  const uriMatch = input.match(/spotify:playlist:([a-zA-Z0-9]{22})/);
+  return uriMatch?.[1] ?? null;
+}
+
+export function parseAlbumId(input: string): string | null {
+  const urlMatch = input.match(/open\.spotify\.com\/album\/([a-zA-Z0-9]{22})/);
+  if (urlMatch?.[1]) return urlMatch[1];
+  const uriMatch = input.match(/spotify:album:([a-zA-Z0-9]{22})/);
+  return uriMatch?.[1] ?? null;
+}

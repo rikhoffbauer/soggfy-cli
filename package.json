@@ -16,7 +16,10 @@
     "test:native": "./scripts/run-state-manager-fixture.sh",
     "test:webapp": "cd webapp && bun test src/server/__tests__",
     "typecheck:webapp": "cd webapp && bun run typecheck",
-    "doctor": "bun run scripts/doctor.ts"
+    "doctor": "bun run scripts/doctor.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "@types/react": "^19.2.18",
@@ -27,6 +30,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitepress": "^1.6.4"
   }
 }

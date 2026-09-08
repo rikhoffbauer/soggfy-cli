@@ -1,0 +1,51 @@
+# Configuration and environment
+
+Soggfy intentionally has a small configuration surface. Runtime state defaults to `~/.soggfy` and can be redirected for isolated tests or multiple installations.
+
+## Shared paths
+
+| Variable | Purpose |
+| --- | --- |
+| `SOGGFY_HOME` | Root for runtime state, downloads, profiles, logs, and workspace. |
+| `SOGGFY_CAPTURE_BACKEND` | Native capture mode. Production supports `ogg` (default) or `disabled`. |
+
+## Web server and worker pool
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SOGGFY_HOST` | `127.0.0.1` | HTTP bind address. |
+| `SOGGFY_PORT` | `8085` | HTTP port. |
+| `SOGGFY_POOL_SIZE` | `1` | Number of isolated Spotify capture instances. |
+| `SOGGFY_MAX_ATTEMPTS` | `2` | Job attempt limit. |
+| `SOGGFY_DEBUG_PORT_BASE` | `9222` | Starting Chromium debug port for instance isolation. |
+| `SOGGFY_HIDDEN` | enabled | Set to `0` to show capture Spotify windows. |
+| `SOGGFY_MUTE_OUTPUT` | `1` | Mute audible Spotify output while capturing. |
+
+Each worker gets its own socket, profile, temp directory, cache, and save path beneath `SOGGFY_HOME`.
+
+## Spotify catalog search
+
+`Soggfy search` and the GUI's catalog search share one transport. Supply one of these credential sets:
+
+```sh
+export SPOTIFY_COOKIE='sp_dc=...; sp_key=...'
+```
+
+or:
+
+```sh
+export SPOTIFY_ACCESS_TOKEN='...'
+export SPOTIFY_CLIENT_TOKEN='...'
+```
+
+Search credentials are not written into Soggfy's auth export. Avoid placing them in shell history, source control, or world-readable files.
+
+## Output and runtime state
+
+Completed GUI downloads live under `~/.soggfy/downloads` unless `SOGGFY_HOME` changes it. CLI `download` writes wherever `--output` points, or to stdout when no output path is supplied.
+
+Use a temporary `SOGGFY_HOME` for smoke tests to guarantee isolation:
+
+```sh
+SOGGFY_HOME=/tmp/soggfy-smoke soggfy daemon start
+```
