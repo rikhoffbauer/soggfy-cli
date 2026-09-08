@@ -16,6 +16,7 @@ import { PID_FILE, DAEMON_LOG, IPC_SOCKET, SAVE_PATH, ensureDirs } from "../core
 import { SpotifyInstance } from "../core/instance";
 import { registerDaemonSpotifyInstance, unregisterDaemonSpotifyInstance } from "../core/daemon-runtime";
 import { ping } from "../core/ipc";
+import { getHttpConfig, getHttpOrigin } from "../core/http-config";
 
 export async function daemonCommand(args: string[]): Promise<void> {
   const sub = args[0];
@@ -103,7 +104,8 @@ async function daemonStart(): Promise<void> {
   const daemonPid = spawnDaemonProcess();
   log.ok(`Daemon started (PID: ${daemonPid})`);
 
-  log.info("Waiting for Spotify instance to become ready...");
+  const httpOrigin = getHttpOrigin();
+  log.info("Waiting for Spotify instance and web UI/API to become ready...");
   for (let i = 0; i < 90; i++) {
     await Bun.sleep(1000);
     try {
@@ -112,14 +114,17 @@ async function daemonStart(): Promise<void> {
       throw new Error("Daemon process exited unexpectedly. Check: soggfy daemon logs");
     }
 
-    if (await ping(IPC_SOCKET)) {
-      log.ok("Spotify instance ready.");
+    const spotifyReady = await ping(IPC_SOCKET);
+    const webReady = spotifyReady && await isWebServerHealthy(httpOrigin);
+    if (spotifyReady && webReady) {
+      log.ok("Daemon ready: Spotify IPC and web UI/API are responsive.");
+      log.dim(`  Web UI/API: ${httpOrigin}`);
       return;
     }
   }
 
   try { process.kill(daemonPid, "SIGTERM"); } catch {}
-  throw new Error("Spotify instance did not become ready within 90 seconds. Check: soggfy daemon logs");
+  throw new Error("Daemon did not become fully ready within 90 seconds. Check: soggfy daemon logs");
 }
 
 async function daemonStop(): Promise<void> {
@@ -157,6 +162,11 @@ async function daemonStatus(): Promise<void> {
   if (ipcAlive) log.ok("Spotify IPC: responsive");
   else log.warn("Spotify IPC: not responding");
 
+  const httpOrigin = getHttpOrigin();
+  const webAlive = await isWebServerHealthy(httpOrigin);
+  if (webAlive) log.ok(`Web UI/API: responsive (${httpOrigin})`);
+  else log.warn(`Web UI/API: not responding (${httpOrigin})`);
+
   log.dim(`  PID file: ${PID_FILE}`);
   log.dim(`  IPC socket: ${IPC_SOCKET}`);
   log.dim(`  Log file: ${DAEMON_LOG}`);
@@ -171,6 +181,17 @@ function daemonLogs(): void {
   const lines = readFileSync(DAEMON_LOG, "utf8").split("\n").slice(-50);
   for (const line of lines) {
     if (line.trim()) console.error(line);
+  }
+}
+
+async function isWebServerHealthy(origin = getHttpOrigin()): Promise<boolean> {
+  try {
+    const response = await fetch(`${origin}/api/health`);
+    if (!response.ok) return false;
+    const body = await response.json() as { ok?: boolean; started?: boolean };
+    return body.ok === true && body.started === true;
+  } catch {
+    return false;
   }
 }
 
@@ -221,7 +242,8 @@ async function daemonRun(): Promise<void> {
     process.env.SOGGFY_USE_DAEMON_INSTANCE = "1";
     const webappEntryUrl = pathToFileURL(resolveWebappServerEntry()).href;
     await import(webappEntryUrl);
-    appendDaemonLog(`Web UI ready at http://${process.env.SOGGFY_HOST || "127.0.0.1"}:${process.env.SOGGFY_PORT || "8085"}.`);
+    const httpConfig = getHttpConfig();
+    appendDaemonLog(`Web UI/API ready at ${getHttpOrigin(httpConfig)}.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     appendDaemonLog(`Failed to start Spotify instance: ${message}`);

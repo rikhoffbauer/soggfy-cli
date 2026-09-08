@@ -1,13 +1,15 @@
 # Soggfy Webapp
 
-Bun API server plus React UI for queueing Spotify captures and monitoring the local capture pool.
+Bun API server plus React UI served by the Soggfy daemon for queueing Spotify captures and monitoring the daemon-owned capture instance.
 
 ## Start
 
 ```bash
-cd webapp
-bun run src/index.ts
+soggfy daemon start
+open http://127.0.0.1:8085
 ```
+
+The daemon owns the HTTP server lifecycle. Running `bun run src/index.ts` directly is retained only as an internal development path.
 
 ## Server endpoints
 
@@ -26,12 +28,14 @@ bun run src/index.ts
 ```bash
 SOGGFY_HOST=127.0.0.1          # default bind host
 SOGGFY_PORT=8085               # default port
+SOGGFY_CAPTURE_BACKEND=ogg     # default capture backend
+SOGGFY_MUTE_OUTPUT=1           # default daemon capture setting
+
+# Standalone webapp development only:
 SOGGFY_POOL_SIZE=2             # isolated Spotify process pool size
-SOGGFY_CAPTURE_BACKEND=disabled # default: no playback buffer writes
-SOGGFY_MUTE_OUTPUT=0           # default: do not mutate audio buffers
 ```
 
-`src/index.ts` derives the repository root from `import.meta.url`, so the documented `cd webapp && bun run src/index.ts` command no longer depends on the caller's current working directory beyond being inside the repository checkout.
+`src/index.ts` derives the repository root from `import.meta.url`, so the internal standalone development path does not depend on the caller's working directory.
 
 ## Notes
 

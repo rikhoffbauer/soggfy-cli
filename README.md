@@ -151,15 +151,13 @@ The web GUI is organized around the normal user workflow: Spotify search/paste f
 
 ## Daemon + web service
 
-The daemon owns the patched Spotify process and serves the web UI/API in the same process. Start either entry point:
+The daemon owns the patched Spotify process and serves the web UI and `/api/*` routes from the same HTTP server in the same daemon process:
 
 ```bash
 soggfy daemon start
-# or
-soggfy web
 ```
 
-The web layer uses the daemon's live `SpotifyInstance` through an internal in-process API; it does not launch a second Spotify worker. The default UI is `http://127.0.0.1:8085`. `soggfy web --help` documents bind/port overrides, and `soggfy webapp` is retained as an alias.
+The web layer uses the daemon's live `SpotifyInstance` through an internal in-process API; it does not launch a second Spotify worker. UI and API both use `http://127.0.0.1:8085` by default. Set `SOGGFY_HOST` or `SOGGFY_PORT` before starting/restarting the daemon to override the bind address.
 
 Important endpoints:
 

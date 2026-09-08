@@ -16,6 +16,7 @@ import { ZipArchive } from "archiver";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "../../src/core/spotify-runtime";
 import { sendIPC as sendIpcCommand } from "../../src/core/ipc";
 import { getDaemonSpotifyInstance } from "../../src/core/daemon-runtime";
+import { getHttpConfig } from "../../src/core/http-config";
 import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
 import { groupSearchResults, searchSpotify } from "../../src/core/spotify-search";
 import {
@@ -45,8 +46,9 @@ import {
   writeSidecar,
 } from "./server/media";
 
-const PORT = Number.parseInt(process.env.SOGGFY_PORT || "8085", 10);
-const HOSTNAME = process.env.SOGGFY_HOST || "127.0.0.1";
+const HTTP_CONFIG = getHttpConfig();
+const PORT = HTTP_CONFIG.port;
+const HOSTNAME = HTTP_CONFIG.host;
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const WEBAPP_DIR = join(SERVER_DIR, "..");
 const REPO_ROOT = join(WEBAPP_DIR, "..");
