@@ -46,7 +46,17 @@ async function main(): Promise<void> {
 
   const subArgs = args.slice(1);
 
+  if (subArgs.includes("--help") || subArgs.includes("-h")) {
+    const { printHelpTopic } = await import("./core/help");
+    if (printHelpTopic(command)) return;
+  }
+
   switch (command) {
+    case "help": {
+      const { helpCommand } = await import("./commands/help");
+      await helpCommand(subArgs);
+      break;
+    }
     case "download": {
       const { downloadCommand } = await import("./commands/download");
       await downloadCommand(subArgs);

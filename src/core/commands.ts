@@ -12,6 +12,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { name: "install", description: "Install dependencies and prepare the patched Spotify app" },
   { name: "auth", usage: "<action>", description: "Manage Spotify authentication state" },
   { name: "fingerprint", usage: "<file>", description: "Generate a Chromaprint audio fingerprint" },
+  { name: "help", usage: "[topic]", description: "Read the embedded Markdown documentation" },
 ];
 
 export function formatCommandList(): string {
