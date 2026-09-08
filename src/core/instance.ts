@@ -43,10 +43,10 @@ export class SpotifyInstance {
     }
 
     // Prepare directories
-    mkdirSync(this.savePath, { recursive: true });
-    mkdirSync(this.profileDir, { recursive: true });
+    mkdirSync(this.savePath, { recursive: true, mode: 0o700 });
+    mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
     const homeDir = join(this.profileDir, "home");
-    mkdirSync(homeDir, { recursive: true });
+    mkdirSync(homeDir, { recursive: true, mode: 0o700 });
 
     // Clone login state from system Spotify
     const appSupportDest = join(this.savePath, "Application Support/Spotify");
@@ -78,7 +78,7 @@ export class SpotifyInstance {
     const sslKeyLogPath = process.env.SOGGFY_SSL_KEYLOG_FILE;
 
     const tmpDir = join(this.profileDir, "tmp");
-    mkdirSync(tmpDir, { recursive: true });
+    mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
 
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
@@ -120,6 +120,7 @@ export class SpotifyInstance {
     // Wait for IPC socket readiness
     const ready = await this.waitForSocket();
     if (!ready) {
+      await this.stop();
       throw new Error("IPC socket/hook handshake timed out. Spotify may have failed to start.");
     }
 
@@ -158,8 +159,7 @@ export class SpotifyInstance {
       } catch {}
       this.process = null;
     }
-    // Cleanup
-    try { Bun.spawnSync(["pkill", "-9", "-f", "SOGGFY_SOCKET_PATH=" + this.socketPath]); } catch {}
+    // Cleanup only resources owned by this instance.
     try { if (existsSync(this.socketPath)) unlinkSync(this.socketPath); } catch {}
     log.info("Spotify instance stopped.");
   }

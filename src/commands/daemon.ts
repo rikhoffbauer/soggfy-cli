@@ -1,15 +1,18 @@
-import { existsSync, readFileSync, writeFileSync, unlinkSync, appendFileSync } from "fs";
-import { dirname } from "path";
-import { fileURLToPath } from "url";
+import {
+  appendFileSync,
+  chmodSync,
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
+import { spawn } from "child_process";
 import { log } from "../core/log";
 import { PID_FILE, DAEMON_LOG, IPC_SOCKET, SAVE_PATH, ensureDirs } from "../core/paths";
 import { SpotifyInstance } from "../core/instance";
 import { ping } from "../core/ipc";
-
-// @ts-ignore
-import indexHtml from "../web/index.html";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export async function daemonCommand(args: string[]): Promise<void> {
   const sub = args[0];
@@ -45,20 +48,18 @@ Subcommands:
     case "run":
       return daemonRun();
     default:
-      log.error(`Unknown daemon subcommand: ${sub}`);
-      process.exit(1);
+      throw new Error(`Unknown daemon subcommand: ${sub}`);
   }
 }
 
 function readPid(): number | null {
   if (!existsSync(PID_FILE)) return null;
-  const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-  if (isNaN(pid)) return null;
+  const pid = Number.parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
+  if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
     process.kill(pid, 0);
     return pid;
   } catch {
-    // Stale PID file
     try { unlinkSync(PID_FILE); } catch {}
     return null;
   }
@@ -68,54 +69,44 @@ function isAlive(): boolean {
   return readPid() !== null;
 }
 
+function spawnDaemonProcess(): number {
+  const cliEntry = process.argv[1];
+  if (!cliEntry) throw new Error("Cannot determine current CLI entrypoint");
+
+  const logFd = openSync(DAEMON_LOG, "a", 0o600);
+  chmodSync(DAEMON_LOG, 0o600);
+  try {
+    const child = spawn(process.execPath, [cliEntry, "daemon", "run"], {
+      detached: true,
+      env: process.env,
+      stdio: ["ignore", logFd, logFd],
+    });
+    child.unref();
+    if (!child.pid) throw new Error("Daemon subprocess did not report a PID");
+    return child.pid;
+  } finally {
+    closeSync(logFd);
+  }
+}
+
 async function daemonStart(): Promise<void> {
   log.header("Starting Daemon");
-
   if (isAlive()) {
-    const pid = readPid();
-    log.info(`Daemon already running (PID: ${pid})`);
+    log.info(`Daemon already running (PID: ${readPid()})`);
     return;
   }
 
   ensureDirs();
-
-  // Resolve the CLI entry point for the subprocess.
-  // We use the top-level cli.ts so it routes through the normal command dispatcher.
-  const cliPath = `${__dirname}/../cli.ts`;
-
-  // Use nohup + shell to truly detach the subprocess so it survives parent exit.
-  // Route stdout/stderr to the daemon log so crashes are diagnosable.
-  const proc = Bun.spawn(
-    ["sh", "-c", `nohup bun run "${cliPath}" daemon run >> "${DAEMON_LOG}" 2>&1 &\necho $!`],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-
-  const rawOut = await new Response(proc.stdout).text();
-  await proc.exited;
-
-  const daemonPid = parseInt(rawOut.trim(), 10);
-  if (isNaN(daemonPid) || daemonPid <= 0) {
-    log.error("Failed to start daemon background process.");
-    process.exit(1);
-  }
-
+  const daemonPid = spawnDaemonProcess();
   log.ok(`Daemon started (PID: ${daemonPid})`);
 
-  // Wait for IPC socket to become responsive
   log.info("Waiting for Spotify instance to become ready...");
   for (let i = 0; i < 90; i++) {
     await Bun.sleep(1000);
-
-    // Check if the daemon process is still alive
     try {
       process.kill(daemonPid, 0);
     } catch {
-      log.error("Daemon process exited unexpectedly.");
-      log.info("Check logs: soggfy daemon logs");
-      process.exit(1);
+      throw new Error("Daemon process exited unexpectedly. Check: soggfy daemon logs");
     }
 
     if (await ping(IPC_SOCKET)) {
@@ -124,13 +115,12 @@ async function daemonStart(): Promise<void> {
     }
   }
 
-  log.warn("Spotify instance did not become ready within timeout.");
-  log.info("Check logs: soggfy daemon logs");
+  try { process.kill(daemonPid, "SIGTERM"); } catch {}
+  throw new Error("Spotify instance did not become ready within 90 seconds. Check: soggfy daemon logs");
 }
 
 async function daemonStop(): Promise<void> {
   log.header("Stopping Daemon");
-
   const pid = readPid();
   if (!pid) {
     log.info("Daemon is not running.");
@@ -144,19 +134,15 @@ async function daemonStop(): Promise<void> {
       try { process.kill(pid, 0); } catch { break; }
     }
     try { process.kill(pid, "SIGKILL"); } catch {}
-  } catch {}
-
-  try { unlinkSync(PID_FILE); } catch {}
-
-  // Also kill any leftover Spotify instances from daemon
-  Bun.spawnSync(["pkill", "-9", "-f", `SOGGFY_SOCKET_PATH=${IPC_SOCKET}`]);
+  } finally {
+    try { unlinkSync(PID_FILE); } catch {}
+  }
 
   log.ok(`Daemon stopped (was PID: ${pid})`);
 }
 
 async function daemonStatus(): Promise<void> {
   log.header("Daemon Status");
-
   const pid = readPid();
   if (!pid) {
     log.info("Daemon is not running.");
@@ -164,13 +150,9 @@ async function daemonStatus(): Promise<void> {
   }
 
   log.ok(`Daemon running (PID: ${pid})`);
-
   const ipcAlive = await ping(IPC_SOCKET);
-  if (ipcAlive) {
-    log.ok("Spotify IPC: responsive");
-  } else {
-    log.warn("Spotify IPC: not responding");
-  }
+  if (ipcAlive) log.ok("Spotify IPC: responsive");
+  else log.warn("Spotify IPC: not responding");
 
   log.dim(`  PID file: ${PID_FILE}`);
   log.dim(`  IPC socket: ${IPC_SOCKET}`);
@@ -183,111 +165,68 @@ function daemonLogs(): void {
     return;
   }
 
-  const content = readFileSync(DAEMON_LOG, "utf-8");
-  const lines = content.split("\n");
-  const tail = lines.slice(-50);
-  for (const line of tail) {
+  const lines = readFileSync(DAEMON_LOG, "utf8").split("\n").slice(-50);
+  for (const line of lines) {
     if (line.trim()) console.error(line);
   }
 }
 
-/**
- * Run the daemon in the foreground. This is called by `daemon start`
- * via a detached subprocess.
- */
+function appendDaemonLog(message: string): void {
+  appendFileSync(DAEMON_LOG, `[${new Date().toISOString()}] ${message}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  chmodSync(DAEMON_LOG, 0o600);
+}
+
 async function daemonRun(): Promise<void> {
   ensureDirs();
-
-  // Write PID file
-  writeFileSync(PID_FILE, String(process.pid));
-
-  function appendLog(msg: string) {
-    const line = `[${new Date().toISOString()}] ${msg}\n`;
-    try { appendFileSync(DAEMON_LOG, line); } catch {}
-    // Also print to stdout/stderr so nohup captures it in the log
-    console.error(line.trimEnd());
-  }
-
-  appendLog("Daemon starting...");
+  writeFileSync(PID_FILE, String(process.pid), { mode: 0o600 });
+  chmodSync(PID_FILE, 0o600);
+  appendDaemonLog("Daemon starting...");
 
   const instance = new SpotifyInstance(IPC_SOCKET, SAVE_PATH);
-
   let shuttingDown = false;
+
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    appendLog("Daemon shutting down...");
+    appendDaemonLog("Daemon shutting down...");
     await instance.stop();
     try { unlinkSync(PID_FILE); } catch {}
-    process.exit(0);
   };
 
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
+  process.on("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 
   try {
     await instance.start();
-    appendLog("Spotify instance ready.");
-  } catch (e: any) {
-    appendLog(`Failed to start Spotify instance: ${e.message}`);
+    appendDaemonLog("Spotify instance ready.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendDaemonLog(`Failed to start Spotify instance: ${message}`);
     try { unlinkSync(PID_FILE); } catch {}
-    process.exit(1);
+    throw error;
   }
 
-  const server = Bun.serve({
-    port: 8080,
-    routes: {
-      "/": indexHtml,
-      "/api/status": {
-        GET: async () => {
-          const ok = await ping(IPC_SOCKET);
-          return new Response(
-            JSON.stringify({ pid: process.pid, ipcResponsive: ok, savePath: SAVE_PATH }),
-            { headers: { "Content-Type": "application/json" } }
-          );
-        },
-      },
-      "/api/stream": {
-        POST: async (req) => {
-          try {
-            const body = await req.json();
-            if (body.track) {
-              const cliPath = `${__dirname}/../cli.ts`;
-              // Spawn soggfy stream in the background
-              Bun.spawn(["bun", "run", cliPath, "stream", body.track], {
-                stdout: "inherit",
-                stderr: "inherit",
-              });
-            }
-            return new Response(JSON.stringify({ success: true, track: body.track }));
-          } catch (err: any) {
-            return new Response(JSON.stringify({ error: err.message }), { status: 500 });
-          }
-        },
-      },
-    },
-    development: { hmr: true, console: true },
-  });
-
-  appendLog(`Web UI and API server listening on http://localhost:${server.port}`);
-
-
-  // Watchdog loop: ping every 15s, restart if unresponsive
   while (!shuttingDown) {
-    await Bun.sleep(15000);
+    await Bun.sleep(15_000);
     if (shuttingDown) break;
 
     const ok = await ping(IPC_SOCKET);
-    if (!ok) {
-      appendLog("Watchdog: IPC ping failed, restarting instance...");
-      try {
-        await instance.stop();
-        await Bun.sleep(2000);
-        await instance.start();
-        appendLog("Watchdog: Instance restarted.");
-      } catch (e: any) {
-        appendLog(`Watchdog: Restart failed: ${e.message}`);
-      }
+    if (ok) continue;
+
+    appendDaemonLog("Watchdog: IPC ping failed, restarting instance...");
+    try {
+      await instance.stop();
+      await Bun.sleep(2000);
+      await instance.start();
+      appendDaemonLog("Watchdog: instance restarted.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendDaemonLog(`Watchdog: restart failed: ${message}`);
     }
   }
+
+  await shutdown();
 }

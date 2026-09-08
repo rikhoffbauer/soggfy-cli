@@ -1,4 +1,5 @@
 import { homedir } from "os";
+import { chmodSync, mkdirSync } from "fs";
 import { join } from "path";
 
 export const SOGGFY_HOME = join(homedir(), ".soggfy");
@@ -26,6 +27,7 @@ export const CAPTURE_BACKEND = process.env.SOGGFY_CAPTURE_BACKEND || "pcm";
 export function ensureDirs() {
   const dirs = [SOGGFY_HOME, SOGGFY_DATA, WORKSPACE_DIR, PROFILES_DIR, OUTPUT_DIR, AUTH_DIR, PAYLOAD_DIR, LOG_DIR];
   for (const dir of dirs) {
-    Bun.spawnSync(["mkdir", "-p", dir]);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
   }
 }
