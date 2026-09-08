@@ -5,10 +5,10 @@ Capture Spotify tracks, albums, or playlists and write the resulting audio to st
 ## Usage
 
 ```sh
-soggfy download [options] <track-url|track-id|album-url|playlist-url>...
+soggfy download [options] <track|album|playlist>...
 ```
 
-With no `--output`, encoded media is written to stdout. Progress, warnings, and diagnostics stay on stderr, so shell pipelines remain binary-safe.
+Inputs may be Spotify URLs or URIs; bare 22-character IDs are accepted as tracks. With no `--output`, encoded media is written to stdout. Progress, warnings, and diagnostics stay on stderr, so shell pipelines remain binary-safe.
 
 ## Options
 
@@ -51,7 +51,7 @@ When multiple tracks are requested, they are processed sequentially by this comm
 
 ## Compatibility alias
 
-`Soggfy stream` still invokes this command for older scripts, but it is deprecated. Its warning is written to stderr and therefore does not corrupt redirected media.
+`soggfy stream` still invokes this command for older scripts, but it is deprecated. Its warning is written to stderr and therefore does not corrupt redirected media.
 
 ## Exit behavior
 

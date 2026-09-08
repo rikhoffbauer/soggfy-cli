@@ -23,12 +23,12 @@ bun run src/cli.ts auth login
 bun run src/cli.ts daemon start
 
 # Capture one track as MP3.
-bun run src/cli.ts stream \
+bun run src/cli.ts download \
   -o song.mp3 \
   https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8
 
 # Or run without the daemon.
-bun run src/cli.ts stream --no-daemon -o song.flac 4PTG3Z6ehGkBFwjybzWkR8
+bun run src/cli.ts download --no-daemon -o song.flac 4PTG3Z6ehGkBFwjybzWkR8
 ```
 
 Run diagnostics at any time with:
@@ -74,7 +74,7 @@ Login cleanup terminates only the exact process tree launched by Soggfy; it does
 
 The packaged daemon re-executes the current CLI bundle/executable, so release builds do not depend on source-tree `cli.ts` files.
 
-### `soggfy stream [options] <input>`
+### `soggfy download [options] <input>`
 
 | Option | Description |
 |---|---|
@@ -83,14 +83,32 @@ The packaged daemon re-executes the current CLI bundle/executable, so release bu
 | `--keep-wav` | Legacy name: keep the intermediate capture instead of deleting it; the production capture is currently Ogg |
 | `--no-daemon` | Start a temporary isolated Spotify instance |
 
-Input can be a Spotify track URL, Spotify URI, bare 22-character track ID, album URL, or playlist URL.
+Input can be a Spotify track URL/URI, bare 22-character track ID, album URL/URI, or playlist URL/URI. With no `--output`, encoded media is written to stdout; logs and compatibility warnings remain on stderr so pipelines stay binary-safe.
 
 `raw` means uncontainerized PCM and is only valid when the source capture is WAV. The production Ogg capture is therefore rejected for `raw` output instead of having its compressed bytes mislabeled as PCM.
+
+`stream` remains accepted as a compatibility alias for `download`. It emits a deprecation warning on stderr only; new scripts should use `download`.
+
+### `soggfy search [options] <query>`
+
+Searches Spotify for tracks, artists, and playlists using the same normalized search implementation as the web GUI.
+
+| Option | Description |
+|---|---|
+| `-t, --type <type>` | `track`, `artist`, `playlist`, or `all` (default) |
+| `-n, --limit <n>` | Results per selected type, clamped to 1–50 |
+| `--json` | Emit stable machine-readable JSON to stdout |
+
+Search authentication can use `SPOTIFY_COOKIE` containing `sp_dc=...`, or the pair `SPOTIFY_ACCESS_TOKEN` + `SPOTIFY_CLIENT_TOKEN`. Credential errors are written to stderr and JSON mode never emits partial data. See [`docs/cli/search.md`](docs/cli/search.md) for details.
+
+### CLI help and documentation
+
+The command reference under [`docs/cli/`](docs/cli/) is the source of truth for both the terminal and the documentation website. For example, `soggfy download --help`, `soggfy search --help`, and `soggfy help scripting` render those Markdown documents directly. The static VitePress site builds with `bun run docs:build` and is configured to deploy to [rikhoffbauer.github.io/soggfy-cli](https://rikhoffbauer.github.io/soggfy-cli/) through GitHub Pages.
 
 ## Capture pipeline
 
 ```text
-soggfy stream <track>
+soggfy download <track>
        │
        ├─ resolve track ID / metadata
        ├─ connect to daemon or start isolated Spotify instance
@@ -129,6 +147,8 @@ The CLI and webapp use the same runtime primitives for:
 
 The webapp keeps its job/pool orchestration layer, but its per-instance socket, save directory, profile, cache, home, and `TMPDIR` are isolated under `SOGGFY_HOME`. This makes `SOGGFY_HOME=/tmp/soggfy-test` a practical way to run an isolated service without colliding with another Soggfy client.
 
+The web GUI is organized around the normal user workflow: Spotify search/paste first, then active queue and recent downloads. Instance health and logs remain available under a collapsed diagnostics disclosure instead of occupying the primary workspace. Completed files can be played or saved directly from the history panel.
+
 ## Web service
 
 Start it with:
@@ -143,6 +163,7 @@ Important endpoints:
 - `GET /api/health`
 - `GET /api/instances`
 - `GET /api/jobs`
+- `GET /api/search?q=<query>`
 - `POST /api/jobs/action`
 - `POST /api/download`
 - `GET /api/status`
@@ -179,7 +200,8 @@ bun run typecheck
 bun run test:native
 cmake --build soggfy-macos/build -j4
 bun run build:cli
-cd webapp && bun run typecheck && bun run build
+bun run docs:build
+cd webapp && bun test src/server/__tests__ src/components/soggfy/__tests__ && bun run typecheck && bun run build
 bun run doctor
 ```
 
