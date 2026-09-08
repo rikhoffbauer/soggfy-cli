@@ -16,6 +16,7 @@ import { ZipArchive } from "archiver";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "../../src/core/spotify-runtime";
 import { sendIPC as sendIpcCommand } from "../../src/core/ipc";
 import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
+import { groupSearchResults, searchSpotify } from "../../src/core/spotify-search";
 import {
   CAPTURE_BACKEND,
   OUTPUT_DIR,
@@ -762,134 +763,6 @@ async function resolveSpotifyUrl(input: string): Promise<string[]> {
   return [];
 }
 
-let _anonymousAccessToken: string | null = null;
-let _anonymousTokenExpiry = 0;
-let _clientToken: string | null = null;
-
-async function getAnonymousTokens() {
-  if (_anonymousAccessToken && _clientToken && Date.now() < _anonymousTokenExpiry) {
-    return { accessToken: _anonymousAccessToken, clientToken: _clientToken };
-  }
-
-  const cookie = process.env.SPOTIFY_COOKIE;
-  if (!cookie?.includes("sp_dc=")) {
-    console.error("[Server] Missing SPOTIFY_COOKIE in environment. Search will fail.");
-    return null;
-  }
-
-  try {
-    const tokenRes = await fetch("https://open.spotify.com/get_access_token?reason=transport&productType=web_player", {
-      headers: {
-        Cookie: cookie,
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-    });
-    if (!tokenRes.ok) {
-      console.error("[Server] get_access_token failed:", tokenRes.status, await tokenRes.text());
-      return null;
-    }
-
-    const tokenData = await tokenRes.json();
-    const accessToken = tokenData.accessToken;
-    const clientId = tokenData.clientId;
-    _anonymousTokenExpiry = tokenData.accessTokenExpirationTimestampMs ? tokenData.accessTokenExpirationTimestampMs - 60_000 : Date.now() + 3_600_000;
-
-    const clientTokenRes = await fetch("https://clienttoken.spotify.com/v1/clienttoken", {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({
-        client_data: {
-          client_version: "1.2.93.177.g139bfa35",
-          client_id: clientId,
-          js_sdk_data: {
-            device_brand: "Apple",
-            device_model: "unknown",
-            os: "macos",
-            os_version: "10.15.7",
-            device_id: "06d5275f-c577-4569-8d9c-36ee0a344ac3",
-            device_type: "computer",
-          },
-        },
-      }),
-    });
-    const clientTokenData = await clientTokenRes.json();
-    const clientToken = clientTokenData.granted_token?.token;
-    if (!clientToken) return null;
-
-    _anonymousAccessToken = accessToken;
-    _clientToken = clientToken;
-    return { accessToken, clientToken };
-  } catch (err) {
-    console.error("[Server] Failed to get Spotify tokens:", err);
-    return null;
-  }
-}
-
-async function searchSpotify(query: string) {
-  const tokens = await getAnonymousTokens();
-  if (!tokens) throw new Error("Failed to get anonymous tokens");
-
-  const payload = {
-    variables: {
-      searchTerm: query,
-      offset: 0,
-      limit: 10,
-      numberOfTopResults: 5,
-      includeAudiobooks: false,
-      includeArtistHasConcertsField: false,
-      includePreReleases: true,
-      includeAlbumPreReleases: false,
-      includeAuthors: false,
-      includeEpisodeContentRatingsV2: false,
-      isPrefix: null,
-      sectionFilters: ["GENERIC"],
-    },
-    operationName: "searchDesktop",
-    extensions: {
-      persistedQuery: {
-        version: 1,
-        sha256Hash: "eff59fa0a3d026b88b56fddbcf4bdfa16a186b8175a5c1a358c072e053c2e5b0",
-      },
-    },
-  };
-
-  const res = await fetch("https://api-partner.spotify.com/pathfinder/v2/query", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${tokens.accessToken}`,
-      "client-token": tokens.clientToken,
-      "content-type": "application/json;charset=UTF-8",
-    },
-    body: JSON.stringify(payload),
-  });
-  const text = await res.text();
-  let data: any;
-  try { data = JSON.parse(text); }
-  catch { throw new Error(`Spotify API returned invalid JSON: ${text.slice(0, 500)}`); }
-  if (data.errors) throw new Error(data.errors[0]?.message || "Search failed");
-
-  const mappedTracks: any[] = [];
-  const searchV2 = data.data?.searchV2;
-  if (searchV2?.tracks?.items) {
-    for (const wrapper of searchV2.tracks.items) {
-      const track = wrapper.item?.data;
-      if (!track) continue;
-      const artistNames = track.artists?.items?.map((a: any) => ({ name: a.profile?.name })) || [];
-      const coverUrl = track.albumOfTrack?.coverArt?.sources?.[0]?.url;
-      mappedTracks.push({
-        id: track.id,
-        name: track.name,
-        type: "track",
-        external_urls: { spotify: track.uri },
-        album: { images: coverUrl ? [{ url: coverUrl }] : [] },
-        artists: artistNames,
-      });
-    }
-  }
-  return { tracks: { items: mappedTracks }, albums: { items: [] }, playlists: { items: [] } };
-}
-
 function findOutputForTrack(trackId: string): { path: string; format: "mp3" | "wav" | "ogg" } | null {
   const job = jobs.findByTrack(trackId);
   if (job?.savedPath && existsSync(job.savedPath)) {
@@ -953,8 +826,12 @@ const server = Bun.serve({
         const url = new URL(req.url);
         const query = url.searchParams.get("q");
         if (!query) return jsonResponse({ error: "Missing query" }, { status: 400 });
-        try { return jsonResponse(await searchSpotify(query)); }
-        catch (err: any) { return jsonResponse({ error: err.message }, { status: 500 }); }
+        try {
+          const results = await searchSpotify(query);
+          return jsonResponse(groupSearchResults(results));
+        } catch (err: any) {
+          return jsonResponse({ error: err.message }, { status: 500 });
+        }
       },
     },
     "/api/download-all": {

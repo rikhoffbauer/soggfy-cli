@@ -58,6 +58,11 @@ async function main(): Promise<void> {
       await downloadCommand(subArgs);
       break;
     }
+    case "search": {
+      const { searchCommand } = await import("./commands/search");
+      await searchCommand(subArgs);
+      break;
+    }
     case "daemon": {
       const { daemonCommand } = await import("./commands/daemon");
       await daemonCommand(subArgs);
