@@ -136,3 +136,27 @@ test("searchSpotify filters result types using a supplied transport", async () =
     if (oldClient === undefined) delete process.env.SPOTIFY_CLIENT_TOKEN; else process.env.SPOTIFY_CLIENT_TOKEN = oldClient;
   }
 });
+
+
+test("searchSpotify forwards an explicit result offset to Pathfinder", async () => {
+  const oldAccess = process.env.SPOTIFY_ACCESS_TOKEN;
+  const oldClient = process.env.SPOTIFY_CLIENT_TOKEN;
+  process.env.SPOTIFY_ACCESS_TOKEN = "access";
+  process.env.SPOTIFY_CLIENT_TOKEN = "client";
+  invalidateSpotifySearchTokens();
+  let requestBody: any;
+  try {
+    await searchSpotify("one", {
+      types: ["track"], limit: 5, offset: 25,
+      fetchImpl: (async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify(response), { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(requestBody.variables.offset).toBe(25);
+  } finally {
+    invalidateSpotifySearchTokens();
+    if (oldAccess === undefined) delete process.env.SPOTIFY_ACCESS_TOKEN; else process.env.SPOTIFY_ACCESS_TOKEN = oldAccess;
+    if (oldClient === undefined) delete process.env.SPOTIFY_CLIENT_TOKEN; else process.env.SPOTIFY_CLIENT_TOKEN = oldClient;
+  }
+});

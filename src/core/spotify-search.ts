@@ -15,6 +15,7 @@ export interface SpotifySearchResult {
 export interface SpotifySearchOptions {
   types?: readonly SpotifySearchType[];
   limit?: number;
+  offset?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -287,11 +288,12 @@ export async function searchSpotify(query: string, options: SpotifySearchOptions
   const fetchImpl = options.fetchImpl ?? fetch;
   const types = options.types?.length ? [...options.types] : normalizeSearchTypes("all");
   const limit = clampSearchLimit(options.limit ?? 10);
+  const offset = Number.isFinite(options.offset) ? Math.max(0, Math.trunc(options.offset!)) : 0;
   const tokens = await getSearchTokens(fetchImpl);
   const body = {
     variables: {
       searchTerm: trimmed,
-      offset: 0,
+      offset,
       limit,
       numberOfTopResults: Math.min(limit, 5),
       includeAudiobooks: false,
