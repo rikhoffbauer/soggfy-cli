@@ -40,6 +40,7 @@ typedef int (*DecodeAudioData_t)(void* x0, float* x1, size_t* x2, const char* x3
 static DecodeAudioData_t orig_DecodeAudioData = nullptr;
 
 std::atomic<bool> g_ogg_stream_active{false};
+std::atomic<bool> g_decoder_hooks_ready{false};
 
 static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
     if (!orig_ogg_stream_pagein) return 0;
@@ -218,6 +219,7 @@ void InstallDecoderHook() {
         reinterpret_cast<void*>(my_ogg_stream_pagein),
         reinterpret_cast<void**>(&orig_ogg_stream_pagein));
 
+    g_decoder_hooks_ready.store(decodeOk && oggOk);
     if (!decodeOk || !oggOk) {
         printf("[Soggfy-ERROR] Ogg backend disabled for this Spotify build.\n");
         orig_DecodeAudioData = nullptr;

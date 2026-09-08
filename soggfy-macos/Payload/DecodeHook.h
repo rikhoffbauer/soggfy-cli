@@ -12,4 +12,5 @@ struct Buffer {
 
 void InstallDecoderHook();
 extern std::atomic<bool> g_ogg_stream_active;
+extern std::atomic<bool> g_decoder_hooks_ready;
 extern uint32_t g_active_ogg_serial;

@@ -519,6 +519,14 @@ void StartIPCServer() {
       const char *res = g_hooks_initialized.load() ? "pong" : "initializing";
       SendResponse(client_fd, res);
       printf("[Soggfy-IPC] Received command: ping (response: %s)\n", res);
+    } else if (req == "get_capabilities") {
+      char response[512];
+      snprintf(response, sizeof(response),
+               R"({"hooksInitialized":%s,"decoderHooksReady":%s,"captureBackend":"%s"})",
+               g_hooks_initialized.load() ? "true" : "false",
+               g_decoder_hooks_ready.load() ? "true" : "false",
+               CaptureBackendName(SelectedCaptureBackend()));
+      SendResponse(client_fd, response);
     } else if (req.rfind("play ", 0) == 0) {
       std::string uri = req.substr(5);
       TrimInPlace(uri);

@@ -12,28 +12,38 @@ import {
   CAPTURE_BACKEND,
 } from "./paths";
 
+export interface SpotifyInstanceOptions {
+  appPath?: string;
+  enforceSupportedVersion?: boolean;
+}
+
 export class SpotifyInstance {
   process: Subprocess | null = null;
   socketPath: string;
   savePath: string;
   profileDir: string;
+  appPath: string;
+  enforceSupportedVersion: boolean;
   isReady = false;
 
   constructor(
     socketPath = IPC_SOCKET,
     savePath = SAVE_PATH,
     profileDir?: string,
+    options: SpotifyInstanceOptions = {},
   ) {
     this.socketPath = socketPath;
     this.savePath = savePath;
     this.profileDir = profileDir || join(PROFILES_DIR, "cli_instance");
+    this.appPath = options.appPath ?? PATCHED_APP;
+    this.enforceSupportedVersion = options.enforceSupportedVersion !== false;
   }
 
   async start(): Promise<void> {
     log.info("Starting patched Spotify instance...");
 
-    const binaryPath = join(PATCHED_APP, "Contents/MacOS/Spotify");
-    const dylibPath = join(PATCHED_APP, "Contents/MacOS/libsoggfy.dylib");
+    const binaryPath = join(this.appPath, "Contents/MacOS/Spotify");
+    const dylibPath = join(this.appPath, "Contents/MacOS/libsoggfy.dylib");
 
     if (!existsSync(binaryPath)) {
       throw new Error(`Patched Spotify binary not found: ${binaryPath}. Run 'soggfy install' first.`);
@@ -41,7 +51,7 @@ export class SpotifyInstance {
     if (!existsSync(dylibPath)) {
       throw new Error(`Payload dylib not found: ${dylibPath}. Run 'soggfy install' first.`);
     }
-    assertSupportedSpotifyBundle(PATCHED_APP);
+    if (this.enforceSupportedVersion) assertSupportedSpotifyBundle(this.appPath);
 
     // Prepare directories
     mkdirSync(this.savePath, { recursive: true, mode: 0o700 });
