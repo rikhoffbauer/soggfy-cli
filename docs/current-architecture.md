@@ -11,7 +11,7 @@ The private native hooks are validated specifically for **Spotify 1.2.98.301 arm
 ## End-to-end pipeline
 
 1. Setup copies `/Applications/Spotify.app` to `~/.soggfy/workspace/PatchedSpotify.app`, builds/copies `libsoggfy.dylib`, signs the payload and completed app bundle, and verifies the signature.
-2. A CLI or webapp instance creates private profile/temp/save directories and clones only the Spotify login state needed for authenticated playback. The large update cache is not duplicated.
+2. The daemon creates the private profile/temp/save directories and clones only the Spotify login state needed for authenticated playback. Non-daemon CLI fallback instances do the same in PID-scoped paths.
 3. The patched Spotify process starts with `DYLD_INSERT_LIBRARIES`, a unique IPC socket/save path, an isolated home/TMPDIR/profile/cache, `SOGGFY_CAPTURE_BACKEND=ogg`, and output muting enabled by default.
 4. The main injected process starts IPC and publishes shared track-generation/capture-gate state. Helper processes consume the same shared state.
 5. `set_track` resets previous track state and starts a new generation. The client sends `play` and keeps retrying while Spotify starts. Capture is not accepted until `get_playing` confirms the requested track.
@@ -39,23 +39,17 @@ Unsafe experimental PCM capture families were removed from the production hook s
 
 The root CLI uses `src/core/*` for paths, IPC, capture control, media validation, Spotify instance lifecycle, login-state cloning, and compatibility checks.
 
-The daemon uses `/tmp/soggfy_cli.sock` and `/tmp/Soggfy_cli` by default. A non-daemon stream uses PID-specific temporary socket/save paths and always tears down the exact process tree it started.
+The daemon uses `/tmp/soggfy_cli.sock` and `/tmp/Soggfy_cli` by default. A non-daemon CLI download uses PID-specific temporary socket/save paths and always tears down the exact process tree it started.
 
 The packaged daemon resolves its current bundle/executable and re-executes that artifact. It does not reference `../cli.ts` at runtime.
 
-## Webapp runtime
+## Daemon-backed web runtime
 
-The webapp has its own job and pool orchestration but shares the low-level runtime primitives with the CLI. Per-instance runtime state lives below:
+The web server is loaded into the daemon process after the daemon-owned `SpotifyInstance` is ready. The daemon registers that live object in a private in-process runtime registry before loading the web module. Web capture operations call the registered instance directly; they do not discover or spawn a second patched Spotify process.
 
-```text
-$SOGGFY_HOME/runtime/instance_<n>/
-$SOGGFY_HOME/runtime/instance_<n>.sock
-$SOGGFY_HOME/workspace/profiles/instance_<n>/
-```
+The daemon instance remains the sole owner of `/tmp/soggfy_cli.sock`, `/tmp/Soggfy_cli`, and `$SOGGFY_HOME/workspace/profiles/cli_instance`. The web job scheduler tracks HTTP jobs and media processing around that shared capture instance.
 
-This avoids global `/tmp/soggfy_instance_*` collisions and makes isolated smoke/integration runs possible simply by setting a different `SOGGFY_HOME`.
-
-The webapp refreshes the payload from the current native build before pool startup, then re-signs and strictly verifies the completed patched app bundle.
+The web layer therefore does not refresh/re-sign the payload or create `runtime/instance_<n>` workers when running inside the daemon. Standalone webapp execution remains an internal development path, not the normal product lifecycle.
 
 ## Job state machine
 
@@ -68,7 +62,7 @@ Legacy states are derived from these structured jobs rather than being the sourc
 
 ## HTTP endpoints
 
-- `GET /api/health` — service/pool/job summary.
+- `GET /api/health` — daemon/web/job summary (legacy pool fields remain for UI compatibility).
 - `GET /api/instances` — per-instance status and recent logs.
 - `GET /api/jobs` — structured jobs, queue, and instance snapshots.
 - `POST /api/jobs/action` — cancel/retry.
@@ -82,7 +76,7 @@ Legacy states are derived from these structured jobs rather than being the sourc
 
 Runtime cleanup never uses `pkill`, `pgrep -f`, or `killall`. The shared lifecycle helper builds the exact descendant set from the launched root PID, sends TERM deepest-first/root, then KILLs only surviving members of that same set.
 
-The same principle is used by CLI instances, webapp instances, and interactive auth/setup flows.
+The same principle is used by daemon/fallback CLI instances and interactive auth/setup flows.
 
 ## Privacy and filesystem permissions
 
@@ -107,11 +101,11 @@ Live verification on the same date:
 
 - CLI captured `4PTG3Z6ehGkBFwjybzWkR8` as a 4,286,257-byte Ogg/Vorbis file, 44.1 kHz stereo, 213.573333 seconds. Signal validation passed with no warnings.
 - The first Spotify AppleEvent returned `-1708`; the retry path later returned success and capture proceeded, validating the startup retry behavior.
-- An isolated webapp (`SOGGFY_HOME=/tmp/...`, unique HTTP/debug ports) captured the same track in one job attempt, validated the Ogg, transcoded/tagged an MP3 of the same duration, and shut down with no leaked capture process or listening test port.
+- The combined daemon/web runtime was live-smoke-tested on 2026-09-08: HTTP health and UI both returned 200 while process inspection showed exactly one daemon-owned patched Spotify root process and no web-owned `instance_1` worker.
 
 ## Remaining intentional limitations
 
 - Spotify's private functions remain version-specific. A Spotify update requires deliberate re-analysis/new validated signatures; automatic best-effort hooking is intentionally not supported.
 - Spotify search uses a private web API and `SPOTIFY_COOKIE`; direct track capture does not depend on that search path.
 - IPC is still a compact string protocol rather than a typed/versioned protocol.
-- CLI daemon orchestration and webapp pool/job orchestration remain separate higher-level products, though they now share the runtime primitives that previously diverged.
+- Web job scheduling and CLI download orchestration are still separate request layers around the same daemon-owned Spotify instance; high-level cross-client job serialization is not yet centralized.

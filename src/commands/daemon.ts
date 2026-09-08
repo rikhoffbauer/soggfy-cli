@@ -9,9 +9,12 @@ import {
   writeFileSync,
 } from "fs";
 import { spawn } from "child_process";
+import { dirname, resolve } from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 import { log } from "../core/log";
 import { PID_FILE, DAEMON_LOG, IPC_SOCKET, SAVE_PATH, ensureDirs } from "../core/paths";
 import { SpotifyInstance } from "../core/instance";
+import { registerDaemonSpotifyInstance, unregisterDaemonSpotifyInstance } from "../core/daemon-runtime";
 import { ping } from "../core/ipc";
 
 export async function daemonCommand(args: string[]): Promise<void> {
@@ -27,7 +30,7 @@ Subcommands:
   restart   Restart the daemon
   status    Show daemon status
   logs      Tail daemon logs
-  run       Run daemon in foreground (internal)
+  run       Run daemon + web server in foreground (internal)
 `);
     return;
   }
@@ -179,6 +182,17 @@ function appendDaemonLog(message: string): void {
   chmodSync(DAEMON_LOG, 0o600);
 }
 
+export function resolveWebappServerEntry(moduleDir = dirname(fileURLToPath(import.meta.url))): string {
+  const candidates = [
+    resolve(moduleDir, "../../webapp/src/index.ts"),
+    resolve(moduleDir, "../webapp/src/index.ts"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error(`Webapp server entry not found. Checked: ${candidates.join(", ")}`);
+}
+
 async function daemonRun(): Promise<void> {
   ensureDirs();
   writeFileSync(PID_FILE, String(process.pid), { mode: 0o600 });
@@ -192,6 +206,7 @@ async function daemonRun(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     appendDaemonLog("Daemon shutting down...");
+    unregisterDaemonSpotifyInstance(instance);
     await instance.stop();
     try { unlinkSync(PID_FILE); } catch {}
   };
@@ -202,6 +217,11 @@ async function daemonRun(): Promise<void> {
   try {
     await instance.start();
     appendDaemonLog("Spotify instance ready.");
+    registerDaemonSpotifyInstance(instance);
+    process.env.SOGGFY_USE_DAEMON_INSTANCE = "1";
+    const webappEntryUrl = pathToFileURL(resolveWebappServerEntry()).href;
+    await import(webappEntryUrl);
+    appendDaemonLog(`Web UI ready at http://${process.env.SOGGFY_HOST || "127.0.0.1"}:${process.env.SOGGFY_PORT || "8085"}.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     appendDaemonLog(`Failed to start Spotify instance: ${message}`);

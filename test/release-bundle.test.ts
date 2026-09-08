@@ -33,7 +33,7 @@ test("bundled daemon start re-executes the bundle instead of source files", asyn
   const home = mkdtempSync(join(tmpdir(), "soggfy-bundled-home-"));
   try {
     const proc = Bun.spawn([process.execPath, bundle, "daemon", "start"], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, SOGGFY_HOME: join(home, ".soggfy") },
       stdout: "pipe",
       stderr: "pipe",
     });

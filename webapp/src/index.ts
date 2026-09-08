@@ -15,6 +15,7 @@ import NodeID3 from "node-id3";
 import { ZipArchive } from "archiver";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "../../src/core/spotify-runtime";
 import { sendIPC as sendIpcCommand } from "../../src/core/ipc";
+import { getDaemonSpotifyInstance } from "../../src/core/daemon-runtime";
 import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
 import { groupSearchResults, searchSpotify } from "../../src/core/spotify-search";
 import {
@@ -23,6 +24,8 @@ import {
   PROFILES_DIR,
   SOGGFY_HOME,
   WORKSPACE_DIR,
+  IPC_SOCKET,
+  SAVE_PATH,
 } from "../../src/core/paths";
 import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./server/http";
 import { extractTrackIds, parseAlbumId, parsePlaylistId, parseTrackId } from "./server/spotify-url";
@@ -47,7 +50,8 @@ const HOSTNAME = process.env.SOGGFY_HOST || "127.0.0.1";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const WEBAPP_DIR = join(SERVER_DIR, "..");
 const REPO_ROOT = join(WEBAPP_DIR, "..");
-const POOL_SIZE = Number.parseInt(process.env.SOGGFY_POOL_SIZE || "1", 10);
+const USE_DAEMON_INSTANCE = process.env.SOGGFY_USE_DAEMON_INSTANCE === "1";
+const POOL_SIZE = USE_DAEMON_INSTANCE ? 1 : Number.parseInt(process.env.SOGGFY_POOL_SIZE || "1", 10);
 const SOGGFY_HIDDEN = process.env.SOGGFY_HIDDEN !== "0";
 const MAX_ATTEMPTS = Number.parseInt(process.env.SOGGFY_MAX_ATTEMPTS || "2", 10);
 const BASE_DEBUG_PORT = Number.parseInt(process.env.SOGGFY_DEBUG_PORT_BASE || "9222", 10);
@@ -165,9 +169,15 @@ class SpotifyInstance {
 
   constructor(id: number) {
     this.id = id;
-    this.socketPath = join(RUNTIME_DIR, `instance_${id}.sock`);
-    this.savePath = join(RUNTIME_DIR, `instance_${id}`);
-    this.profileDir = join(PROFILES_DIR, `instance_${id}`);
+    if (USE_DAEMON_INSTANCE && id === 1) {
+      this.socketPath = IPC_SOCKET;
+      this.savePath = SAVE_PATH;
+      this.profileDir = join(PROFILES_DIR, "cli_instance");
+    } else {
+      this.socketPath = join(RUNTIME_DIR, `instance_${id}.sock`);
+      this.savePath = join(RUNTIME_DIR, `instance_${id}`);
+      this.profileDir = join(PROFILES_DIR, `instance_${id}`);
+    }
     this.debugPort = BASE_DEBUG_PORT + id;
   }
 
@@ -199,6 +209,9 @@ class SpotifyInstance {
 
   async sendIPC(command: string, retries = 4, timeoutMs = 2500): Promise<string> {
     try {
+      if (USE_DAEMON_INSTANCE && this.id === 1) {
+        return await getDaemonSpotifyInstance().sendCommand(command);
+      }
       return await sendIpcCommand(this.socketPath, command, { retries, timeoutMs });
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
@@ -232,6 +245,20 @@ class SpotifyInstance {
     this.statusText = "Starting";
     this.lastError = undefined;
     this.log("Initializing instance...");
+
+    if (USE_DAEMON_INSTANCE && this.id === 1) {
+      const daemonInstance = getDaemonSpotifyInstance();
+      this.process = daemonInstance.process;
+      if (!daemonInstance.isReady || !(await this.ping())) {
+        this.statusText = "Socket Error";
+        this.isReady = false;
+        throw new Error(`Daemon Spotify IPC is not responsive at ${this.socketPath}`);
+      }
+      this.isReady = true;
+      this.statusText = "Ready";
+      this.log("Attached to daemon-owned Spotify instance.");
+      return;
+    }
 
     mkdirSync(this.savePath, { recursive: true, mode: 0o700 });
     mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
@@ -359,6 +386,10 @@ class SpotifyInstance {
     this.currentTrack = null;
     this.currentJobId = null;
     this.statusText = "Stopped";
+    if (USE_DAEMON_INSTANCE && this.id === 1) {
+      this.log("Detached from daemon-owned Spotify instance.");
+      return;
+    }
     if (this.process) {
       const pid = this.process.pid;
       await terminateProcessTree(pid, this.process.exited);
@@ -376,6 +407,12 @@ class SpotifyInstance {
 
   async recycle(reason: string) {
     this.log(`Recycling instance: ${reason}`);
+    if (USE_DAEMON_INSTANCE && this.id === 1) {
+      this.isReady = await this.ping();
+      this.statusText = this.isReady ? "Ready" : "Socket Error";
+      if (!this.isReady) throw new Error("Daemon-owned Spotify instance is not responsive; restart the Soggfy daemon");
+      return;
+    }
     await this.stop();
     await new Promise((r) => setTimeout(r, 1000));
     await this.start();
@@ -609,8 +646,8 @@ class SpotifyPoolManager {
   }
 
   async start() {
-    await preparePayload();
-    console.log(`[Server] Starting Spotify pool with ${this.instances.length} instances...`);
+    if (!USE_DAEMON_INSTANCE) await preparePayload();
+    console.log(`[Server] ${USE_DAEMON_INSTANCE ? "Attaching to daemon Spotify instance" : `Starting Spotify pool with ${this.instances.length} instances`}...`);
     for (const inst of this.instances) {
       try {
         await inst.start();
@@ -919,7 +956,7 @@ console.log(`Soggfy supervised API server running at http://${HOSTNAME}:${PORT}`
 console.log(`=============================================================`);
 console.log(`- Web UI: http://${HOSTNAME}:${PORT}/`);
 console.log(`- Repo root: ${REPO_ROOT}`);
-console.log(`- Pool size: ${POOL_SIZE}`);
+console.log(`- Runtime: ${USE_DAEMON_INSTANCE ? "daemon-owned Spotify instance" : `standalone pool (${POOL_SIZE})`}`);
 console.log(`- Capture backend: ${CAPTURE_BACKEND}`);
 console.log(`- Health: http://${HOSTNAME}:${PORT}/api/health`);
 console.log(`=============================================================\n`);

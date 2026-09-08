@@ -20,6 +20,7 @@ ${"\x1b[1m"}EXAMPLES${"\x1b[0m"}
   soggfy install
   soggfy auth login
   soggfy daemon start
+  soggfy web
   soggfy download 4PTG3Z6ehGkBFwjybzWkR8 > song.mp3
   soggfy download -o song.flac https://open.spotify.com/track/...
   soggfy download --format wav spotify:track:... | ffplay -
@@ -71,6 +72,12 @@ async function main(): Promise<void> {
     case "search": {
       const { searchCommand } = await import("./commands/search");
       await searchCommand(subArgs);
+      break;
+    }
+    case "web":
+    case "webapp": {
+      const { webCommand } = await import("./commands/web");
+      await webCommand(subArgs);
       break;
     }
     case "daemon": {

@@ -9,19 +9,16 @@ Soggfy intentionally has a small configuration surface. Runtime state defaults t
 | `SOGGFY_HOME` | Root for runtime state, downloads, profiles, logs, and workspace. |
 | `SOGGFY_CAPTURE_BACKEND` | Native capture mode. Production supports `ogg` (default) or `disabled`. |
 
-## Web server and worker pool
+## Daemon and web server
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SOGGFY_HOST` | `127.0.0.1` | HTTP bind address. |
 | `SOGGFY_PORT` | `8085` | HTTP port. |
-| `SOGGFY_POOL_SIZE` | `1` | Number of isolated Spotify capture instances. |
 | `SOGGFY_MAX_ATTEMPTS` | `2` | Job attempt limit. |
-| `SOGGFY_DEBUG_PORT_BASE` | `9222` | Starting Chromium debug port for instance isolation. |
-| `SOGGFY_HIDDEN` | enabled | Set to `0` to show capture Spotify windows. |
 | `SOGGFY_MUTE_OUTPUT` | `1` | Mute audible Spotify output while capturing. |
 
-Each worker gets its own socket, profile, temp directory, cache, and save path beneath `SOGGFY_HOME`.
+The normal runtime has one daemon-owned Spotify instance. The daemon and web UI/API share that same instance in-process; no additional web worker is created.
 
 ## Spotify catalog search
 

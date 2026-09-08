@@ -2,6 +2,7 @@ import downloadHelp from "../../docs/cli/download.md" with { type: "text" };
 import searchHelp from "../../docs/cli/search.md" with { type: "text" };
 import authHelp from "../../docs/cli/auth.md" with { type: "text" };
 import daemonHelp from "../../docs/cli/daemon.md" with { type: "text" };
+import webHelp from "../../docs/cli/web.md" with { type: "text" };
 import installHelp from "../../docs/cli/install.md" with { type: "text" };
 import fingerprintHelp from "../../docs/cli/fingerprint.md" with { type: "text" };
 import scriptingHelp from "../../docs/guides/scripting.md" with { type: "text" };
@@ -14,6 +15,7 @@ const TOPICS: Readonly<Record<string, string>> = {
   search: searchHelp,
   auth: authHelp,
   daemon: daemonHelp,
+  web: webHelp,
   install: installHelp,
   fingerprint: fingerprintHelp,
   scripting: scriptingHelp,
@@ -27,7 +29,8 @@ export function listHelpTopics(): string[] {
 }
 
 export function getHelpTopic(topic: string): string | null {
-  const normalized = topic.toLowerCase() === "stream" ? "download" : topic.toLowerCase();
+  const lower = topic.toLowerCase();
+  const normalized = lower === "stream" ? "download" : lower === "webapp" ? "web" : lower;
   return TOPICS[normalized] ?? null;
 }
 

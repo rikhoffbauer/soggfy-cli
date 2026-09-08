@@ -24,6 +24,7 @@ export default defineConfig({
           { text: "search", link: "/cli/search" },
           { text: "auth", link: "/cli/auth" },
           { text: "daemon", link: "/cli/daemon" },
+          { text: "web", link: "/cli/web" },
           { text: "install", link: "/cli/install" },
           { text: "fingerprint", link: "/cli/fingerprint" },
         ],

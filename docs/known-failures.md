@@ -73,11 +73,9 @@ Webapp Spotify search depends on `SPOTIFY_COOKIE` and private Spotify web APIs. 
 
 Direct track IDs/URIs/URLs can still be captured when the local authenticated Spotify runtime is healthy.
 
-## Pool partial readiness
+## Daemon/web readiness
 
-A webapp pool may have fewer ready instances than configured. Check `/api/health` (`readyInstances`) and `/api/instances`; do not infer capacity from `poolSize` alone.
-
-The readiness loop now exits immediately if the launched Spotify root process dies rather than waiting the entire socket timeout.
+The web server attaches to the daemon-owned Spotify instance. `/api/health` may be reachable before that instance reports ready; check `readyInstances` before queueing capture work. If the daemon-owned Spotify process becomes unresponsive, restart the daemon rather than spawning a second web worker.
 
 ## Cancellation and retries
 

@@ -149,14 +149,17 @@ The webapp keeps its job/pool orchestration layer, but its per-instance socket, 
 
 The web GUI is organized around the normal user workflow: Spotify search/paste first, then active queue and recent downloads. Instance health and logs remain available under a collapsed diagnostics disclosure instead of occupying the primary workspace. Completed files can be played or saved directly from the history panel.
 
-## Web service
+## Daemon + web service
 
-Start it with:
+The daemon owns the patched Spotify process and serves the web UI/API in the same process. Start either entry point:
 
 ```bash
-cd webapp
-bun run src/index.ts
+soggfy daemon start
+# or
+soggfy web
 ```
+
+The web layer uses the daemon's live `SpotifyInstance` through an internal in-process API; it does not launch a second Spotify worker. The default UI is `http://127.0.0.1:8085`. `soggfy web --help` documents bind/port overrides, and `soggfy webapp` is retained as an alias.
 
 Important endpoints:
 

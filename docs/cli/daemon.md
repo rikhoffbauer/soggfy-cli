@@ -1,6 +1,6 @@
 # `soggfy daemon`
 
-Manage a reusable background Spotify capture instance so repeated downloads avoid launch/setup overhead.
+Manage the reusable background Soggfy service. The daemon owns one patched Spotify capture instance and serves the local web UI/API in the same process.
 
 ## Usage
 
@@ -10,19 +10,22 @@ soggfy daemon <start|stop|status|restart|logs>
 
 ## Actions
 
-- `start` launches the bundled daemon process and waits for IPC readiness.
-- `stop` terminates the exact daemon process tree recorded by Soggfy.
-- `status` checks the PID and IPC endpoint.
+- `start` launches the daemon, starts its Spotify capture instance, then starts the web UI/API.
+- `stop` terminates the exact daemon process tree recorded by Soggfy; the web server stops with it.
+- `status` checks the daemon PID and Spotify IPC endpoint.
 - `restart` performs an exact stop followed by start.
-- `logs` prints the daemon log.
+- `logs` prints the daemon log, including web-server startup/errors.
 
 ```sh
 soggfy daemon start
+open http://127.0.0.1:8085
 soggfy download -o song.mp3 spotify:track:4PTG3Z6ehGkBFwjybzWkR8
 soggfy daemon status
 soggfy daemon logs
 ```
 
-`download` automatically uses the daemon when it is healthy. If it is unavailable, the command falls back to a temporary isolated instance unless other startup requirements fail.
+`download` and the web UI use the same daemon-owned `SpotifyInstance`. The web server receives that live instance through Soggfy's private in-process runtime API and calls it directly; it does not launch or own a second patched Spotify process. The instance itself still communicates with the injected Spotify payload over Soggfy's local IPC socket.
 
-The daemon never routes binary capture output into its own log. Media stays on the invoking command's stdout or requested output path.
+The web UI/API binds to `127.0.0.1:8085` by default. Set `SOGGFY_HOST` and `SOGGFY_PORT` before starting the daemon to change this. `soggfy web` is a convenience alias that ensures the daemon is running and accepts `--host`/`--port` when starting it.
+
+If the daemon is unavailable, `download` can still fall back to a temporary isolated instance unless other startup requirements fail. Binary capture output is never routed into the daemon log.

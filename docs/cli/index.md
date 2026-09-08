@@ -9,6 +9,7 @@ soggfy <command> [options]
 - [`download`](./download.md) — capture audio; stdout remains supported for pipelines.
 - [`search`](./search.md) — search tracks, artists, and playlists.
 - [`daemon`](./daemon.md) — manage the reusable background capture instance.
+- [`web`](./web.md) — start the local web application and API server.
 - [`auth`](./auth.md) — manage desktop Spotify login state.
 - [`install`](./install.md) — prepare dependencies, supported Spotify, and payload.
 - [`fingerprint`](./fingerprint.md) — emit a Chromaprint fingerprint.
