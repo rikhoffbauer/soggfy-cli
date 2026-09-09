@@ -17,14 +17,14 @@ import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessT
 import { sendIPC as sendIpcCommand } from "../../src/core/ipc";
 import { getDaemonSpotifyInstance } from "../../src/core/daemon-runtime";
 import { getHttpConfig } from "../../src/core/http-config";
-import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
+import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "../../src/core/capture-control";
 import { groupSearchResults, searchSpotify } from "../../src/core/spotify-search";
 import {
   fetchAllSpotifyPlaylistTracks,
   fetchSpotifyPlaylistPage,
   type SpotifyPlaylistTrack,
 } from "../../src/core/spotify-playlist";
-import { resolveInput as resolveSpotifyInput } from "../../src/core/metadata";
+import { resolveInput as resolveSpotifyInput, resolvePlayableTrackId } from "../../src/core/metadata";
 import { fetchSpotifyLyrics } from "../../src/core/spotify-lyrics";
 import {
   CAPTURE_BACKEND,
@@ -480,7 +480,7 @@ class SpotifyInstance {
       this.statusText = `Playing: ${trackId}`;
       jobs.transition(job, "playing");
       assertJobActive(job);
-      await this.sendIPC(`play spotify:track:${trackId}`);
+      await requestTrackPlayback((command) => this.sendIPC(command, 1), trackId);
 
       // Wait for the target track to actually start playing (not an ad).
       // The dylib gates capture via PlaybackStateChanged notifications.
@@ -500,10 +500,6 @@ class SpotifyInstance {
           }
         } catch {}
 
-        if (i > 0 && i % 6 === 0 && !trackConfirmed) {
-          await this.sendIPC(`play spotify:track:${trackId}`).catch(() => undefined);
-          jobs.log(job, "re-requested target track playback");
-        }
       }
       if (!trackConfirmed) {
         await this.sendIPC("pause").catch(() => undefined);
@@ -703,19 +699,19 @@ class SpotifyPoolManager {
   }
 
   async addJob(trackParam: string): Promise<DownloadJob> {
-    const trackId = parseTrackId(trackParam);
-    if (!trackId) throw new Error("Invalid Spotify track URL, URI, or ID format");
+    const requestedTrackId = parseTrackId(trackParam);
+    if (!requestedTrackId) throw new Error("Invalid Spotify track URL, URI, or ID format");
 
+    const resolution = await resolvePlayableTrackId(requestedTrackId);
+    const trackId = resolution.trackId;
     const reusable = jobs.findReusable(trackId);
     if (reusable) return reusable;
 
-    const job = jobs.create(trackId, GLOBAL_METADATA[trackId]);
-    fetchTrackMetadata(trackId).then((meta) => {
-      if (meta) {
-        GLOBAL_METADATA[trackId] = meta;
-        jobs.patch(job, { metadata: meta }, "metadata prefetched");
-      }
-    }).catch(() => undefined);
+    GLOBAL_METADATA[trackId] = resolution.metadata;
+    const job = jobs.create(trackId, resolution.metadata);
+    if (resolution.relinked) {
+      jobs.log(job, `relinked unavailable Spotify track ${requestedTrackId} -> ${trackId}`);
+    }
 
     this.queue.enqueue(this.queueEntry(job));
     this.dispatch();
@@ -723,19 +719,14 @@ class SpotifyPoolManager {
   }
 
   async playNow(trackParam: string): Promise<{ job: DownloadJob; interruptedJobId?: string }> {
-    const trackId = parseTrackId(trackParam);
-    if (!trackId) throw new Error("Invalid Spotify track URL, URI, or ID format");
+    const requestedTrackId = parseTrackId(trackParam);
+    if (!requestedTrackId) throw new Error("Invalid Spotify track URL, URI, or ID format");
 
+    const job = await this.addJob(requestedTrackId);
+    const trackId = job.trackId;
     const alreadyActive = this.instances.find((inst) => inst.isBusy && inst.currentTrack === trackId);
-    if (alreadyActive?.currentJobId) {
-      const activeJob = jobs.get(alreadyActive.currentJobId);
-      if (activeJob) return { job: activeJob };
-    }
-
-    const existing = jobs.findReusable(trackId);
-    if (existing?.state === "completed" && findOutputForTrack(trackId)) return { job: existing };
-
-    const job = existing ?? await this.addJob(trackId);
+    if (alreadyActive?.currentJobId === job.id) return { job };
+    if (job.state === "completed" && findOutputForTrack(trackId)) return { job };
     if (!this.queue.find(job.id) && !this.instances.some((inst) => inst.currentJobId === job.id)) {
       this.queue.enqueue(this.queueEntry(job));
     }

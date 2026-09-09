@@ -29,3 +29,21 @@ test("stream route resolves unavailable track IDs before looking up or queuing o
   expect(streamRoute).toContain("const resolvedTrackIds = await resolveSpotifyInput(trackParam);");
   expect(streamRoute).toContain("const trackId = resolvedTrackIds[0];");
 });
+
+test("webapp jobs canonicalize unavailable track IDs before queueing", () => {
+  const start = source.indexOf("  async addJob(trackParam: string)");
+  const end = source.indexOf("  async playNow(", start);
+  const addJob = source.slice(start, end);
+  expect(source).toContain("resolvePlayableTrackId");
+  expect(addJob).toContain("await resolvePlayableTrackId(requestedTrackId)");
+  expect(addJob).toContain("const trackId = resolution.trackId");
+});
+
+test("webapp download jobs never blindly replay a successfully requested track", () => {
+  const start = source.indexOf("  async downloadJob(job: DownloadJob)");
+  const end = source.indexOf("  async recycle(", start);
+  const downloadJob = source.slice(start, end);
+  expect(source).toContain("requestTrackPlayback");
+  expect(downloadJob).toContain("await requestTrackPlayback(");
+  expect(downloadJob).not.toContain("re-requested target track playback");
+});
