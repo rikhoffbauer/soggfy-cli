@@ -49,3 +49,41 @@ test("search results map to queueable Spotify inputs", async () => {
   expect(downloadInputForSearchResult(results[2]!)).toBe("https://open.spotify.com/playlist/p1");
   expect(downloadInputForSearchResult(results[1]!)).toBeNull();
 });
+
+test("search result actions distinguish tracks, playlists, and artists", async () => {
+  const { actionForSearchResult } = await import("../workspace-model");
+  expect(actionForSearchResult(results[0]!)).toBe("track");
+  expect(actionForSearchResult(results[2]!)).toBe("playlist");
+  expect(actionForSearchResult(results[1]!)).toBe("artist");
+});
+
+test("playlist pages merge in source order without overlapping duplicates", async () => {
+  const { mergePlaylistPages } = await import("../workspace-model");
+  const first: any = {
+    playlist: { id: "p1", uri: "spotify:playlist:p1", name: "P", owner: "O" },
+    tracks: [
+      { id: "a", uri: "spotify:track:a", name: "A", artists: [], playable: true, sourceIndex: 0 },
+      { id: "b", uri: "spotify:track:b", name: "B", artists: [], playable: true, sourceIndex: 1 },
+    ],
+    issues: [], offset: 0, limit: 2, totalCount: 3, nextOffset: 2,
+  };
+  const second: any = {
+    ...first,
+    tracks: [
+      { ...first.tracks[1], sourceIndex: 1 },
+      { id: "c", uri: "spotify:track:c", name: "C", artists: [], playable: true, sourceIndex: 2 },
+    ],
+    offset: 1, nextOffset: null,
+  };
+  expect(mergePlaylistPages(first, second).tracks.map((track: any) => track.id)).toEqual(["a", "b", "c"]);
+});
+
+test("job state lookup returns the latest job for each track", async () => {
+  const { jobStateByTrack } = await import("../workspace-model");
+  const jobs = [
+    { id: "old", trackId: "a", state: "failed", createdAt: "2026-09-08T00:00:00Z", updatedAt: "2026-09-08T00:00:01Z" },
+    { id: "new", trackId: "a", state: "capturing", createdAt: "2026-09-08T00:01:00Z", updatedAt: "2026-09-08T00:01:01Z" },
+  ] as FrontendDownloadJob[];
+  expect(jobStateByTrack(jobs).get("a")?.id).toBe("new");
+  expect(jobStateByTrack(jobs).get("a")?.state).toBe("capturing");
+});

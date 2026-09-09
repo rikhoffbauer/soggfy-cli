@@ -4,6 +4,7 @@ import {
   IconExternalLink,
   IconLoader2,
   IconMusic,
+  IconPlayerPlay,
   IconPlaylist,
   IconSearch,
   IconUser,
@@ -11,11 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SearchResult } from "./models";
-import {
-  downloadInputForSearchResult,
-  filterSearchResults,
-  type SearchFilter,
-} from "./workspace-model";
+import { filterSearchResults, type SearchFilter } from "./workspace-model";
 
 interface SearchPanelProps {
   query: string;
@@ -24,7 +21,9 @@ interface SearchPanelProps {
   error: string | null;
   onQueryChange: (value: string) => void;
   onSubmit: (query: string) => void;
-  onQueue: (input: string) => void;
+  onPlayTrack: (trackId: string) => void;
+  onQueueTrack: (trackId: string) => void;
+  onOpenPlaylist: (playlistId: string) => void;
 }
 
 const FILTERS: Array<{ value: SearchFilter; label: string }> = [
@@ -35,7 +34,10 @@ const FILTERS: Array<{ value: SearchFilter; label: string }> = [
 ];
 
 export function SearchPanel(props: SearchPanelProps) {
-  const { query, results, loading, error, onQueryChange, onSubmit, onQueue } = props;
+  const {
+    query, results, loading, error, onQueryChange, onSubmit,
+    onPlayTrack, onQueueTrack, onOpenPlaylist,
+  } = props;
   const [filter, setFilter] = useState<SearchFilter>("all");
   const visibleResults = useMemo(() => filterSearchResults(results, filter), [results, filter]);
 
@@ -43,7 +45,7 @@ export function SearchPanel(props: SearchPanelProps) {
     <section id="search" className="scroll-mt-4">
       <div className="mb-4 flex flex-col gap-1">
         <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Find music</h1>
-        <p className="text-sm text-white/45">Search Spotify, or paste a track, album, or playlist URL to download it directly.</p>
+        <p className="text-sm text-white/45">Search Spotify, or paste a track, album, or playlist URL.</p>
       </div>
 
       <form
@@ -100,7 +102,13 @@ export function SearchPanel(props: SearchPanelProps) {
 
           <div className="overflow-hidden rounded-xl border border-white/8 bg-white/[0.025]">
             {visibleResults.length ? visibleResults.map((result) => (
-              <SearchResultRow key={`${result.type}:${result.id}`} result={result} onQueue={onQueue} />
+              <SearchResultRow
+                key={`${result.type}:${result.id}`}
+                result={result}
+                onPlayTrack={onPlayTrack}
+                onQueueTrack={onQueueTrack}
+                onOpenPlaylist={onOpenPlaylist}
+              />
             )) : (
               <div className="px-4 py-8 text-center text-sm text-white/35">No {filter} results in this search.</div>
             )}
@@ -109,16 +117,20 @@ export function SearchPanel(props: SearchPanelProps) {
       ) : query && !loading && !error ? (
         <div className="mt-8 rounded-xl border border-dashed border-white/10 px-4 py-10 text-center">
           <IconMusic className="mx-auto size-8 text-white/18" />
-          <p className="mt-3 text-sm font-medium text-white/55">Search Spotify to start a download</p>
-          <p className="mt-1 text-xs text-white/30">Tracks download individually. Playlist results queue all resolved tracks.</p>
+          <p className="mt-3 text-sm font-medium text-white/55">Search Spotify to choose what to play or queue</p>
         </div>
       ) : null}
     </section>
   );
 }
 
-function SearchResultRow({ result, onQueue }: { result: SearchResult; onQueue: (input: string) => void }) {
-  const queueInput = downloadInputForSearchResult(result);
+function SearchResultRow(props: {
+  result: SearchResult;
+  onPlayTrack: (trackId: string) => void;
+  onQueueTrack: (trackId: string) => void;
+  onOpenPlaylist: (playlistId: string) => void;
+}) {
+  const { result, onPlayTrack, onQueueTrack, onOpenPlaylist } = props;
   const Icon = result.type === "artist" ? IconUser : result.type === "playlist" ? IconPlaylist : IconMusic;
 
   return (
@@ -136,21 +148,31 @@ function SearchResultRow({ result, onQueue }: { result: SearchResult; onQueue: (
           <span className="capitalize">{result.type}</span><span>·</span><span className="truncate">{result.subtitle}</span>
         </div>
       </div>
-      {queueInput ? (
-        <Button size="sm" variant="secondary" className="shrink-0 rounded-lg" onClick={() => onQueue(queueInput)}>
-          <IconDownload className="size-4" />
-          <span className="hidden sm:inline">{result.type === "playlist" ? "Queue playlist" : "Download"}</span>
-        </Button>
-      ) : (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="shrink-0 rounded-lg text-white/50"
-          onClick={() => window.open(`https://open.spotify.com/artist/${result.id}`, "_blank", "noopener,noreferrer")}
-        >
-          <IconExternalLink className="size-4" /><span className="hidden sm:inline">Open</span>
-        </Button>
-      )}
+      <div className="flex shrink-0 items-center gap-1.5">
+        {result.type === "track" ? (
+          <>
+            <Button size="sm" className="rounded-lg" onClick={() => onPlayTrack(result.id)}>
+              <IconPlayerPlay className="size-4" /><span>Play</span>
+            </Button>
+            <Button size="sm" variant="secondary" className="rounded-lg" onClick={() => onQueueTrack(result.id)}>
+              <IconDownload className="size-4" /><span className="hidden sm:inline">Queue</span>
+            </Button>
+          </>
+        ) : result.type === "playlist" ? (
+          <Button size="sm" variant="secondary" className="rounded-lg" onClick={() => onOpenPlaylist(result.id)}>
+            <IconPlaylist className="size-4" /><span>Open</span>
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="rounded-lg text-white/50"
+            onClick={() => window.open(`https://open.spotify.com/artist/${result.id}`, "_blank", "noopener,noreferrer")}
+          >
+            <IconExternalLink className="size-4" /><span className="hidden sm:inline">Open</span>
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

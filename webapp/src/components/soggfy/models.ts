@@ -88,3 +88,38 @@ export interface SearchResult {
   subtitle: string;
   imageUrl?: string;
 }
+
+export interface PlaylistTrack {
+  id: string;
+  uri: string;
+  name: string;
+  artists: string[];
+  imageUrl?: string;
+  durationMs?: number;
+  playable: boolean;
+  sourceIndex: number;
+}
+
+export interface PlaylistIssue {
+  index: number;
+  reason: "unavailable" | "non-track" | "malformed";
+}
+
+export interface PlaylistDetail {
+  id: string;
+  uri: string;
+  name: string;
+  owner: string;
+  description?: string;
+  imageUrl?: string;
+}
+
+export interface PlaylistPage {
+  playlist: PlaylistDetail;
+  tracks: PlaylistTrack[];
+  issues: PlaylistIssue[];
+  offset: number;
+  limit: number;
+  totalCount: number;
+  nextOffset: number | null;
+}
