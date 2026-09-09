@@ -22,7 +22,7 @@ The normal runtime has one daemon-owned Spotify instance. The daemon and web UI/
 
 ## Spotify web data
 
-`Soggfy search`, `soggfy lyrics`, and the daemon lyrics/search APIs share Spotify Web Player authentication. Supply one of these credential sets:
+`soggfy search` and playlist browsing use Spotify Web Player authentication and acquire anonymous web/client tokens automatically. `soggfy lyrics` and authenticated private endpoints may still require an authenticated credential set. To override the anonymous path or enable authenticated access, supply one of these credential sets:
 
 ```sh
 export SPOTIFY_COOKIE='sp_dc=...; sp_key=...'
@@ -35,9 +35,9 @@ export SPOTIFY_ACCESS_TOKEN='...'
 export SPOTIFY_CLIENT_TOKEN='...'
 ```
 
-Search credentials are not written into Soggfy's auth export. Avoid placing them in shell history, source control, or world-readable files.
+Web credentials are not written into Soggfy's auth export. Avoid placing them in shell history, source control, or world-readable files.
 
-Cookie-based authentication works for both search and lyrics. When supplying tokens directly, provide both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`.
+Normal search/playlist browsing needs no manual credential. Cookie-based authentication works for authenticated search/playlist requests and lyrics. When supplying tokens directly, provide both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`.
 
 ## Output and runtime state
 

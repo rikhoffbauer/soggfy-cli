@@ -101,7 +101,7 @@ Searches Spotify for tracks, artists, and playlists using the same normalized se
 | `-n, --limit <n>` | Results per selected type, clamped to 1–50 |
 | `--json` | Emit stable machine-readable JSON to stdout |
 
-Search authentication can use `SPOTIFY_COOKIE` containing `sp_dc=...`, or the pair `SPOTIFY_ACCESS_TOKEN` + `SPOTIFY_CLIENT_TOKEN`. Credential errors are written to stderr and JSON mode never emits partial data. See [`docs/cli/search.md`](docs/cli/search.md) for details.
+Catalog search works without manual credentials by acquiring Spotify's anonymous Web Player token plus client token. `SPOTIFY_COOKIE` or the pair `SPOTIFY_ACCESS_TOKEN` + `SPOTIFY_CLIENT_TOKEN` can still override that path when authenticated web access is needed. Token/upstream errors are written to stderr and JSON mode never emits partial data. See [`docs/cli/search.md`](docs/cli/search.md) for details.
 
 ### CLI help and documentation
 
@@ -170,11 +170,15 @@ Important endpoints:
 - `GET /api/instances`
 - `GET /api/jobs`
 - `GET /api/search?q=<query>`
+- `GET /api/playlist?id=<playlist>&offset=<n>&limit=<n>`
+- `GET /api/track?id=<track>`
+- `POST /api/play`
+- `POST /api/playlist/queue-all`
 - `GET /api/lyrics?track=<track>`
 - `POST /api/jobs/action`
 - `POST /api/download`
 - `GET /api/status`
-- `GET /api/stream?track=<id>`
+- `GET /api/stream?track=<id>&job=<job-id>`
 - `GET /api/file?track=<id>`
 - `GET /api/download-all`
 

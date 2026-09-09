@@ -20,9 +20,9 @@ Try `soggfy auth status`, restart the daemon, and retry. The runtime periodicall
 
 Check daemon/payload logs. The Ogg writer is elected per capture generation across injected Spotify processes; only the elected writer may produce media. A missing writer, failed hook validation, or lost IPC/shared state prevents completion rather than allowing multiple processes to corrupt one file.
 
-## Search says credentials are missing
+## Search or playlist browsing cannot acquire web tokens
 
-Catalog search currently needs either `SPOTIFY_COOKIE` with `sp_dc=...`, or both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`. This is separate from the native desktop login used for capture.
+Catalog search and playlist browsing normally acquire Spotify's anonymous Web Player access token and client token automatically; they do not require `SPOTIFY_COOKIE`. If that private token/API flow changes upstream, retry later or supply an authenticated `SPOTIFY_COOKIE` with `sp_dc=...`, or both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`, as an override. This remains separate from the native desktop login used for capture.
 
 ## Output exists but command failed
 

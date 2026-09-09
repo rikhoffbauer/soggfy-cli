@@ -1,6 +1,6 @@
 # Known Failure Modes
 
-Current as of 2026-09-08.
+Current as of 2026-09-09.
 
 ## Spotify version mismatch
 
@@ -72,7 +72,7 @@ Malformed, near-silent, mostly-silent, or clearly wrong-duration captures are re
 
 ## Search failures
 
-Webapp Spotify search depends on `SPOTIFY_COOKIE` and private Spotify web APIs. Missing/expired cookies or upstream API changes can break search independently of capture.
+Spotify search and playlist browsing use private Spotify Web Player APIs. They acquire anonymous web/client tokens by default, so a cookie is not normally required; token-endpoint or Pathfinder changes can still break catalog browsing independently of capture. Optional authenticated cookie/direct-token overrides can fail separately if they expire.
 
 Direct track IDs/URIs/URLs can still be captured when the local authenticated Spotify runtime is healthy.
 

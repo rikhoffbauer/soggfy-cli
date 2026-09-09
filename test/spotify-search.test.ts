@@ -160,3 +160,41 @@ test("searchSpotify forwards an explicit result offset to Pathfinder", async () 
     if (oldClient === undefined) delete process.env.SPOTIFY_CLIENT_TOKEN; else process.env.SPOTIFY_CLIENT_TOKEN = oldClient;
   }
 });
+
+test("anonymous search acquires web and client tokens without a Spotify cookie", async () => {
+  const saved = {
+    access: process.env.SPOTIFY_ACCESS_TOKEN,
+    client: process.env.SPOTIFY_CLIENT_TOKEN,
+    cookie: process.env.SPOTIFY_COOKIE,
+  };
+  delete process.env.SPOTIFY_ACCESS_TOKEN;
+  delete process.env.SPOTIFY_CLIENT_TOKEN;
+  delete process.env.SPOTIFY_COOKIE;
+  invalidateSpotifySearchTokens();
+  const calls: Array<{ url: URL; init?: RequestInit }> = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    calls.push({ url, init });
+    if (url.pathname === "/api/token") return new Response(JSON.stringify({
+      accessToken: "anonymous-access", clientId: "web-client", isAnonymous: true,
+      accessTokenExpirationTimestampMs: Date.now() + 3_600_000,
+    }));
+    if (url.hostname === "clienttoken.spotify.com") return new Response(JSON.stringify({ granted_token: { token: "client-token" } }));
+    return new Response(JSON.stringify(response));
+  }) as typeof fetch;
+  try {
+    const results = await searchSpotify("one", { types: ["track"], limit: 5, fetchImpl });
+    expect(results).toHaveLength(1);
+    expect(calls).toHaveLength(3);
+    expect(new Headers(calls[0]!.init?.headers).get("Cookie")).toBeNull();
+    expect(calls[0]!.url.pathname).toBe("/api/token");
+    expect(calls[1]!.url.hostname).toBe("clienttoken.spotify.com");
+  } finally {
+    invalidateSpotifySearchTokens();
+    const restore = (key: string, value: string | undefined) => value === undefined
+      ? delete process.env[key] : void (process.env[key] = value);
+    restore("SPOTIFY_ACCESS_TOKEN", saved.access);
+    restore("SPOTIFY_CLIENT_TOKEN", saved.client);
+    restore("SPOTIFY_COOKIE", saved.cookie);
+  }
+});

@@ -48,11 +48,8 @@ Normalized results have this shape:
 
 ## Search credentials
 
-Catalog search uses Spotify's web-player search transport. Provide either:
+Catalog search uses Spotify's private Web Player transport and acquires an anonymous Web Player access token plus client token automatically. No Spotify cookie is required for normal search or playlist browsing.
 
-- `SPOTIFY_COOKIE` containing a valid `sp_dc=...` cookie, or
-- both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`.
-
-These credentials are only needed for catalog search; the native capture/login path remains separate. If search credentials are missing or rejected, Soggfy exits non-zero with an actionable error and writes no fake/empty result set.
+For authenticated web endpoints, or as an explicit override, Soggfy still accepts either `SPOTIFY_COOKIE` containing a valid `sp_dc=...` cookie or both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`. The native capture/login path remains separate. If token acquisition or the upstream private API fails, Soggfy exits non-zero with an actionable error and writes no fake/empty result set.
 
 The GUI uses exactly the same shared search implementation and result model as this command.

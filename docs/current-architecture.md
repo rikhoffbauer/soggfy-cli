@@ -1,6 +1,6 @@
 # Current Architecture
 
-Status: active implementation as of 2026-09-08.
+Status: active implementation as of 2026-09-09.
 
 ## Truth model
 
@@ -68,7 +68,7 @@ queued -> assigned -> starting -> playing -> capturing -> finalizing -> transcod
    └────────────────────────────> cancelled                         └──────────────> failed
 ```
 
-Legacy states are derived from these structured jobs rather than being the source of truth.
+Legacy states are derived from these structured jobs rather than being the source of truth. Priority Play marks only interruptible capture states, cancels that native capture, then requeues the same job at the front of normal work with its attempt counter restored; the restarted capture begins from byte zero.
 
 ## HTTP endpoints
 
@@ -77,8 +77,13 @@ Legacy states are derived from these structured jobs rather than being the sourc
 - `GET /api/jobs` — structured jobs, queue, and instance snapshots.
 - `POST /api/jobs/action` — cancel/retry.
 - `GET /api/status` — compatibility status map.
+- `GET /api/search?q=<query>` — normalized Spotify catalog search.
+- `GET /api/playlist?id=<playlist>&offset=<n>&limit=<n>` — playlist metadata and paged tracks without queue mutation.
+- `GET /api/track?id=<track>` — normalized single-track metadata.
+- `POST /api/play` — priority-play a track, interrupting an active capture when needed.
+- `POST /api/playlist/queue-all` — explicitly queue every playable track in a playlist.
 - `POST /api/download` — queue track/album/playlist inputs.
-- `GET /api/stream?track=<id>` — range-capable completed output, or 202 while queued/capturing.
+- `GET /api/stream?track=<id>&job=<job-id>` — streams newly appended bytes from that exact active Ogg capture; completed outputs remain range-capable.
 - `GET /api/file?track=<id>` — completed file download.
 - `GET /api/download-all` — archive completed validated outputs.
 
@@ -99,7 +104,7 @@ The same principle is used by daemon/fallback CLI instances and interactive auth
 
 Automated verification on 2026-09-08:
 
-- `bun test`: 103 passed, 0 failed.
+- `bun test`: 135 passed, 0 failed.
 - root TypeScript: passed.
 - native StateManager/CapturePolicy fixture: passed.
 - native dylib build: passed.
@@ -118,6 +123,6 @@ Live verification on the same date:
 ## Remaining intentional limitations
 
 - Spotify's private functions remain version-specific. `soggfy compat probe` can determine whether the current implementation survives an update unchanged, but a prologue mismatch still requires deliberate reverse engineering/new validated signatures; automatic best-effort hooking is intentionally not supported.
-- Spotify search uses a private web API and `SPOTIFY_COOKIE`; direct track capture does not depend on that search path.
+- Spotify search and playlist browsing use private Web Player APIs and anonymous web/client tokens by default; optional authenticated cookie/direct-token overrides remain supported. Direct track capture does not depend on that catalog path.
 - IPC is still a compact string protocol rather than a typed/versioned protocol.
 - Web job scheduling and CLI download orchestration are still separate request layers around the same daemon-owned Spotify instance; high-level cross-client job serialization is not yet centralized.

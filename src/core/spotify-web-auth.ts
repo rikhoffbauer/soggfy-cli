@@ -60,12 +60,7 @@ async function acquireSpotifyWebTokens(fetchImpl: typeof fetch): Promise<Spotify
     return { accessToken: directAccess, clientToken: directClient, expiresAt: Date.now() + 50 * 60_000 };
   }
 
-  const cookie = process.env.SPOTIFY_COOKIE;
-  if (!cookie?.includes("sp_dc=")) {
-    throw new Error(
-      "Spotify web access requires SPOTIFY_COOKIE containing sp_dc=... or both SPOTIFY_ACCESS_TOKEN and SPOTIFY_CLIENT_TOKEN",
-    );
-  }
+  const cookie = process.env.SPOTIFY_COOKIE?.trim();
 
   const totp = generateSpotifyWebTOTP();
   const tokenURL = new URL("https://open.spotify.com/api/token");
@@ -74,15 +69,14 @@ async function acquireSpotifyWebTokens(fetchImpl: typeof fetch): Promise<Spotify
   tokenURL.searchParams.set("totp", totp);
   tokenURL.searchParams.set("totpServer", totp);
   tokenURL.searchParams.set("totpVer", String(spotifyTotpVersion()));
-  const tokenRes = await fetchImpl(tokenURL, {
-    headers: {
-      Accept: "application/json",
-      "App-Platform": "WebPlayer",
-      Cookie: cookie,
-      Referer: "https://open.spotify.com/",
-      "User-Agent": SPOTIFY_WEB_USER_AGENT,
-    },
-  });
+  const tokenHeaders: Record<string, string> = {
+    Accept: "application/json",
+    "App-Platform": "WebPlayer",
+    Referer: "https://open.spotify.com/",
+    "User-Agent": SPOTIFY_WEB_USER_AGENT,
+  };
+  if (cookie) tokenHeaders.Cookie = cookie;
+  const tokenRes = await fetchImpl(tokenURL, { headers: tokenHeaders });
   if (!tokenRes.ok) throw new Error(`Spotify web token request failed with HTTP ${tokenRes.status}`);
   const tokenData: any = await tokenRes.json();
   if (!tokenData.accessToken || !tokenData.clientId) {
