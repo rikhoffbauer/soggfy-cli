@@ -58,6 +58,7 @@ export interface DownloadJob {
   error?: string;
   metadata?: TrackMetadata;
   validation?: OutputValidation;
+  priorityInterrupted?: boolean;
   logs: string[];
 }
 

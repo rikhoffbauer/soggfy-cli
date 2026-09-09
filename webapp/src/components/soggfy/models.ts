@@ -40,6 +40,7 @@ export interface DownloadJob {
   coverUrl?: string;
   metadata?: TrackMetadata;
   validation?: OutputValidation;
+  priorityInterrupted?: boolean;
   logs: string[];
 }
 
