@@ -19,6 +19,11 @@ import { getDaemonSpotifyInstance } from "../../src/core/daemon-runtime";
 import { getHttpConfig } from "../../src/core/http-config";
 import { parsePlaybackConfirmation, waitForTrackCompletion } from "../../src/core/capture-control";
 import { groupSearchResults, searchSpotify } from "../../src/core/spotify-search";
+import {
+  fetchAllSpotifyPlaylistTracks,
+  fetchSpotifyPlaylistPage,
+  type SpotifyPlaylistTrack,
+} from "../../src/core/spotify-playlist";
 import { resolveInput as resolveSpotifyInput } from "../../src/core/metadata";
 import { fetchSpotifyLyrics } from "../../src/core/spotify-lyrics";
 import {
@@ -37,6 +42,7 @@ import {
   type DownloadJob,
   type TrackMetadata,
 } from "./server/jobs";
+import { PriorityJobQueue, type QueueEntry } from "./server/priority-queue";
 import {
   copyAudioFallback,
   displayFileName,
@@ -68,6 +74,14 @@ mkdirSync(PROFILES_DIR, { recursive: true, mode: 0o700 });
 
 const jobs = new JobRegistry();
 const GLOBAL_METADATA: Record<string, TrackMetadata> = {};
+
+function cachePlaylistTrackMetadata(track: SpotifyPlaylistTrack) {
+  GLOBAL_METADATA[track.id] = {
+    title: track.name,
+    artist: track.artists.join(", ") || "Unknown artist",
+    coverUrl: track.imageUrl,
+  };
+}
 
 async function fetchTrackDuration(trackId: string): Promise<number | null> {
   try {
@@ -151,7 +165,15 @@ class JobCancelledError extends Error {
   }
 }
 
+class JobPriorityInterruptedError extends Error {
+  constructor(job: DownloadJob) {
+    super(`job ${job.id} interrupted for priority playback`);
+    this.name = "JobPriorityInterruptedError";
+  }
+}
+
 function assertJobActive(job: DownloadJob) {
+  if (job.priorityInterrupted) throw new JobPriorityInterruptedError(job);
   if (job.state === "cancelled") throw new JobCancelledError(job);
 }
 
@@ -642,7 +664,7 @@ class SpotifyInstance {
 
 class SpotifyPoolManager {
   instances: SpotifyInstance[] = [];
-  queue: Array<{ job: DownloadJob; resolve: (value: DownloadJob) => void; reject: (error: Error) => void }> = [];
+  queue = new PriorityJobQueue();
   started = false;
 
   constructor(size: number) {
@@ -671,6 +693,14 @@ class SpotifyPoolManager {
     await Promise.all(this.instances.map((inst) => inst.stop()));
   }
 
+  private queueEntry(job: DownloadJob): QueueEntry {
+    return {
+      job,
+      resolve: () => undefined,
+      reject: (error) => console.error(`[Server] Job ${job.id} failed: ${error.message}`),
+    };
+  }
+
   async addJob(trackParam: string): Promise<DownloadJob> {
     const trackId = parseTrackId(trackParam);
     if (!trackId) throw new Error("Invalid Spotify track URL, URI, or ID format");
@@ -686,13 +716,42 @@ class SpotifyPoolManager {
       }
     }).catch(() => undefined);
 
-    this.queue.push({
-      job,
-      resolve: () => undefined,
-      reject: (error) => console.error(`[Server] Job ${job.id} failed: ${error.message}`),
-    });
+    this.queue.enqueue(this.queueEntry(job));
     this.dispatch();
     return job;
+  }
+
+  async playNow(trackParam: string): Promise<{ job: DownloadJob; interruptedJobId?: string }> {
+    const trackId = parseTrackId(trackParam);
+    if (!trackId) throw new Error("Invalid Spotify track URL, URI, or ID format");
+
+    const alreadyActive = this.instances.find((inst) => inst.isBusy && inst.currentTrack === trackId);
+    if (alreadyActive?.currentJobId) {
+      const activeJob = jobs.get(alreadyActive.currentJobId);
+      if (activeJob) return { job: activeJob };
+    }
+
+    const existing = jobs.findReusable(trackId);
+    if (existing?.state === "completed" && findOutputForTrack(trackId)) return { job: existing };
+
+    const job = existing ?? await this.addJob(trackId);
+    if (!this.queue.find(job.id) && !this.instances.some((inst) => inst.currentJobId === job.id)) {
+      this.queue.enqueue(this.queueEntry(job));
+    }
+    this.queue.promote(job.id);
+
+    const activeInstance = this.instances.find((inst) => inst.isBusy && inst.currentTrack !== trackId);
+    const activeJob = activeInstance?.currentJobId ? jobs.get(activeInstance.currentJobId) : undefined;
+    const interruptible = activeJob && ["assigned", "starting", "playing", "capturing"].includes(activeJob.state);
+    const interrupted = interruptible ? activeJob : undefined;
+    if (activeInstance && interrupted && !interrupted.priorityInterrupted) {
+      jobs.patch(interrupted, { priorityInterrupted: true }, `interrupted for priority playback of ${trackId}`);
+      await activeInstance.sendIPC(`cancel_track ${interrupted.trackId}`, 1, 1000).catch(() => undefined);
+      await activeInstance.sendIPC("pause", 1, 1000).catch(() => undefined);
+    }
+
+    this.dispatch();
+    return { job, interruptedJobId: interrupted?.id };
   }
 
   async cancelJob(jobId: string, reason = "cancelled by user"): Promise<DownloadJob> {
@@ -700,10 +759,8 @@ class SpotifyPoolManager {
     if (!job) throw new Error(`Unknown job: ${jobId}`);
     if (jobs.isTerminal(job)) return job;
 
-    const queuedIndex = this.queue.findIndex((queued) => queued.job.id === jobId);
-    if (queuedIndex >= 0) {
-      const [queued] = this.queue.splice(queuedIndex, 1);
-      if (!queued) throw new Error(`Queued job disappeared before cancellation: ${jobId}`);
+    const queued = this.queue.remove(jobId);
+    if (queued) {
       jobs.cancel(job, reason);
       queued.reject(new JobCancelledError(job));
       return job;
@@ -740,6 +797,12 @@ class SpotifyPoolManager {
     idleInstance.downloadJob(queued.job)
       .then((res) => queued.resolve(res))
       .catch(async (err: Error) => {
+        if (err instanceof JobPriorityInterruptedError) {
+          jobs.log(queued.job, `priority interruption completed on instance ${idleInstance.id}`);
+          jobs.requeueAfterPriorityInterruption(queued.job);
+          this.queue.insertInterrupted(queued);
+          return;
+        }
         jobs.log(queued.job, `attempt failed on instance ${idleInstance.id}: ${err.message}`);
         if (queued.job.state === "cancelled" || err instanceof JobCancelledError) {
           queued.reject(err);
@@ -747,7 +810,7 @@ class SpotifyPoolManager {
         }
         if (queued.job.attempts < MAX_ATTEMPTS) {
           jobs.transition(queued.job, "queued", { instanceId: undefined, error: undefined });
-          this.queue.push(queued);
+          this.queue.enqueue(queued);
           await idleInstance.recycle(err.message).catch((recycleErr) => idleInstance.log(`recycle failed: ${recycleErr.message}`));
         } else {
           jobs.fail(queued.job, err);
@@ -817,7 +880,7 @@ const server = Bun.serve({
       GET: () => jsonResponse(pool.snapshots()),
     },
     "/api/jobs": {
-      GET: () => jsonResponse({ jobs: jobs.all(), queue: pool.queue.map((q) => q.job.id), instances: pool.snapshots() }),
+      GET: () => jsonResponse({ jobs: jobs.all(), queue: pool.queue.ids(), instances: pool.snapshots() }),
     },
     "/api/jobs/action": {
       POST: async (req) => {
@@ -847,6 +910,78 @@ const server = Bun.serve({
           return jsonResponse(groupSearchResults(results));
         } catch (err: any) {
           return jsonResponse({ error: err.message }, { status: 500 });
+        }
+      },
+    },
+    "/api/playlist": {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const input = url.searchParams.get("id");
+        if (!input) return jsonResponse({ error: "Missing playlist id" }, { status: 400 });
+        const playlistId = parsePlaylistId(input);
+        if (!playlistId) return jsonResponse({ error: "Invalid Spotify playlist" }, { status: 400 });
+        const offset = Number.parseInt(url.searchParams.get("offset") || "0", 10);
+        const limit = Number.parseInt(url.searchParams.get("limit") || "100", 10);
+        try {
+          const page = await fetchSpotifyPlaylistPage(playlistId, { offset, limit });
+          for (const track of page.tracks) cachePlaylistTrackMetadata(track);
+          return jsonResponse(page);
+        } catch (err: any) {
+          const status = /not found/i.test(err.message) ? 404 : 502;
+          return jsonResponse({ error: err.message }, { status });
+        }
+      },
+    },
+    "/api/track": {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const input = url.searchParams.get("id");
+        const trackId = input ? parseTrackId(input) : null;
+        if (!trackId) return jsonResponse({ error: "Invalid Spotify track" }, { status: 400 });
+        const [metadata, durationMs] = await Promise.all([fetchTrackMetadata(trackId), fetchTrackDuration(trackId)]);
+        if (metadata) GLOBAL_METADATA[trackId] = metadata;
+        return jsonResponse({
+          id: trackId, uri: `spotify:track:${trackId}`, type: "track",
+          name: metadata?.title || trackId, subtitle: metadata?.artist || "Unknown artist",
+          imageUrl: metadata?.coverUrl, durationMs: durationMs || undefined,
+        });
+      },
+    },
+    "/api/play": {
+      POST: async (req) => {
+        try {
+          const body = await req.json();
+          const input = body.trackId || body.url;
+          if (!input) return jsonResponse({ success: false, error: "Missing trackId" }, { status: 400 });
+          const result = await pool.playNow(input);
+          return jsonResponse({ success: true, ...result });
+        } catch (err: any) {
+          return jsonResponse({ success: false, error: err.message }, { status: 400 });
+        }
+      },
+    },
+    "/api/playlist/queue-all": {
+      POST: async (req) => {
+        try {
+          const body = await req.json();
+          const input = body.playlistId || body.url || body.id;
+          const playlistId = typeof input === "string" ? parsePlaylistId(input) : null;
+          if (!playlistId) return jsonResponse({ success: false, error: "Invalid Spotify playlist" }, { status: 400 });
+          const playlist = await fetchAllSpotifyPlaylistTracks(playlistId);
+          let newlyQueued = 0;
+          let existing = 0;
+          let skipped = playlist.issues.length;
+          const trackIds: string[] = [];
+          for (const track of playlist.tracks) {
+            cachePlaylistTrackMetadata(track);
+            if (!track.playable) { skipped += 1; continue; }
+            trackIds.push(track.id);
+            if (jobs.findReusable(track.id)) existing += 1;
+            else { await pool.addJob(track.id); newlyQueued += 1; }
+          }
+          return jsonResponse({ success: true, total: playlist.totalCount, newlyQueued, existing, skipped, trackIds });
+        } catch (err: any) {
+          return jsonResponse({ success: false, error: err.message }, { status: 502 });
         }
       },
     },

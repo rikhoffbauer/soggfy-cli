@@ -19,6 +19,7 @@ test("collection parsers accept Spotify URLs and URIs", async () => {
   const { parsePlaylistId, parseAlbumId } = await import("../spotify-url");
   expect(parsePlaylistId(`https://open.spotify.com/playlist/${id}?si=x`)).toBe(id);
   expect(parsePlaylistId(`spotify:playlist:${id}`)).toBe(id);
+  expect(parsePlaylistId(id)).toBe(id);
   expect(parseAlbumId(`https://open.spotify.com/album/${id}`)).toBe(id);
   expect(parseAlbumId(`spotify:album:${id}`)).toBe(id);
 });

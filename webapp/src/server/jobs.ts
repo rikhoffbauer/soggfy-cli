@@ -186,6 +186,20 @@ export class JobRegistry {
     return this.transition(job, "cancelled", { error: reason });
   }
 
+  requeueAfterPriorityInterruption(job: DownloadJob): DownloadJob {
+    return this.transition(job, "queued", {
+      attempts: Math.max(0, job.attempts - 1),
+      bytesCaptured: 0,
+      capturePath: undefined,
+      wavPath: undefined,
+      oggPath: undefined,
+      instanceId: undefined,
+      error: undefined,
+      validation: undefined,
+      priorityInterrupted: undefined,
+    });
+  }
+
   complete(job: DownloadJob, patch: Partial<DownloadJob> = {}): DownloadJob {
     return this.transition(job, "completed", patch);
   }

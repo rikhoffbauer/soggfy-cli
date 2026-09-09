@@ -25,7 +25,9 @@ export function parsePlaylistId(input: string): string | null {
   const urlMatch = input.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]{22})/);
   if (urlMatch?.[1]) return urlMatch[1];
   const uriMatch = input.match(/spotify:playlist:([a-zA-Z0-9]{22})/);
-  return uriMatch?.[1] ?? null;
+  if (uriMatch?.[1]) return uriMatch[1];
+  const idMatch = input.trim().match(/^([a-zA-Z0-9]{22})$/);
+  return idMatch?.[1] ?? null;
 }
 
 export function parseAlbumId(input: string): string | null {

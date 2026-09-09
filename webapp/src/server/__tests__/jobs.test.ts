@@ -34,3 +34,29 @@ test("failed and cancelled jobs are terminal and do not block replacement jobs",
   expect(replacement.legacyStatus).toBe("failed");
   expect(registry.findReusable(trackId)).toBeUndefined();
 });
+
+test("priority interruption requeues the same job without spending an attempt", () => {
+  const registry = new JobRegistry();
+  const job = registry.create(trackId);
+  registry.transition(job, "capturing", {
+    attempts: 2,
+    bytesCaptured: 4096,
+    capturePath: "/tmp/partial.ogg",
+    oggPath: "/tmp/partial.ogg",
+    instanceId: 1,
+    error: "stale",
+    priorityInterrupted: true,
+  });
+
+  registry.requeueAfterPriorityInterruption(job);
+
+  expect(job.state).toBe("queued");
+  expect(job.legacyStatus).toBe("pending");
+  expect(job.attempts).toBe(1);
+  expect(job.bytesCaptured).toBe(0);
+  expect(job.capturePath).toBeUndefined();
+  expect(job.oggPath).toBeUndefined();
+  expect(job.instanceId).toBeUndefined();
+  expect(job.error).toBeUndefined();
+  expect(job.priorityInterrupted).toBeUndefined();
+});
