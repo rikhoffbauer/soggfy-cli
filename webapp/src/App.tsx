@@ -318,7 +318,7 @@ export function App() {
           </div>
 
           <div className="mt-5">
-            <DiagnosticsPanel health={health} instances={snapshot.instances} />
+            <DiagnosticsPanel health={health} instances={snapshot.instances} jobs={snapshot.jobs} />
           </div>
         </main>
       </div>

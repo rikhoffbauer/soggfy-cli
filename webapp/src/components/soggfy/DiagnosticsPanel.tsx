@@ -4,15 +4,17 @@ import {
   IconChevronDown,
   IconServer,
 } from "@tabler/icons-react";
-import type { HealthSnapshot, InstanceSnapshot } from "./models";
+import type { DownloadJob, HealthSnapshot, InstanceSnapshot } from "./models";
+import { LogViewer } from "./LogViewer";
 import { DEFAULT_DIAGNOSTICS_OPEN } from "./workspace-model";
 
 interface DiagnosticsPanelProps {
   health: HealthSnapshot | null;
   instances: InstanceSnapshot[];
+  jobs: DownloadJob[];
 }
 
-export function DiagnosticsPanel({ health, instances }: DiagnosticsPanelProps) {
+export function DiagnosticsPanel({ health, instances, jobs }: DiagnosticsPanelProps) {
   const [open, setOpen] = useState(DEFAULT_DIAGNOSTICS_OPEN);
   const ready = health?.readyInstances ?? instances.filter((item) => item.isReady).length;
   const total = health?.poolSize ?? instances.length;
@@ -65,6 +67,8 @@ export function DiagnosticsPanel({ health, instances }: DiagnosticsPanelProps) {
               ))}
             </div>
           ) : null}
+
+          <LogViewer jobs={jobs} instances={instances} />
 
           {health?.outputDir ? (
             <div className="mt-3 truncate text-[10px] text-white/22" title={health.outputDir}>Output: {health.outputDir}</div>

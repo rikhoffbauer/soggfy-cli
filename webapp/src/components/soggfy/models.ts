@@ -78,6 +78,21 @@ export interface HealthSnapshot {
   captureBackend?: string;
 }
 
+export interface LogSource {
+  id: string;
+  label: string;
+  path: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  category: "daemon" | "historical" | "runtime" | "spotify" | "payload";
+}
+
+export interface LogTailSnapshot {
+  source: LogSource;
+  lines: string[];
+  truncated: boolean;
+}
+
 export type SearchResultType = "track" | "artist" | "playlist";
 
 export interface SearchResult {

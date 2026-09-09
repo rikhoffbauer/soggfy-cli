@@ -105,11 +105,10 @@ export class SpotifyInstance {
 
     this.process = spawn([binaryPath, ...cefFlags], {
       env,
-      stdout: "ignore",
-      stderr: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
-
-
+    this.pipeProcessLogs();
 
     log.info(`Spotify process spawned (PID: ${this.process.pid})`);
 
@@ -122,6 +121,26 @@ export class SpotifyInstance {
 
     this.isReady = true;
     log.ok("Spotify instance ready.");
+  }
+
+  private pipeProcessLogs(): void {
+    if (!this.process) return;
+    const stdout = (this.process as any).stdout;
+    const stderr = (this.process as any).stderr;
+    const logWriter = Bun.file(join(this.profileDir, "spotify.log")).writer();
+    const errWriter = Bun.file(join(this.profileDir, "spotify.err")).writer();
+    const pump = async (stream: AsyncIterable<Uint8Array>, writer: any) => {
+      try {
+        for await (const chunk of stream) {
+          writer.write(chunk);
+          writer.flush();
+        }
+      } catch {} finally {
+        writer.end();
+      }
+    };
+    void pump(stdout, logWriter);
+    void pump(stderr, errWriter);
   }
 
   private async waitForSocket(): Promise<boolean> {

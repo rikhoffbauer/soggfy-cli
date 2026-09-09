@@ -34,6 +34,7 @@ import {
   WORKSPACE_DIR,
   IPC_SOCKET,
   SAVE_PATH,
+  LOG_DIR,
 } from "../../src/core/paths";
 import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./server/http";
 import { extractTrackIds, parseAlbumId, parsePlaylistId, parseTrackId } from "./server/spotify-url";
@@ -44,6 +45,7 @@ import {
 } from "./server/jobs";
 import { PriorityJobQueue, type QueueEntry } from "./server/priority-queue";
 import { streamGrowingFile } from "./server/growing-file";
+import { listLogSources, readLogTail } from "./server/logs";
 import {
   copyAudioFallback,
   displayFileName,
@@ -68,6 +70,7 @@ const MAX_ATTEMPTS = Number.parseInt(process.env.SOGGFY_MAX_ATTEMPTS || "3", 10)
 const BASE_DEBUG_PORT = Number.parseInt(process.env.SOGGFY_DEBUG_PORT_BASE || "9223", 10);
 const MUTE_OUTPUT = process.env.SOGGFY_MUTE_OUTPUT || "1";
 const RUNTIME_DIR = join(SOGGFY_HOME, "runtime");
+const LOG_ROOTS = { logDir: LOG_DIR, runtimeDir: RUNTIME_DIR, profilesDir: PROFILES_DIR, payloadDir: SAVE_PATH };
 
 mkdirSync(OUTPUT_DIR, { recursive: true, mode: 0o700 });
 mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
@@ -867,6 +870,23 @@ const server = Bun.serve({
         failedJobs: jobs.all().filter((j) => j.state === "failed").length,
         captureBackend: CAPTURE_BACKEND,
       }),
+    },
+    "/api/logs": {
+      GET: (req) => {
+        const url = new URL(req.url);
+        const sources = listLogSources(LOG_ROOTS);
+        const sourceId = url.searchParams.get("source");
+        if (!sourceId) return jsonResponse({ sources });
+        const source = sources.find((item) => item.id === sourceId);
+        if (!source) return jsonResponse({ error: "Unknown log source" }, { status: 404 });
+        if (url.searchParams.get("raw") === "1") {
+          return new Response(Bun.file(source.path), {
+            headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", ...CORS_HEADERS },
+          });
+        }
+        const requestedLines = Number.parseInt(url.searchParams.get("lines") || "1000", 10);
+        return jsonResponse(readLogTail(source, Number.isFinite(requestedLines) ? requestedLines : 1000));
+      },
     },
     "/api/instances": {
       GET: () => jsonResponse(pool.snapshots()),
