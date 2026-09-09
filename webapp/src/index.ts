@@ -43,6 +43,7 @@ import {
   type TrackMetadata,
 } from "./server/jobs";
 import { PriorityJobQueue, type QueueEntry } from "./server/priority-queue";
+import { streamGrowingFile } from "./server/growing-file";
 import {
   copyAudioFallback,
   displayFileName,
@@ -1047,14 +1048,42 @@ const server = Bun.serve({
         const trackId = resolvedTrackIds[0];
         if (!trackId) return new Response("Invalid track", { status: 400, headers: CORS_HEADERS });
 
+        const requestedJobId = url.searchParams.get("job");
+        const requestedJob = requestedJobId ? jobs.get(requestedJobId) : undefined;
+        if (requestedJobId && !requestedJob) {
+          return jsonResponse({ error: "Unknown stream job" }, { status: 404 });
+        }
+        if (requestedJob && requestedJob.trackId !== trackId) {
+          return jsonResponse({ error: "Stream job does not match track" }, { status: 409 });
+        }
+
         const output = findOutputForTrack(trackId);
         if (output) return serveFileWithRange(req, output.path);
 
-        const existing = jobs.findReusable(trackId);
+        const existing = requestedJob ?? jobs.findReusable(trackId);
         if (!existing) {
-          pool.addJob(trackId).catch((err) => console.error(`[Server] stream-triggered job failed for ${trackId}:`, err));
+          return jsonResponse({ error: "Track is not queued or capturing; use /api/play or /api/download first" }, { status: 404 });
         }
-        return jsonResponse({ queued: true, trackId, message: "Track is queued/capturing; retry stream when status is completed." }, { status: 202 });
+        if (existing.state === "failed" || existing.state === "cancelled") {
+          return jsonResponse({ error: existing.error || `Track job is ${existing.state}` }, { status: 409 });
+        }
+
+        return streamGrowingFile({
+          getPath: () => {
+            const current = jobs.get(existing.id);
+            if (!current || current.priorityInterrupted) return undefined;
+            if (current.oggPath) return current.oggPath;
+            return current.capturePath?.endsWith(".ogg") ? current.capturePath : undefined;
+          },
+          getState: () => {
+            const current = jobs.get(existing.id);
+            if (!current || current.priorityInterrupted) return "cancelled";
+            return current.state;
+          },
+          signal: req.signal,
+          startupTimeoutMs: 20_000,
+          pollMs: 100,
+        });
       },
     },
     "/api/download": {
