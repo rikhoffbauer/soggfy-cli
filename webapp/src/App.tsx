@@ -84,7 +84,7 @@ export function App() {
   const jobsByTrack = useMemo(() => jobStateByTrack(snapshot.jobs), [snapshot.jobs]);
   const completedCount = library.filter((job) => job.state === "completed").length;
   const playerJob = playerJobId
-    ? snapshot.jobs.find((job) => job.id === playerJobId && job.state === "completed") || null
+    ? snapshot.jobs.find((job) => job.id === playerJobId) || null
     : null;
 
   const queueDownload = async (input: string) => {
@@ -184,6 +184,12 @@ export function App() {
       const data = await response.json();
       if (!response.ok || !data.success || !data.job?.id) throw new Error(data.error || "Failed to start playback");
       setPlayerJobId(data.job.id);
+      setSnapshot((current) => ({
+        ...current,
+        jobs: current.jobs.some((job) => job.id === data.job.id)
+          ? current.jobs.map((job) => job.id === data.job.id ? data.job : job)
+          : [...current.jobs, data.job],
+      }));
       setNotice(data.interruptedJobId ? "Playback started; previous download will resume afterward." : "Playback started.");
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : "Failed to start playback");
