@@ -254,6 +254,24 @@ void StateManager::ReceiveOggData(
     playback->oggBytesWritten += length;
 }
 
+void StateManager::RestartOggCapture(const std::string& playbackId) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    const auto it = _playbacks.find(playbackId);
+    if (it == _playbacks.end()) return;
+    auto* playback = it->second;
+
+    if (playback->oggFileStream.is_open()) {
+        playback->oggFileStream.close();
+    }
+    if (!playback->oggFileName.empty()) {
+        std::error_code ec;
+        fs::remove(playback->oggFileName, ec);
+    }
+    playback->oggInitialized = false;
+    playback->oggBytesWritten = 0;
+    playback->discard = false;
+}
+
 void StateManager::FinishPlayback(const std::string& playbackId) {
     std::lock_guard<std::mutex> lock(_mutex);
     const auto it = _playbacks.find(playbackId);

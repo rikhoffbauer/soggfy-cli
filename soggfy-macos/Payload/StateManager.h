@@ -33,6 +33,7 @@ public:
 
     void ReceiveAudioData(const std::string& playbackId, const char* data, size_t length);
     void ReceiveOggData(const std::string& playbackId, const char* data, size_t length);
+    void RestartOggCapture(const std::string& playbackId);
     void FinishPlayback(const std::string& playbackId);
     void SetBaseSavePath(const std::string& path);
     std::string GetPlaybackStatus(const std::string& playbackId);

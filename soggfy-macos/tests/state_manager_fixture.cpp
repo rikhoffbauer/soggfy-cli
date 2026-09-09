@@ -70,6 +70,23 @@ int main() {
         WEXITSTATUS(childStatus) != 0) return 15;
     manager.ResetPlayback(ownerTrack);
 
+    const std::string restartedOggTrack = "restarted-ogg-track";
+    manager.ResetPlayback(restartedOggTrack);
+    if (!manager.TryClaimWriter(restartedOggTrack, "ogg")) return 16;
+    manager.ReceiveOggData(restartedOggTrack, "aborted-prefix", 14);
+    manager.RestartOggCapture(restartedOggTrack);
+    if (!manager.OwnsWriter(restartedOggTrack, "ogg")) return 18;
+    manager.ReceiveOggData(restartedOggTrack, "replacement-stream", 18);
+    manager.FinishPlayback(restartedOggTrack);
+    const fs::path restartedOgg = base / (restartedOggTrack + ".ogg");
+    std::ifstream restartedIn(restartedOgg, std::ios::binary);
+    const std::string restartedContents(
+        (std::istreambuf_iterator<char>(restartedIn)),
+        std::istreambuf_iterator<char>()
+    );
+    if (restartedContents != "replacement-stream") return 17;
+    manager.ResetPlayback(restartedOggTrack);
+
     manager.SetPlaybackDuration(trackId, 1000);
     manager.ReceiveAudioData(trackId, reinterpret_cast<const char*>(pcm.data()), pcm.size() * sizeof(float));
     manager.FinishPlayback(trackId);

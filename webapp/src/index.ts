@@ -50,7 +50,6 @@ import {
   copyAudioFallback,
   displayFileName,
   expectedOggBytes,
-  ffprobeOk,
   findCapturedAudioPath,
   transcodeAudioToMp3,
   validateAudioFile,
@@ -579,7 +578,11 @@ class SpotifyInstance {
       const transcode = transcodeAudioToMp3(capturePath, finalMp3Path);
       let savedPath: string;
       let outputFormat: "mp3" | "wav" | "ogg";
-      if (transcode.ok && ffprobeOk(finalMp3Path)) {
+      if (transcode.ok) {
+        const outputValidation = validateAudioFile(finalMp3Path, job.durationMs);
+        if (!outputValidation.ok) {
+          throw new Error(`transcoded output failed validation: ${outputValidation.warnings.join(",") || "validation failed"}`);
+        }
         savedPath = finalMp3Path;
         outputFormat = "mp3";
       } else {

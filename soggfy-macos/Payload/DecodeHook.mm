@@ -86,26 +86,32 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
             // Only the elected writer may persist pages for this track/serial.
             if (g_ogg_stream_active.load() && serial == g_active_ogg_serial &&
                 state.OwnsWriter(track_id, "ogg")) {
+                uint64_t eos_granule = 0;
+                double eos_audio_sec = 0.0;
+                if (is_eos) {
+                    memcpy(&eos_granule, hdr + 6, sizeof(eos_granule));
+                    eos_audio_sec = (double)eos_granule / 44100.0;
+                    if (eos_audio_sec <= 5.0) {
+                        state.RestartOggCapture(track_id);
+                        g_ogg_stream_active.store(false);
+                        printf("[Soggfy-OGG] Discarded aborted stream for %s (serial 0x%x, %.1fs EOS); waiting for replacement BOS\n",
+                               track_id.c_str(), serial, eos_audio_sec);
+                        fflush(stdout);
+                        return ret;
+                    }
+                }
+
                 state.ReceiveOggData(track_id, (const char*)hdr, (size_t)hlen);
                 if (bdy != nullptr && blen > 0 && blen < 1048576) {
                     state.ReceiveOggData(track_id, (const char*)bdy, (size_t)blen);
                 }
 
                 if (is_eos) {
-                    uint64_t granule = 0;
-                    memcpy(&granule, hdr + 6, sizeof(granule));
-                    double audio_sec = (double)granule / 44100.0;
-                    if (audio_sec > 5.0) {
-                        printf("[Soggfy-OGG] Stream EOS reached for %s (serial 0x%x, %.1fs audio). Finalizing!\n",
-                               track_id.c_str(), serial, audio_sec);
-                        fflush(stdout);
-                        g_ogg_stream_active.store(false);
-                        state.FinishPlayback(track_id);
-                    } else {
-                        printf("[Soggfy-OGG] Ignoring premature EOS page for %s (serial 0x%x, %.1fs audio)\n",
-                               track_id.c_str(), serial, audio_sec);
-                        fflush(stdout);
-                    }
+                    printf("[Soggfy-OGG] Stream EOS reached for %s (serial 0x%x, %.1fs audio). Finalizing!\n",
+                           track_id.c_str(), serial, eos_audio_sec);
+                    fflush(stdout);
+                    g_ogg_stream_active.store(false);
+                    state.FinishPlayback(track_id);
                 }
             }
         }
