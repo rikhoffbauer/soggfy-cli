@@ -35,7 +35,7 @@ test("typed search defaults to 40 results and returns album pagination metadata"
   expect(variables.limit).toBe(40);
   expect(variables.offset).toBe(80);
   expect(await response.json()).toEqual({
-    type: "album", offset: 80, limit: 40, nextOffset: null,
+    type: "album", offset: 80, limit: 40, nextOffset: 81,
     items: [{ id: "album1", uri: "spotify:album:album1", type: "album", name: "Album One", subtitle: "Artist One", imageUrl: "album.jpg" }],
   });
 });
@@ -44,4 +44,24 @@ test("typed search rejects missing or unsupported result types", async () => {
   const route = createApiRoutes()["/api/search"].GET;
   expect((await route(new Request("http://localhost/api/search?q=eminem"))).status).toBe(400);
   expect((await route(new Request("http://localhost/api/search?q=eminem&type=all"))).status).toBe(400);
+});
+
+
+test("typed search keeps pagination alive when Spotify returns fewer items than requested", async () => {
+  process.env.SPOTIFY_ACCESS_TOKEN = "access";
+  process.env.SPOTIFY_CLIENT_TOKEN = "client";
+  invalidateSpotifySearchTokens();
+  const items = Array.from({ length: 10 }, (_, index) => ({ item: { data: {
+    id: `track${String(index).padStart(17, "0")}`,
+    uri: `spotify:track:track${String(index).padStart(17, "0")}`,
+    name: `Track ${index}`,
+    artists: { items: [{ profile: { name: "Artist" } }] },
+  } } }));
+  globalThis.fetch = (async () => new Response(JSON.stringify({ data: { searchV2: { tracks: { items } } } }))) as unknown as typeof fetch;
+  const route = createApiRoutes()["/api/search"].GET;
+  const response = await route(new Request("http://localhost/api/search?q=eminem&type=track&offset=0&limit=40"));
+  expect(response.status).toBe(200);
+  const body = await response.json() as any;
+  expect(body.items).toHaveLength(10);
+  expect(body.nextOffset).toBe(10);
 });

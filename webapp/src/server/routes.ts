@@ -100,7 +100,7 @@ export function createApiRoutes() {
           const items = await searchSpotify(query, { types: [type], limit, offset });
           return jsonResponse({
             type, items, offset, limit,
-            nextOffset: items.length >= limit ? offset + limit : null,
+            nextOffset: items.length > 0 ? offset + items.length : null,
           });
         } catch (err: any) {
           return jsonResponse({ error: err.message }, { status: 500 });
