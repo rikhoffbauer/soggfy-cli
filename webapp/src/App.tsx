@@ -167,13 +167,21 @@ export function App() {
     }
   };
 
-  const loadAlbum = async (albumId: string, offset = 0, replace = true) => {
+  const loadAlbum = async (albumId: string, offset = 0, replace = true, albumHint?: SearchResult) => {
     setAlbumLoading(true);
     setSearchError(null);
     try {
       const response = await fetch(`/api/album?id=${encodeURIComponent(albumId)}&offset=${offset}&limit=100`);
       const data = await response.json() as AlbumPage & { error?: string };
       if (!response.ok) throw new Error(data.error || "Album lookup failed");
+      if (albumHint?.type === "album" && albumHint.id === albumId) {
+        data.album = {
+          ...data.album,
+          name: albumHint.name || data.album.name,
+          artists: albumHint.subtitle && albumHint.subtitle !== "Unknown artist" ? [albumHint.subtitle] : data.album.artists,
+          imageUrl: albumHint.imageUrl || data.album.imageUrl,
+        };
+      }
       setPlaylistPage(null);
       setAlbumPage((current) => replace || !current ? data : mergeAlbumPages(current, data));
     } finally {
@@ -391,7 +399,7 @@ export function App() {
       onLoadMore={loadMoreSearch}
       onPlayTrack={playTrack}
       onQueueTrack={queueTrack}
-      onOpenAlbum={(id) => void loadAlbum(id, 0, true).catch((error) => setSearchError(error.message))}
+      onOpenAlbum={(albumHint) => void loadAlbum(albumHint.id, 0, true, albumHint).catch((error) => setSearchError(error.message))}
       onOpenPlaylist={(id) => void loadPlaylist(id, 0, true).catch((error) => setSearchError(error.message))}
       detail={albumPage ? (
         <AlbumPanel

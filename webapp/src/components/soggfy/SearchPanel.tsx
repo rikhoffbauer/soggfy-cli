@@ -2,6 +2,7 @@ import { IconLoader2, IconSearch } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchResults } from "./SearchResults";
+import type { SearchResult } from "./models";
 import type { SearchSession, SearchTab } from "./workspace-model";
 
 interface SearchPanelProps {
@@ -14,7 +15,7 @@ interface SearchPanelProps {
   onLoadMore: (tab: SearchTab) => void;
   onPlayTrack: (trackId: string) => void;
   onQueueTrack: (trackId: string) => void;
-  onOpenAlbum: (albumId: string) => void;
+  onOpenAlbum: (album: SearchResult) => void;
   onOpenPlaylist: (playlistId: string) => void;
   detail?: React.ReactNode;
 }

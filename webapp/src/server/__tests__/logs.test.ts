@@ -52,6 +52,21 @@ test("log catalog includes daemon, payload, Spotify, and historical log files on
   expect(sources.some((source) => /leveldb\/00000[34]\.log$/.test(source.path))).toBe(false);
 });
 
+test("nested payload roots are deduplicated by physical path and prefer payload classification", () => {
+  const f = fixture();
+  const payload = join(f.runtime, "spotify");
+  mkdirSync(payload, { recursive: true });
+  const path = join(payload, "payload-99.log");
+  writeFileSync(path, "payload\n");
+  const sources = listLogSources({
+    logDir: f.logs, runtimeDir: f.runtime, profilesDir: f.profiles, payloadDir: payload,
+  });
+  const matching = sources.filter((source) => source.path === path);
+  expect(matching).toHaveLength(1);
+  expect(matching[0]).toMatchObject({ label: "payload/payload-99.log", category: "payload" });
+  expect(new Set(sources.map((source) => source.id)).size).toBe(sources.length);
+});
+
 test("readLogTail returns bounded newest lines without exposing arbitrary paths", () => {
   const f = fixture();
   const path = join(f.logs, "daemon.log");

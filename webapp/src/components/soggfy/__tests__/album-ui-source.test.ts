@@ -23,3 +23,11 @@ test("App opens album detail without queueing the album implicitly", () => {
   expect(appSource).toContain("setAlbumPage");
   expect(appSource).toContain("spotify:album:${albumPage.album.id}");
 });
+
+
+test("album detail preserves metadata from the selected search result", () => {
+  const resultsSource = readFileSync(join(componentDir, "SearchResults.tsx"), "utf8");
+  expect(resultsSource).toContain("onOpenAlbum(result)");
+  expect(appSource).toContain("albumHint");
+  expect(appSource).toContain("albumHint.subtitle");
+});

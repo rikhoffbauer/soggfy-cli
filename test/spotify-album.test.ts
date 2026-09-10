@@ -32,6 +32,39 @@ test("normalizes album metadata and track rows while preserving track ids", () =
   expect(page.nextOffset).toBe(2);
 });
 
+test("normalizes current tracksV2 responses using requested album identity", () => {
+  const response = { data: { albumUnion: {
+    __typename: "Album", playability: { playable: true },
+    tracksV2: { totalCount: 3, items: [
+      { uid: "one", track: { uri: `spotify:track:${trackA}`, name: "First", artists: { items: [{ profile: { name: "Artist A" } }] }, duration: { totalMilliseconds: 123000 }, playability: { playable: true } } },
+      { uid: "two", track: { uri: `spotify:track:${trackB}`, name: "Second", artists: { items: [{ profile: { name: "Guest Artist" } }] }, duration: { totalMilliseconds: 234000 }, playability: { playable: false } } },
+    ] },
+  } } };
+  const identity = { id: albumId, uri: `spotify:album:${albumId}`, name: "Live Album", artists: [], imageUrl: "live.jpg" };
+  const page = normalizeSpotifyAlbumResponse(response, 0, 2, identity);
+  expect(page.album).toEqual({ ...identity, artists: ["Artist A"] });
+  expect(page.trackIds).toEqual([trackA, trackB]);
+  expect(page.tracks.map((track) => [track.name, track.durationMs, track.playable])).toEqual([["First", 123000, true], ["Second", 234000, false]]);
+  expect(page.nextOffset).toBe(2);
+});
+
+test("fetchSpotifyAlbumPage combines current tracksV2 data with oEmbed identity", async () => {
+  const { fetchSpotifyAlbumPage } = await import("../src/core/spotify-album");
+  process.env.SPOTIFY_ACCESS_TOKEN = "access"; process.env.SPOTIFY_CLIENT_TOKEN = "client";
+  const current = { data: { albumUnion: { __typename: "Album", tracksV2: { totalCount: 1, items: [
+    { track: { uri: `spotify:track:${trackA}`, name: "First", artists: { items: [{ profile: { name: "Artist A" } }] }, duration: { totalMilliseconds: 123000 }, playability: { playable: true } } },
+  ] } } } };
+  const calls: string[] = [];
+  const page = await fetchSpotifyAlbumPage(albumId, { fetchImpl: (async (input, init) => {
+    const url = String(input); calls.push(url);
+    if (url.includes("/oembed?")) return new Response(JSON.stringify({ title: "Live Album", thumbnail_url: "live.jpg" }));
+    return new Response(JSON.stringify(current));
+  }) as typeof fetch });
+  expect(calls.some((url) => url.includes("/oembed?"))).toBe(true);
+  expect(page.album).toEqual({ id: albumId, uri: `spotify:album:${albumId}`, name: "Live Album", artists: ["Artist A"], imageUrl: "live.jpg" });
+  expect(page.trackIds).toEqual([trackA]);
+});
+
 test("fetchSpotifyAlbumPage forwards offset and limit", async () => {
   const { fetchSpotifyAlbumPage } = await import("../src/core/spotify-album");
   process.env.SPOTIFY_ACCESS_TOKEN = "access"; process.env.SPOTIFY_CLIENT_TOKEN = "client";

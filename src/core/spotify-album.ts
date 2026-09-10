@@ -104,12 +104,13 @@ export function normalizeSpotifyAlbumResponse(
   response: unknown,
   requestedOffset = 0,
   requestedLimit = 100,
+  identity?: SpotifyAlbumSummary,
 ): SpotifyAlbumPage {
   const data = asObject(response)?.data;
   const album = asObject(asObject(data)?.album) ?? asObject(asObject(data)?.albumUnion);
   if (!album) throw new Error("Spotify album response did not contain album data");
 
-  const trackSection = asObject(album.tracks) ?? asObject(album.content);
+  const trackSection = asObject(album.tracksV2) ?? asObject(album.tracks) ?? asObject(album.content);
   const items = Array.isArray(trackSection?.items) ? trackSection.items : [];
   const paging = asObject(trackSection?.pagingInfo);
   const offset = Number.isFinite(paging?.offset) ? Number(paging!.offset) : requestedOffset;
@@ -124,17 +125,22 @@ export function normalizeSpotifyAlbumResponse(
     .filter((track): track is SpotifyAlbumTrack => track !== null);
   const trackIds = tracks.map((track) => track.id);
   const consumed = items.length;
-  const uri = typeof album.uri === "string" ? album.uri : "";
-  const id = uri.startsWith("spotify:album:") ? uri.slice(14) : typeof album.id === "string" ? album.id : "";
+  const payloadUri = typeof album.uri === "string" ? album.uri : "";
+  const payloadId = payloadUri.startsWith("spotify:album:")
+    ? payloadUri.slice(14)
+    : typeof album.id === "string" ? album.id : "";
+  const id = SPOTIFY_ID_RE.test(payloadId) ? payloadId : identity?.id ?? "";
   if (!SPOTIFY_ID_RE.test(id)) throw new Error("Spotify album response did not contain a valid album ID");
+  const payloadArtists = artistNames(album.artists);
+  const derivedArtists = tracks[0]?.artists ?? [];
 
   return {
     album: {
       id,
-      uri: uri || `spotify:album:${id}`,
-      name: typeof album.name === "string" && album.name ? album.name : "Untitled album",
-      artists: artistNames(album.artists),
-      imageUrl: firstImage(asObject(album.coverArt)?.sources),
+      uri: payloadUri || identity?.uri || `spotify:album:${id}`,
+      name: typeof album.name === "string" && album.name ? album.name : identity?.name || "Untitled album",
+      artists: payloadArtists.length ? payloadArtists : identity?.artists.length ? identity.artists : derivedArtists,
+      imageUrl: firstImage(asObject(album.coverArt)?.sources) || identity?.imageUrl,
     },
     tracks,
     trackIds,
@@ -148,7 +154,26 @@ export function normalizeSpotifyAlbumResponse(
 function clampLimit(value = 100): number {
   if (!Number.isFinite(value)) return 100;
   return Math.max(1, Math.min(300, Math.trunc(value)));
-}export async function fetchSpotifyAlbumPage(
+}
+
+async function fetchSpotifyAlbumIdentity(id: string, fetchImpl: typeof fetch): Promise<SpotifyAlbumSummary> {
+  const fallback: SpotifyAlbumSummary = { id, uri: `spotify:album:${id}`, name: "Untitled album", artists: [] };
+  try {
+    const target = `https://open.spotify.com/album/${id}`;
+    const response = await fetchImpl(`https://open.spotify.com/oembed?url=${encodeURIComponent(target)}`, {
+      headers: { accept: "application/json", "user-agent": SPOTIFY_WEB_USER_AGENT },
+    });
+    if (!response.ok) return fallback;
+    const data = asObject(await response.json());
+    const name = typeof data?.title === "string" && data.title ? data.title : fallback.name;
+    const imageUrl = typeof data?.thumbnail_url === "string" && data.thumbnail_url ? data.thumbnail_url : undefined;
+    return { ...fallback, name, imageUrl };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function fetchSpotifyAlbumPage(
   id: string,
   options: SpotifyAlbumOptions = {},
 ): Promise<SpotifyAlbumPage> {
@@ -158,6 +183,7 @@ function clampLimit(value = 100): number {
   const limit = clampLimit(options.limit);
   const fetchImpl = options.fetchImpl ?? fetch;
   const tokens = await getSpotifyWebTokens(fetchImpl);
+  const identityPromise = fetchSpotifyAlbumIdentity(albumId, fetchImpl);
   const response = await fetchImpl("https://api-partner.spotify.com/pathfinder/v2/query", {
     method: "POST",
     headers: {
@@ -183,8 +209,11 @@ function clampLimit(value = 100): number {
     const message = asObject(errors[0])?.message;
     throw new Error(typeof message === "string" ? message : "Spotify album request failed");
   }
-  return normalizeSpotifyAlbumResponse(data, offset, limit);
-}export async function fetchAllSpotifyAlbumTrackIds(
+  const identity = await identityPromise;
+  return normalizeSpotifyAlbumResponse(data, offset, limit, identity);
+}
+
+export async function fetchAllSpotifyAlbumTrackIds(
   id: string,
   options: Omit<SpotifyAlbumOptions, "offset"> = {},
 ): Promise<string[]> {

@@ -206,7 +206,7 @@ export async function searchSpotify(query: string, options: SpotifySearchOptions
     extensions: { persistedQuery: { version: 1, sha256Hash: SEARCH_HASH } },
   };
 
-  const response = await fetchImpl("https://api-partner.spotify.com/pathfinder/v2/query", {
+  const request = {
     method: "POST",
     headers: {
       accept: "application/json",
@@ -216,7 +216,20 @@ export async function searchSpotify(query: string, options: SpotifySearchOptions
       "user-agent": SPOTIFY_WEB_USER_AGENT,
     },
     body: JSON.stringify(body),
-  });
+  } satisfies RequestInit;
+  let response: Response | undefined;
+  let networkError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      response = await fetchImpl("https://api-partner.spotify.com/pathfinder/v2/query", request);
+      if (response.ok || response.status < 500 || attempt === 1) break;
+    } catch (error) {
+      networkError = error;
+      if (attempt === 1) throw error;
+    }
+    await Bun.sleep(100);
+  }
+  if (!response) throw networkError instanceof Error ? networkError : new Error("Spotify search request failed");
   const text = await response.text();
   if (!response.ok) throw new Error(`Spotify search failed with HTTP ${response.status}: ${text.slice(0, 240)}`);
   let data: unknown;

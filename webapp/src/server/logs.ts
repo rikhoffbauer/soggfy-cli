@@ -75,12 +75,15 @@ function discover(base: string, prefix: string): LogSource[] {
 }
 
 export function listLogSources(roots: LogRoots): LogSource[] {
-  return [
+  const sources = [
     ...discover(roots.logDir, ""),
     ...discover(roots.runtimeDir, "runtime"),
     ...discover(roots.profilesDir, "profiles"),
     ...discover(roots.payloadDir, "payload"),
   ];
+  const unique = new Map<string, LogSource>();
+  for (const source of sources) unique.set(source.id, source);
+  return [...unique.values()];
 }
 
 export function decodeLogTail(

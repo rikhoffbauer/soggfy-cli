@@ -20,7 +20,7 @@ interface SearchResultsProps {
   onLoadMore: () => void;
   onPlayTrack: (trackId: string) => void;
   onQueueTrack: (trackId: string) => void;
-  onOpenAlbum: (albumId: string) => void;
+  onOpenAlbum: (album: SearchResult) => void;
   onOpenPlaylist: (playlistId: string) => void;
 }
 
@@ -78,7 +78,7 @@ function GridResults(props: SearchResultsProps) {
     <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6 min-[1900px]:grid-cols-7">
       {items.map((result) => {
         const open = tab === "album"
-          ? () => onOpenAlbum(result.id)
+          ? () => onOpenAlbum(result)
           : tab === "playlist"
             ? () => onOpenPlaylist(result.id)
             : () => window.open(`https://open.spotify.com/artist/${result.id}`, "_blank", "noopener,noreferrer");

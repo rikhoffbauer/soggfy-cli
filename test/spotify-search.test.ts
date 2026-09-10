@@ -144,6 +144,44 @@ test("searchSpotify filters result types using a supplied transport", async () =
 });
 
 
+test("searchSpotify retries one transient Pathfinder failure", async () => {
+  const oldAccess = process.env.SPOTIFY_ACCESS_TOKEN;
+  const oldClient = process.env.SPOTIFY_CLIENT_TOKEN;
+  process.env.SPOTIFY_ACCESS_TOKEN = "access";
+  process.env.SPOTIFY_CLIENT_TOKEN = "client";
+  invalidateSpotifySearchTokens();
+  let attempts = 0;
+  try {
+    const results = await searchSpotify("one", { types: ["track"], limit: 5, fetchImpl: (async () => {
+      attempts += 1;
+      return attempts === 1 ? new Response("temporary", { status: 503 }) : new Response(JSON.stringify(response));
+    }) as typeof fetch });
+    expect(attempts).toBe(2);
+    expect(results).toHaveLength(1);
+  } finally {
+    invalidateSpotifySearchTokens();
+    if (oldAccess === undefined) delete process.env.SPOTIFY_ACCESS_TOKEN; else process.env.SPOTIFY_ACCESS_TOKEN = oldAccess;
+    if (oldClient === undefined) delete process.env.SPOTIFY_CLIENT_TOKEN; else process.env.SPOTIFY_CLIENT_TOKEN = oldClient;
+  }
+});
+
+test("searchSpotify does not retry deterministic client errors", async () => {
+  const oldAccess = process.env.SPOTIFY_ACCESS_TOKEN;
+  const oldClient = process.env.SPOTIFY_CLIENT_TOKEN;
+  process.env.SPOTIFY_ACCESS_TOKEN = "access";
+  process.env.SPOTIFY_CLIENT_TOKEN = "client";
+  invalidateSpotifySearchTokens();
+  let attempts = 0;
+  try {
+    await expect(searchSpotify("one", { types: ["track"], fetchImpl: (async () => { attempts += 1; return new Response("bad", { status: 400 }); }) as typeof fetch })).rejects.toThrow("HTTP 400");
+    expect(attempts).toBe(1);
+  } finally {
+    invalidateSpotifySearchTokens();
+    if (oldAccess === undefined) delete process.env.SPOTIFY_ACCESS_TOKEN; else process.env.SPOTIFY_ACCESS_TOKEN = oldAccess;
+    if (oldClient === undefined) delete process.env.SPOTIFY_CLIENT_TOKEN; else process.env.SPOTIFY_CLIENT_TOKEN = oldClient;
+  }
+});
+
 test("searchSpotify forwards an explicit result offset to Pathfinder", async () => {
   const oldAccess = process.env.SPOTIFY_ACCESS_TOKEN;
   const oldClient = process.env.SPOTIFY_CLIENT_TOKEN;
