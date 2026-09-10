@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <cstring>
 #include <chrono>
+#include <condition_variable>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <fstream>
@@ -22,6 +23,8 @@
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <string>
@@ -433,8 +436,11 @@ static void WritePrivateSharedFile(const std::string &name, const std::string &v
 }
 
 static std::atomic<uint64_t> g_capture_gate_epoch{0};
+static std::mutex g_capture_gate_publish_mutex;
 
 static void PersistCaptureGate(bool gated) {
+  std::lock_guard<std::mutex> lock(g_capture_gate_publish_mutex);
+  g_capture_gated.store(gated);
   const uint64_t epoch = g_capture_gate_epoch.fetch_add(1) + 1;
   WritePrivateSharedFile(
       "capture_gate.txt",
@@ -449,7 +455,6 @@ static void PersistActiveTrackId(const std::string &track) {
 static void ApplySetTrack(const std::string &track) {
   // Arm the capture gate — no audio is captured until the correct track
   // is confirmed playing via PlaybackStateChanged notification.
-  g_capture_gated.store(true);
   PersistCaptureGate(true);
   ResetOggCaptureState(track);
 
@@ -671,23 +676,55 @@ void StartIPCServer() {
       StateManager::Instance().ResetPlayback(track);
       SendResponse(client_fd, "track reset");
     } else if (req == "get_playing") {
-      __block std::string response = "{}";
-      dispatch_sync(dispatch_get_main_queue(), ^{
-        @try {
-          id app = [NSClassFromString(@"NSApplication") performSelector:@selector(sharedApplication)];
-          id track = [app valueForKey:@"currentTrack"];
-          NSString *uri = track ? [track valueForKey:@"applescriptID"] : @"";
-          NSNumber *state = [app valueForKey:@"playerState"];
-          NSNumber *position = [app valueForKey:@"playbackPosition"];
-          NSDictionary *snapshot = @{
-            @"uri": uri ?: @"", @"state": state.intValue == 1 ? @"playing" : state.intValue == 2 ? @"paused" : @"stopped",
-            @"position": position ?: @0, @"is_ad": @([uri hasPrefix:@"spotify:ad:"]),
-            @"gated": @(g_capture_gated.load())
-          };
-          NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:0 error:nil];
-          if (data) response.assign((const char *)data.bytes, data.length);
-        } @catch (NSException *) {}
+      struct SnapshotRequest {
+        std::mutex mutex;
+        std::condition_variable ready;
+        std::string response = "{}";
+        bool completed = false;
+      };
+      auto snapshot_request = std::make_shared<SnapshotRequest>();
+      dispatch_async(dispatch_get_main_queue(), ^{
+        std::string response = "{}";
+        @autoreleasepool {
+          @try {
+            id app = [NSClassFromString(@"NSApplication") performSelector:@selector(sharedApplication)];
+            id track = [app valueForKey:@"currentTrack"];
+            NSString *uri = track ? [track valueForKey:@"applescriptID"] : @"";
+            NSNumber *state = [app valueForKey:@"playerState"];
+            NSNumber *position = [app valueForKey:@"playbackPosition"];
+            NSString *state_value = @"unknown";
+            if (state) {
+              state_value = state.intValue == 1 ? @"playing"
+                          : state.intValue == 2 ? @"paused"
+                          : state.intValue == 0 ? @"stopped"
+                          : @"unknown";
+            }
+            NSDictionary *snapshot = @{
+              @"uri": uri ?: @"", @"state": state_value,
+              @"position": position ?: @0, @"is_ad": @([uri hasPrefix:@"spotify:ad:"]),
+              @"gated": @(g_capture_gated.load())
+            };
+            NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:0 error:nil];
+            if (data) response.assign((const char *)data.bytes, data.length);
+          } @catch (NSException *) {}
+        }
+        {
+          std::lock_guard<std::mutex> lock(snapshot_request->mutex);
+          snapshot_request->response = std::move(response);
+          snapshot_request->completed = true;
+        }
+        snapshot_request->ready.notify_one();
       });
+
+      std::string response = "{}";
+      {
+        std::unique_lock<std::mutex> lock(snapshot_request->mutex);
+        const bool completed = snapshot_request->ready.wait_for(
+            lock, std::chrono::milliseconds(750),
+            [&] { return snapshot_request->completed; });
+        if (completed) response = snapshot_request->response;
+        else printf("[Soggfy-IPC] get_playing main-queue snapshot timed out\n");
+      }
       SendResponse(client_fd, response);
     } else {
       SendResponse(client_fd, "error unknown command");
@@ -1008,18 +1045,15 @@ __attribute__((constructor)) void SoggfyEntryPoint() {
           bool is_playing = (player_state == "Playing" || player_state == "playing");
 
           if (is_ad) {
-            g_capture_gated.store(true);
             PersistCaptureGate(true);
             DiscardPendingOggCapture();
             printf("[Soggfy-AD] Advertisement detected: %s — capture gated\n",
                    uri.c_str());
           } else if (matches_target && is_playing) {
-            g_capture_gated.store(false);
             PersistCaptureGate(false);
             printf("[Soggfy-AD] Target track confirmed playing: %s\n", uri.c_str());
           } else {
             // Non-target, non-ad track (e.g. autoplay next song) — keep gated
-            g_capture_gated.store(true);
             PersistCaptureGate(true);
             DiscardPendingOggCapture();
             printf("[Soggfy-AD] Non-target track playing: %s (target: %s) "
