@@ -3,7 +3,28 @@ import { getSpotifyWebTokens, SPOTIFY_WEB_USER_AGENT } from "./spotify-web-auth"
 const ALBUM_HASH = "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10";
 const SPOTIFY_ID_RE = /^[a-zA-Z0-9]{22}$/;
 
+export interface SpotifyAlbumSummary {
+  id: string;
+  uri: string;
+  name: string;
+  artists: string[];
+  imageUrl?: string;
+}
+
+export interface SpotifyAlbumTrack {
+  id: string;
+  uri: string;
+  name: string;
+  artists: string[];
+  imageUrl?: string;
+  durationMs?: number;
+  playable: boolean;
+  sourceIndex: number;
+}
+
 export interface SpotifyAlbumPage {
+  album: SpotifyAlbumSummary;
+  tracks: SpotifyAlbumTrack[];
   trackIds: string[];
   offset: number;
   limit: number;
@@ -23,17 +44,63 @@ function asObject(value: unknown): Record<string, any> | null {
     : null;
 }
 
-function trackIdFromItem(value: unknown): string | null {
+function firstImage(sources: unknown): string | undefined {
+  if (!Array.isArray(sources)) return undefined;
+  for (const source of sources) {
+    const url = asObject(source)?.url;
+    if (typeof url === "string" && url) return url;
+  }
+  return undefined;
+}
+
+function artistNames(value: unknown): string[] {
+  const items = asObject(value)?.items;
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => asObject(item)?.profile?.name ?? asObject(item)?.name)
+    .filter((name): name is string => typeof name === "string" && name.length > 0);
+}
+
+function trackDataFromItem(value: unknown): Record<string, any> | null {
   const item = asObject(value);
-  const candidates = [item?.track, item?.track?.data, item?.data, item];
+  const candidates = [item?.track, item?.track?.data, item?.item?.data, item?.data, item];
   for (const candidate of candidates) {
     const object = asObject(candidate);
-    const uri = typeof object?.uri === "string" ? object.uri : "";
-    const id = uri.startsWith("spotify:track:") ? uri.slice(14) : object?.id;
-    if (typeof id === "string" && SPOTIFY_ID_RE.test(id)) return id;
+    if (!object) continue;
+    const uri = typeof object.uri === "string" ? object.uri : "";
+    const id = uri.startsWith("spotify:track:") ? uri.slice(14) : object.id;
+    if (typeof id === "string" && SPOTIFY_ID_RE.test(id)) return object;
   }
   return null;
-}export function normalizeSpotifyAlbumResponse(
+}
+
+function normalizeAlbumTrack(value: unknown, sourceIndex: number): SpotifyAlbumTrack | null {
+  const data = trackDataFromItem(value);
+  if (!data) return null;
+  const uri = typeof data.uri === "string" && data.uri.startsWith("spotify:track:")
+    ? data.uri
+    : `spotify:track:${data.id}`;
+  const id = uri.slice(14);
+  const name = typeof data.name === "string" ? data.name : "";
+  if (!SPOTIFY_ID_RE.test(id) || !name) return null;
+  const duration = asObject(data.trackDuration)?.totalMilliseconds ?? asObject(data.duration)?.totalMilliseconds;
+  const cover = asObject(data.albumOfTrack)?.coverArt;
+  return {
+    id, uri, name, artists: artistNames(data.artists),
+    imageUrl: firstImage(asObject(cover)?.sources),
+    durationMs: Number.isFinite(duration) ? Number(duration) : undefined,
+    playable: asObject(data.playability)?.playable !== false,
+    sourceIndex,
+  };
+}
+
+function trackIdFromItem(value: unknown): string | null {
+  return trackDataFromItem(value)?.uri?.startsWith("spotify:track:")
+    ? trackDataFromItem(value)!.uri.slice(14)
+    : typeof trackDataFromItem(value)?.id === "string" ? trackDataFromItem(value)!.id : null;
+}
+
+export function normalizeSpotifyAlbumResponse(
   response: unknown,
   requestedOffset = 0,
   requestedLimit = 100,
@@ -42,20 +109,34 @@ function trackIdFromItem(value: unknown): string | null {
   const album = asObject(asObject(data)?.album) ?? asObject(asObject(data)?.albumUnion);
   if (!album) throw new Error("Spotify album response did not contain album data");
 
-  const tracks = asObject(album.tracks) ?? asObject(album.content);
-  const items = Array.isArray(tracks?.items) ? tracks.items : [];
-  const paging = asObject(tracks?.pagingInfo);
+  const trackSection = asObject(album.tracks) ?? asObject(album.content);
+  const items = Array.isArray(trackSection?.items) ? trackSection.items : [];
+  const paging = asObject(trackSection?.pagingInfo);
   const offset = Number.isFinite(paging?.offset) ? Number(paging!.offset) : requestedOffset;
   const limit = Number.isFinite(paging?.limit) ? Number(paging!.limit) : requestedLimit;
-  const totalCount = Number.isFinite(tracks?.totalCount)
-    ? Number(tracks!.totalCount)
+  const totalCount = Number.isFinite(trackSection?.totalCount)
+    ? Number(trackSection!.totalCount)
     : Number.isFinite(paging?.total)
       ? Number(paging!.total)
       : items.length;
-  const trackIds = items.map(trackIdFromItem).filter((id): id is string => id !== null);
+  const tracks = items
+    .map((item, index) => normalizeAlbumTrack(item, offset + index))
+    .filter((track): track is SpotifyAlbumTrack => track !== null);
+  const trackIds = tracks.map((track) => track.id);
   const consumed = items.length;
+  const uri = typeof album.uri === "string" ? album.uri : "";
+  const id = uri.startsWith("spotify:album:") ? uri.slice(14) : typeof album.id === "string" ? album.id : "";
+  if (!SPOTIFY_ID_RE.test(id)) throw new Error("Spotify album response did not contain a valid album ID");
 
   return {
+    album: {
+      id,
+      uri: uri || `spotify:album:${id}`,
+      name: typeof album.name === "string" && album.name ? album.name : "Untitled album",
+      artists: artistNames(album.artists),
+      imageUrl: firstImage(asObject(album.coverArt)?.sources),
+    },
+    tracks,
     trackIds,
     offset,
     limit,

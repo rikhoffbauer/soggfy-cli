@@ -3,11 +3,12 @@ import { extname } from "path";
 import { ZipArchive } from "archiver";
 import { clampSearchLimit, searchSpotify, type SpotifySearchType } from "../../../src/core/spotify-search";
 import { fetchAllSpotifyPlaylistTracks, fetchSpotifyPlaylistPage } from "../../../src/core/spotify-playlist";
+import { fetchSpotifyAlbumPage } from "../../../src/core/spotify-album";
 import { resolveInput as resolveSpotifyInput } from "../../../src/core/metadata";
 import { fetchSpotifyLyrics } from "../../../src/core/spotify-lyrics";
 import { CAPTURE_BACKEND, OUTPUT_DIR } from "../../../src/core/paths";
 import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./http";
-import { parsePlaylistId, parseTrackId } from "./spotify-url";
+import { parseAlbumId, parsePlaylistId, parseTrackId } from "./spotify-url";
 import { streamGrowingFile } from "./growing-file";
 import { listLogSources, readLogTail } from "./logs";
 import { displayFileName } from "./media";
@@ -103,6 +104,24 @@ export function createApiRoutes() {
           });
         } catch (err: any) {
           return jsonResponse({ error: err.message }, { status: 500 });
+        }
+      },
+    },
+    "/api/album": {
+      GET: async (req: Request) => {
+        const url = new URL(req.url);
+        const input = url.searchParams.get("id");
+        const albumId = input ? parseAlbumId(input) : null;
+        if (!albumId) return jsonResponse({ error: "Invalid Spotify album" }, { status: 400 });
+        const offset = Number.parseInt(url.searchParams.get("offset") || "0", 10);
+        const limit = Number.parseInt(url.searchParams.get("limit") || "50", 10);
+        try {
+          const page = await fetchSpotifyAlbumPage(albumId, { offset, limit });
+          for (const track of page.tracks) cachePlaylistTrackMetadata(track);
+          return jsonResponse(page);
+        } catch (err: any) {
+          const status = /not found/i.test(err.message) ? 404 : 502;
+          return jsonResponse({ error: err.message }, { status });
         }
       },
     },

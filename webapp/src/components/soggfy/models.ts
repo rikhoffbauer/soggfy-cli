@@ -95,7 +95,7 @@ export interface LogTailSnapshot {
   truncated: boolean;
 }
 
-export type SearchResultType = "track" | "artist" | "playlist";
+export type SearchResultType = "track" | "album" | "artist" | "playlist";
 
 export interface SearchResult {
   id: string;
@@ -135,6 +135,24 @@ export interface PlaylistPage {
   playlist: PlaylistDetail;
   tracks: PlaylistTrack[];
   issues: PlaylistIssue[];
+  offset: number;
+  limit: number;
+  totalCount: number;
+  nextOffset: number | null;
+}
+
+export interface AlbumDetail {
+  id: string;
+  uri: string;
+  name: string;
+  artists: string[];
+  imageUrl?: string;
+}
+
+export interface AlbumPage {
+  album: AlbumDetail;
+  tracks: PlaylistTrack[];
+  trackIds: string[];
   offset: number;
   limit: number;
   totalCount: number;
