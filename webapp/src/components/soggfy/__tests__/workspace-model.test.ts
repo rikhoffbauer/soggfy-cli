@@ -94,3 +94,62 @@ test("lower health revision forces a full snapshot after daemon restart", async 
   expect(revisionResetAfterHealth(3, 3)).toEqual({ restarted: false, since: 3 });
   expect(revisionResetAfterHealth(3, undefined)).toEqual({ restarted: false, since: 3 });
 });
+
+
+describe("multi-page workspace navigation", () => {
+  test("maps only known hashes to pages and defaults to search", async () => {
+    const { pageFromHash, hashForPage } = await import("../workspace-model");
+    expect(pageFromHash("#queue")).toBe("queue");
+    expect(pageFromHash("#downloads")).toBe("downloads");
+    expect(pageFromHash("#diagnostics")).toBe("diagnostics");
+    expect(pageFromHash("#wat")).toBe("search");
+    expect(hashForPage("search")).toBe("#search");
+  });
+});
+
+describe("typed search session state", () => {
+  test("new sessions default to Tracks and keep independent lazy tab caches", async () => {
+    const { createSearchSession, searchTabNeedsLoad } = await import("../workspace-model");
+    const session = createSearchSession("eminem");
+    expect(session.query).toBe("eminem");
+    expect(session.activeTab).toBe("track");
+    expect(Object.keys(session.tabs)).toEqual(["track", "album", "playlist", "artist"]);
+    expect(searchTabNeedsLoad(session, "track")).toBe(true);
+    expect(searchTabNeedsLoad(session, "album")).toBe(true);
+  });
+
+  test("merges paginated tab results without duplicates and leaves other tabs untouched", async () => {
+    const { createSearchSession, mergeSearchTabPage, searchTabNeedsLoad } = await import("../workspace-model");
+    const session = createSearchSession("eminem");
+    const first = mergeSearchTabPage(session, "track", {
+      items: [
+        { id: "a", uri: "spotify:track:a", type: "track", name: "A", subtitle: "Artist" },
+        { id: "b", uri: "spotify:track:b", type: "track", name: "B", subtitle: "Artist" },
+      ],
+      nextOffset: 40,
+    });
+    const second = mergeSearchTabPage(first, "track", {
+      items: [
+        { id: "b", uri: "spotify:track:b", type: "track", name: "B", subtitle: "Artist" },
+        { id: "c", uri: "spotify:track:c", type: "track", name: "C", subtitle: "Artist" },
+      ],
+      nextOffset: null,
+    }, true);
+    expect(second.tabs.track.items.map((item: any) => item.id)).toEqual(["a", "b", "c"]);
+    expect(second.tabs.track.nextOffset).toBeNull();
+    expect(searchTabNeedsLoad(second, "track")).toBe(false);
+    expect(searchTabNeedsLoad(second, "album")).toBe(true);
+  });
+
+  test("starting a different query resets every tab cache", async () => {
+    const { createSearchSession, mergeSearchTabPage, resetSearchSessionQuery } = await import("../workspace-model");
+    const loaded = mergeSearchTabPage(createSearchSession("eminem"), "track", {
+      items: [{ id: "a", uri: "spotify:track:a", type: "track", name: "A", subtitle: "Artist" }], nextOffset: null,
+    });
+    const reset = resetSearchSessionQuery(loaded, "dr dre");
+    expect(reset.query).toBe("dr dre");
+    expect(reset.activeTab).toBe("track");
+    expect(reset.tabs.track.items).toEqual([]);
+    expect(reset.tabs.album.loaded).toBe(false);
+  });
+});

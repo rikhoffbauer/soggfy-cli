@@ -1,6 +1,90 @@
 import type { DownloadJob, DownloadState, PlaylistPage, SearchResult } from "./models";
 
 export type SearchFilter = "all" | "track" | "artist" | "playlist";
+
+export type WorkspacePage = "search" | "queue" | "downloads" | "diagnostics";
+export type SearchTab = "track" | "album" | "playlist" | "artist";
+
+export interface SearchTabState {
+  items: FrontendSearchResult[];
+  loaded: boolean;
+  loading: boolean;
+  nextOffset: number | null;
+}
+
+export interface SearchSession {
+  query: string;
+  activeTab: SearchTab;
+  tabs: Record<SearchTab, SearchTabState>;
+}
+
+const SEARCH_TABS: readonly SearchTab[] = ["track", "album", "playlist", "artist"];
+const WORKSPACE_PAGES: readonly WorkspacePage[] = ["search", "queue", "downloads", "diagnostics"];
+
+function emptySearchTabState(): SearchTabState {
+  return { items: [], loaded: false, loading: false, nextOffset: 0 };
+}
+
+export function pageFromHash(hash: string): WorkspacePage {
+  const value = hash.replace(/^#/, "") as WorkspacePage;
+  return WORKSPACE_PAGES.includes(value) ? value : "search";
+}
+
+export function hashForPage(page: WorkspacePage): string {
+  return `#${page}`;
+}
+
+export function createSearchSession(query = ""): SearchSession {
+  return {
+    query: query.trim(),
+    activeTab: "track",
+    tabs: Object.fromEntries(SEARCH_TABS.map((tab) => [tab, emptySearchTabState()])) as Record<SearchTab, SearchTabState>,
+  };
+}
+
+export function resetSearchSessionQuery(_session: SearchSession, query: string): SearchSession {
+  return createSearchSession(query);
+}
+
+export function searchTabNeedsLoad(session: SearchSession, tab: SearchTab): boolean {
+  const state = session.tabs[tab];
+  return !state.loaded && !state.loading;
+}
+
+export function mergeSearchTabPage(
+  session: SearchSession,
+  tab: SearchTab,
+  page: { items: FrontendSearchResult[]; nextOffset: number | null },
+  append = false,
+): SearchSession {
+  const current = session.tabs[tab];
+  const combined = append ? [...current.items, ...page.items] : [...page.items];
+  const seen = new Set<string>();
+  const items = combined.filter((item) => {
+    const key = `${item.type}:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return {
+    ...session,
+    tabs: {
+      ...session.tabs,
+      [tab]: { items, loaded: true, loading: false, nextOffset: page.nextOffset },
+    },
+  };
+}
+
+export function setSearchTabLoading(session: SearchSession, tab: SearchTab, loading: boolean): SearchSession {
+  return {
+    ...session,
+    tabs: { ...session.tabs, [tab]: { ...session.tabs[tab], loading } },
+  };
+}
+
+export function setActiveSearchTab(session: SearchSession, tab: SearchTab): SearchSession {
+  return { ...session, activeTab: tab };
+}
 export type FrontendSearchResult = SearchResult;
 export type FrontendDownloadState = DownloadState;
 export type FrontendDownloadJob = DownloadJob;
