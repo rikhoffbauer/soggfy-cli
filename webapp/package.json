@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/index.ts",
-    "start": "NODE_ENV=production bun src/index.ts",
-    "build": "bun run build.ts",
+    "dev": "$npm_execpath --hot src/index.ts",
+    "start": "NODE_ENV=production $npm_execpath src/index.ts",
+    "build": "$npm_execpath run build.ts",
     "typecheck": "tsc --noEmit --pretty",
-    "test": "bun test src/server/__tests__",
-    "doctor": "bun run ../scripts/doctor.ts"
+    "test": "$npm_execpath test src/server/__tests__",
+    "doctor": "$npm_execpath run ../scripts/doctor.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
