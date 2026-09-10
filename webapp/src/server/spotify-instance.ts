@@ -5,6 +5,8 @@ import { cloneSpotifyLoginState, terminateProcessTree } from "../../../src/core/
 import { sendIPC as sendIpcCommand } from "../../../src/core/ipc";
 import { getDaemonSpotifyInstance } from "../../../src/core/daemon-runtime";
 import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "../../../src/core/capture-control";
+import { captureMaxWaitMs, captureMonitorDecision, PlaybackProgressMonitor } from "../../../src/core/capture-monitor";
+import { migrateOfficialSpotifyAuthOnce } from "../../../src/core/auth-migration";
 import { CAPTURE_BACKEND, OUTPUT_DIR, PROFILES_DIR, WORKSPACE_DIR, IPC_SOCKET, SAVE_PATH } from "../../../src/core/paths";
 import type { DownloadJob, TrackMetadata } from "./jobs";
 import { copyAudioFallback, expectedOggBytes, findCapturedAudioPath, transcodeAudioToMp3, validateAudioFile, writeSidecar } from "./media";
@@ -168,6 +170,12 @@ export class SpotifyInstance {
     mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
 
     const appSupportSpotify = join(this.savePath, "Application Support/Spotify");
+    try {
+      const migration = migrateOfficialSpotifyAuthOnce();
+      if (migration === "migrated") this.log("Migrated existing Spotify login state into Soggfy-owned auth state.");
+    } catch (error) {
+      this.log(`Warning: could not migrate existing Spotify login state: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const loginState = cloneSpotifyLoginState(appSupportSpotify);
     if (loginState.copiedSessionCache) {
       this.log("Cloned reusable Spotify session state.");
@@ -406,22 +414,15 @@ export class SpotifyInstance {
       }
 
       const started = Date.now();
-      const maxCaptureMs = Math.max((durationMs || 240000) + 30000, 90000);
-      let lastBytes = -1;
-      let stagnantTicks = 0;
-      while (status !== "completed" && Date.now() - started < maxCaptureMs) {
+      const playback = new PlaybackProgressMonitor(trackId, started);
+      const maxCaptureMs = captureMaxWaitMs(durationMs);
+      while (captureMonitorDecision(status, Date.now() - started, maxCaptureMs) === "continue") {
         assertJobActive(job);
         await new Promise((r) => setTimeout(r, 1000));
         status = await this.sendIPC(`get_status ${trackId}`, 1).catch(() => "ipc_lost");
-        const bytes = this.refreshCapturedBytes(job);
-        if (bytes === lastBytes) stagnantTicks += 1;
-        else stagnantTicks = 0;
-        lastBytes = bytes;
+        this.refreshCapturedBytes(job);
         if (status === "ipc_lost") throw new Error("IPC lost during capture");
-        if (stagnantTicks >= 20 && bytes > 44) {
-          jobs.log(job, "capture appears stagnant; finalizing defensively");
-          break;
-        }
+        if (status !== "completed") playback.observe(await this.sendIPC("get_playing", 1).catch(() => "{}"));
       }
 
       jobs.transition(job, "finalizing");

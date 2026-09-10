@@ -9,6 +9,7 @@ import {
 import { join } from "path";
 import { isSpotifyVersionSupported, latestSupportedSpotifyVersion, supportedSpotifyVersions } from "./spotify-compatibility";
 import { AUTH_STATE_DIR } from "./paths";
+import { acquireAuthStateLock } from "./auth-lock";
 
 export interface LoginStateCloneResult {
   copiedPrefs: boolean;
@@ -60,6 +61,17 @@ export function cloneSpotifyLoginState(
   appSupportDest: string,
   sourceDir = AUTH_STATE_DIR,
 ): LoginStateCloneResult {
+  // Runtime snapshots must not race logout/import. Explicit official sources
+  // are used by auth operations that already own the destination's lock.
+  const lock = sourceDir === AUTH_STATE_DIR ? acquireAuthStateLock() : undefined;
+  try {
+    return copySpotifyLoginState(appSupportDest, sourceDir);
+  } finally {
+    lock?.release();
+  }
+}
+
+function copySpotifyLoginState(appSupportDest: string, sourceDir: string): LoginStateCloneResult {
   ensurePrivateDir(appSupportDest);
   let copiedPrefs = false;
   let copiedUsers = false;

@@ -218,7 +218,7 @@ function stateLabel(state: DownloadJob["state"]) {
 }
 
 function stateDetail(job: DownloadJob) {
-  if (job.state === "capturing" && job.durationMs) return `Capturing accelerated audio · ${Math.round(job.durationMs / 1000)} s source`;
+  if (job.state === "capturing" && job.durationMs) return `Capturing audio · ${Math.round(job.durationMs / 1000)} s source`;
   if (job.state === "transcoding") return `Encoding ${job.outputFormat || "mp3"} and writing metadata`;
   if (job.state === "finalizing") return "Validating captured stream";
   if (job.state === "queued") return "Waiting for a capture instance";

@@ -41,12 +41,35 @@ test("identifies the daemon process that owns the identity socket", () => {
 });
 
 
+test("legacy daemon retirement rejects same-second PID reuse via kernel birth id", async () => {
+  const owner = {
+    daemonPid: 73096,
+    spotifyPid: 77585,
+    daemonFingerprint: {
+      startedAt: "Thu Sep 10 13:46:55 2026",
+      birthId: "1789047322:111111",
+      command: "/Users/user/.bun/bin/bun /repo/soggfy-cli/src/cli.ts daemon run",
+    },
+  };
+  let terminated = false;
+  await expect(retireLegacyDaemonOwner(owner, {
+    readFingerprint: () => ({
+      startedAt: "Thu Sep 10 13:46:55 2026",
+      birthId: "1789047322:222222",
+      command: "/Users/user/.bun/bin/bun /repo/soggfy-cli/src/cli.ts daemon run",
+    }),
+    terminate: async () => { terminated = true; },
+  })).rejects.toThrow("identity changed");
+  expect(terminated).toBe(false);
+});
+
 test("legacy daemon retirement refuses a reused PID with a different fingerprint", async () => {
   const owner = {
     daemonPid: 73096,
     spotifyPid: 77585,
     daemonFingerprint: {
       startedAt: "Thu Sep 10 13:46:55 2026",
+      birthId: "1789047322:111111",
       command: "/Users/user/.bun/bin/bun /repo/soggfy-cli/src/cli.ts daemon run",
     },
   };
@@ -54,6 +77,7 @@ test("legacy daemon retirement refuses a reused PID with a different fingerprint
   await expect(retireLegacyDaemonOwner(owner, {
     readFingerprint: () => ({
       startedAt: "Thu Sep 10 13:47:01 2026",
+      birthId: "1789047328:000001",
       command: "/usr/bin/python3 unrelated.py",
     }),
     terminate: async () => { terminated = true; },

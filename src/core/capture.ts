@@ -5,6 +5,7 @@ import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion
 import { log } from "./log";
 import { fetchTrackMetadata, type TrackMetadata } from "./metadata";
 import { validateAudioFile } from "./media";
+import { captureMaxWaitMs, captureMonitorDecision, PlaybackProgressMonitor } from "./capture-monitor";
 
 export interface CaptureResult {
   trackId: string;
@@ -79,15 +80,14 @@ export async function captureTrack(
   log.info(`Capturing audio${durationMs ? ` (~${Math.round(durationMs / 1000)}s)` : ""}...`);
 
   // Monitor capture progress
-  const maxCaptureMs = Math.max((durationMs || 240000) + 30000, 90000);
+  const maxCaptureMs = captureMaxWaitMs(durationMs);
   const started = Date.now();
-  let lastBytes = -1;
-  let stagnantTicks = 0;
+  const playback = new PlaybackProgressMonitor(trackId, started);
   let ipcLossTicks = 0;
   const oggPath = join(savePath, `${trackId}.ogg`);
   const wavPath = join(savePath, `${trackId}.wav`);
 
-  while (status !== "completed" && Date.now() - started < maxCaptureMs) {
+  while (captureMonitorDecision(status, Date.now() - started, maxCaptureMs) === "continue") {
     await Bun.sleep(250);
     const newStatus = await sendIPC(socketPath, `get_status ${trackId}`, { retries: 2, timeoutMs: 1500 }).catch(() => "ipc_lost");
     if (newStatus === "ipc_lost") {
@@ -95,6 +95,15 @@ export async function captureTrack(
     } else {
       ipcLossTicks = 0;
       status = newStatus;
+      if (status !== "completed") {
+        try {
+          playback.observe(await sendIPC(socketPath, "get_playing", { retries: 1 }).catch(() => "{}"));
+        } catch (error) {
+          await sendIPC(socketPath, `cancel_track ${trackId}`).catch(() => {});
+          await sendIPC(socketPath, "pause").catch(() => {});
+          throw error;
+        }
+      }
     }
 
     const currentPath = existsSync(oggPath) ? oggPath : wavPath;
@@ -110,14 +119,6 @@ export async function captureTrack(
       log.progress("Capturing", bytes, expectedBytes);
     }
 
-    if (bytes === lastBytes) stagnantTicks++;
-    else stagnantTicks = 0;
-    lastBytes = bytes;
-
-    if (stagnantTicks >= 40 && bytes > 0) {
-      log.warn("Capture stagnant — finalizing");
-      break;
-    }
   }
 
   // Finalize

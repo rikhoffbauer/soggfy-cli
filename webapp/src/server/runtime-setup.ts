@@ -1,3 +1,4 @@
+import { signSpotifyBundle } from "../../../src/core/spotify-signing";
 import { copyFileSync, existsSync, mkdirSync } from "fs";
 import { spawnSync } from "child_process";
 import { join } from "path";
@@ -23,7 +24,5 @@ export async function preparePayload(): Promise<void> {
   assertSupportedSpotifyBundle(appBundle);
   mkdirSync(destDir, { recursive: true });
   copyFileSync(dylibSource, dylibDest);
-  runChecked("codesign", ["-f", "-s", "-", dylibDest], "codesign libsoggfy.dylib");
-  runChecked("codesign", ["-f", "-s", "-", "--deep", appBundle], "codesign patched Spotify bundle");
-  runChecked("codesign", ["--verify", "--deep", "--strict", appBundle], "verify patched Spotify bundle");
+  signSpotifyBundle(appBundle);
 }

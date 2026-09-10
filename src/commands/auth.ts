@@ -6,6 +6,8 @@ import { AUTH_STATE_DIR, SPOTIFY_APP, ensureDirs } from "../core/paths";
 import { exportAuthSnapshot, importAuthSnapshot, importLegacyAuthSnapshot, type AuthSnapshotV2 } from "../core/auth-state";
 import { replaceDirectoryAtomically } from "../core/atomic-directory";
 import { cloneSpotifyLoginState, terminateProcessTree } from "../core/spotify-runtime";
+import { markOfficialSpotifyAuthMigrationComplete } from "../core/auth-migration";
+import { acquireAuthStateLock } from "../core/auth-lock";
 
 const OFFICIAL_SPOTIFY_SUPPORT = join(homedir(), "Library/Application Support/Spotify");
 const PREFS_FILE = join(AUTH_STATE_DIR, "prefs");
@@ -23,18 +25,22 @@ function parseUsername(prefs: string | null): string | null {
 }
 
 function captureOfficialLoginState(): void {
+  const lock = acquireAuthStateLock();
   const stage = `${AUTH_STATE_DIR}.login-${process.pid}-${Date.now()}`;
-  rmSync(stage, { recursive: true, force: true });
-  mkdirSync(stage, { recursive: true, mode: 0o700 });
   try {
+    rmSync(stage, { recursive: true, force: true });
+    mkdirSync(stage, { recursive: true, mode: 0o700 });
     const copied = cloneSpotifyLoginState(stage, OFFICIAL_SPOTIFY_SUPPORT);
     if (!copied.copiedPrefs && !copied.copiedUsers && !copied.copiedSessionCache) {
       throw new Error("Spotify did not expose reusable login state after authentication");
     }
     replaceDirectoryAtomically(stage, AUTH_STATE_DIR);
+    markOfficialSpotifyAuthMigrationComplete();
   } catch (error) {
     rmSync(stage, { recursive: true, force: true });
     throw error;
+  } finally {
+    lock.release();
   }
 }
 
@@ -73,12 +79,18 @@ async function authLogin(): Promise<void> {
 
 function authLogout(): void {
   log.header("Spotify Logout");
-  if (!existsSync(AUTH_STATE_DIR)) {
-    log.info("No Soggfy credentials found.");
-    return;
+  const lock = acquireAuthStateLock();
+  try {
+    markOfficialSpotifyAuthMigrationComplete();
+    if (!existsSync(AUTH_STATE_DIR)) {
+      log.info("No Soggfy credentials found.");
+      return;
+    }
+    rmSync(AUTH_STATE_DIR, { recursive: true, force: true });
+    log.ok("Soggfy credentials removed. Official Spotify login was left untouched.");
+  } finally {
+    lock.release();
   }
-  rmSync(AUTH_STATE_DIR, { recursive: true, force: true });
-  log.ok("Soggfy credentials removed. Official Spotify login was left untouched.");
 }
 
 function authStatus(): void {
@@ -95,13 +107,18 @@ function authStatus(): void {
 }
 
 function authExport(outputPath?: string): void {
-  if (!existsSync(AUTH_STATE_DIR)) throw new Error("No credentials to export. Run 'soggfy auth login' first.");
-  const snapshot = exportAuthSnapshot(AUTH_STATE_DIR);
-  if (!Object.keys(snapshot.files).length) throw new Error("Soggfy auth state is empty");
-  const outFile = outputPath ? resolve(outputPath) : resolve("soggfy-auth.json");
-  writeFileSync(outFile, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(outFile, 0o600);
-  log.ok(`Credentials exported to: ${outFile}`);
+  const lock = acquireAuthStateLock();
+  try {
+    if (!existsSync(AUTH_STATE_DIR)) throw new Error("No credentials to export. Run 'soggfy auth login' first.");
+    const snapshot = exportAuthSnapshot(AUTH_STATE_DIR);
+    if (!Object.keys(snapshot.files).length) throw new Error("Soggfy auth state is empty");
+    const outFile = outputPath ? resolve(outputPath) : resolve("soggfy-auth.json");
+    writeFileSync(outFile, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 });
+    chmodSync(outFile, 0o600);
+    log.ok(`Credentials exported to: ${outFile}`);
+  } finally {
+    lock.release();
+  }
 }
 
 function authImport(inputPath?: string): void {
@@ -112,8 +129,14 @@ function authImport(inputPath?: string): void {
   try { snapshot = JSON.parse(readFileSync(path, "utf8")); }
   catch (error) { throw new Error(`Failed to parse auth file: ${error instanceof Error ? error.message : error}`); }
   ensureDirs();
-  if (snapshot.version === 2) importAuthSnapshot(AUTH_STATE_DIR, snapshot);
-  else if (snapshot.version === 1) importLegacyAuthSnapshot(AUTH_STATE_DIR, snapshot);
-  else throw new Error(`Unsupported auth snapshot version: ${snapshot.version}`);
-  log.ok(`Credentials imported into Soggfy-owned state: ${AUTH_STATE_DIR}`);
+  const lock = acquireAuthStateLock();
+  try {
+    if (snapshot.version === 2) importAuthSnapshot(AUTH_STATE_DIR, snapshot);
+    else if (snapshot.version === 1) importLegacyAuthSnapshot(AUTH_STATE_DIR, snapshot);
+    else throw new Error(`Unsupported auth snapshot version: ${snapshot.version}`);
+    markOfficialSpotifyAuthMigrationComplete();
+    log.ok(`Credentials imported into Soggfy-owned state: ${AUTH_STATE_DIR}`);
+  } finally {
+    lock.release();
+  }
 }

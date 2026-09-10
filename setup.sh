@@ -161,9 +161,7 @@ ditto "/Applications/Spotify.app" "$STAGED_APP"
 /usr/libexec/PlistBuddy -c 'Add :LSBackgroundOnly bool true' "$STAGED_APP/Contents/Info.plist"
 mkdir -p "$STAGED_APP/Contents/MacOS"
 cp "$ROOT_DIR/soggfy-macos/build/libsoggfy.dylib" "$STAGED_APP/Contents/MacOS/libsoggfy.dylib"
-codesign -f -s - "$STAGED_APP/Contents/MacOS/libsoggfy.dylib" >/dev/null
-codesign -f -s - --deep "$STAGED_APP" >/dev/null
-codesign --verify --deep --strict "$STAGED_APP"
+bun "$ROOT_DIR/scripts/sign-spotify.ts" "$STAGED_APP"
 
 if [[ -e "$BACKUP_APP" ]]; then
   echo -e "${RED}Refusing install with stale backup present: $BACKUP_APP${NC}"

@@ -22,6 +22,7 @@ add_library(soggfy SHARED
     Payload/Main.mm
     Payload/CapturePolicy.cpp
     Payload/DecodeHook.mm
+    Payload/OggPreRoll.cpp
     Payload/Scanner.cpp
     Payload/StateManager.cpp
 )

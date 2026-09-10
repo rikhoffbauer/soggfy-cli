@@ -3,9 +3,14 @@ import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion
 
 const trackId = "4PTG3Z6ehGkBFwjybzWkR8";
 
-test("playback confirmation accepts plain and ungated JSON target responses", () => {
-  expect(parsePlaybackConfirmation(`spotify:track:${trackId}`, trackId).confirmed).toBe(true);
-  expect(parsePlaybackConfirmation(JSON.stringify({ uri: `spotify:track:${trackId}`, is_ad: false, gated: false }), trackId).confirmed).toBe(true);
+test("playback confirmation requires the exact target, playing state and advancing position", () => {
+  const playing = { uri: `spotify:track:${trackId}`, is_ad: false, gated: false, state: "playing", position: 1.5 };
+  expect(parsePlaybackConfirmation(JSON.stringify(playing), trackId).confirmed).toBe(true);
+  expect(parsePlaybackConfirmation(`spotify:track:${trackId}`, trackId).confirmed).toBe(false);
+  expect(parsePlaybackConfirmation(JSON.stringify({ ...playing, state: "paused" }), trackId).confirmed).toBe(false);
+  expect(parsePlaybackConfirmation(JSON.stringify({ ...playing, position: 0 }), trackId).confirmed).toBe(false);
+  expect(parsePlaybackConfirmation(JSON.stringify({ ...playing, uri: `${playing.uri}extra` }), trackId).confirmed).toBe(false);
+  expect(parsePlaybackConfirmation(JSON.stringify({ uri: playing.uri, is_ad: false, gated: false }), trackId).confirmed).toBe(false);
   expect(parsePlaybackConfirmation(JSON.stringify({ uri: `spotify:track:${trackId}`, is_ad: false, gated: true }), trackId).confirmed).toBe(false);
   expect(parsePlaybackConfirmation(JSON.stringify({ uri: "spotify:ad:1", is_ad: true, gated: false }), trackId).confirmed).toBe(false);
 });

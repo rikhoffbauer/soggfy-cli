@@ -1,6 +1,6 @@
 # Current Architecture
 
-Status: active implementation as of 2026-09-09.
+Status: active implementation as of 2026-09-10.
 
 ## Truth model
 
@@ -11,13 +11,13 @@ Spotify compatibility is exact and registry-backed. Production launch accepts on
 ## End-to-end pipeline
 
 1. Setup copies `/Applications/Spotify.app` to `~/.soggfy/workspace/PatchedSpotify.app`, builds/copies `libsoggfy.dylib`, signs the payload and completed app bundle, and verifies the signature.
-2. The daemon creates the private profile/temp/save directories and clones only the Spotify login state needed for authenticated playback. Non-daemon CLI fallback instances do the same in PID-scoped paths.
+2. The daemon creates the private profile/temp/save directories and clones only the Spotify login state needed for authenticated playback. On first launch after the auth-isolation migration, an existing official Spotify login can be imported once into Soggfy-owned state; explicit logout suppresses future automatic imports. Non-daemon CLI fallback instances use the same auth source in PID-scoped runtime paths.
 3. The patched Spotify process starts with `DYLD_INSERT_LIBRARIES`, a unique IPC socket/save path, an isolated home/TMPDIR/profile/cache, `SOGGFY_CAPTURE_BACKEND=ogg`, and output muting enabled by default.
 4. The main injected process starts IPC and publishes shared track-generation/capture-gate state. Helper processes consume the same shared state.
-5. `set_track` resets previous track state and starts a new generation. The client sends `play` and keeps retrying while Spotify starts. Capture is not accepted until `get_playing` confirms the requested track.
-6. The Ogg beginning-of-stream path atomically claims `.capture-owner`. Only that process may append Ogg pages or enable the accelerated decode mutation.
+5. `set_track` resets previous track state and starts a new generation. Native `play` verifies its local control listener and the bundled Spotify CLI signature, then executes one CLI playback command. `get_playing` must confirm the exact track, playing state and positive position. Lost command replies never cause replay.
+6. Ogg pages arriving before target confirmation are retained only in a bounded generation-scoped pre-roll. Once the requested URI is confirmed, the matching Vorbis BOS/header pages are promoted and the Ogg path atomically claims `.capture-owner`. Ads, non-target playback, resets, and overflow discard pre-roll. Only the elected process may append Ogg pages or enable accelerated decode mutation.
 7. A shared status/control protocol (`.status`, `.duration`, `.finish`, `.cancel`) lets the IPC-owning process and writer process coordinate even when they are different Spotify processes.
-8. Capture finishes on Ogg EOS, explicit `finish_track`, duration controls, or cancellation. Clients wait for shared `completed` instead of sleeping for a fixed delay.
+8. Capture finishes on Ogg EOS, explicit `finish_track`, duration controls, or cancellation. Byte stagnation is never treated as EOS; a 30-second playback-position stall fails the job. Clients wait for shared `completed` instead of sleeping for a fixed delay.
 9. `validateAudioFile` checks the container with ffprobe, compares duration when known, decodes signal through ffmpeg, and rejects malformed, silent, or mostly-silent output.
 10. The CLI streams/transcodes only validated media. The webapp transcodes validated captures to MP3 when possible and preserves the validated Ogg/WAV container if transcode fails.
 
@@ -89,7 +89,7 @@ Legacy states are derived from these structured jobs rather than being the sourc
 
 ## Process lifecycle
 
-Runtime cleanup never uses `pkill`, `pgrep -f`, or `killall`. The shared lifecycle helper builds the exact descendant set from the launched root PID, sends TERM deepest-first/root, then KILLs only surviving members of that same set.
+Runtime cleanup never uses `pkill`, `pgrep -f`, or `killall`. The shared lifecycle helper builds the exact descendant set from the launched root PID, sends TERM deepest-first/root, then KILLs only surviving members of that same set. Legacy-daemon retirement additionally fingerprints the daemon with macOS kernel process birth metadata from `proc_pidinfo(PROC_PIDTBSDINFO)` at microsecond resolution and rechecks it before signals; if that identity cannot be proven, automatic retirement fails closed.
 
 The same principle is used by daemon/fallback CLI instances and interactive auth/setup flows.
 
@@ -101,6 +101,8 @@ The same principle is used by daemon/fallback CLI instances and interactive auth
 - TLS session-key logging is opt-in only.
 
 ## Verification state
+
+The 2026-09-10 playback repair and four-track evidence are recorded in [Playback verification](./playback-verification.md). The following results describe the earlier baseline.
 
 Automated verification on 2026-09-08:
 

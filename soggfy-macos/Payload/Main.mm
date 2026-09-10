@@ -1,5 +1,6 @@
 #include "CapturePolicy.h"
 #include "DecodeHook.h"
+#include "OggPreRoll.h"
 #include "Scanner.h"
 #include "StateManager.h"
 #include "ProcessRole.h"
@@ -200,8 +201,6 @@ static std::atomic<bool> g_watchdog_running{false};
 // ── Ad-gated capture state ──
 // Tracks what Spotify actually reports as playing via PlaybackStateChanged
 // notifications. Capture is gated until the confirmed URI matches the target.
-static std::string g_confirmed_playing_uri;
-static std::mutex g_playing_mutex;
 std::atomic<bool> g_capture_gated{true};
 // ── DNS / Ad-Blocking Hook ──
 #include <netdb.h>
@@ -407,17 +406,39 @@ static std::string SharedSaveDir() {
 
 static void WritePrivateSharedFile(const std::string &name, const std::string &value) {
   const std::string path = SharedSaveDir() + "/" + name;
-  int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  const std::string temp = path + ".tmp." + std::to_string(getpid());
+  int fd = open(temp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
   if (fd < 0) {
-    printf("[Soggfy-IPC] Failed to write %s: %s\n", path.c_str(), strerror(errno));
+    printf("[Soggfy-IPC] Failed to write %s: %s\n", temp.c_str(), strerror(errno));
     return;
   }
-  (void)write(fd, value.data(), value.size());
+  const char *data = value.data();
+  size_t remaining = value.size();
+  while (remaining > 0) {
+    const ssize_t written = write(fd, data, remaining);
+    if (written <= 0) {
+      printf("[Soggfy-IPC] Failed to write %s: %s\n", temp.c_str(), strerror(errno));
+      close(fd);
+      unlink(temp.c_str());
+      return;
+    }
+    data += written;
+    remaining -= (size_t)written;
+  }
   close(fd);
+  if (rename(temp.c_str(), path.c_str()) != 0) {
+    printf("[Soggfy-IPC] Failed to publish %s: %s\n", path.c_str(), strerror(errno));
+    unlink(temp.c_str());
+  }
 }
 
+static std::atomic<uint64_t> g_capture_gate_epoch{0};
+
 static void PersistCaptureGate(bool gated) {
-  WritePrivateSharedFile("capture_gate.txt", gated ? "1\n" : "0\n");
+  const uint64_t epoch = g_capture_gate_epoch.fetch_add(1) + 1;
+  WritePrivateSharedFile(
+      "capture_gate.txt",
+      std::string(gated ? "1 " : "0 ") + std::to_string(epoch) + "\n");
 }
 
 static void PersistActiveTrackId(const std::string &track) {
@@ -430,8 +451,7 @@ static void ApplySetTrack(const std::string &track) {
   // is confirmed playing via PlaybackStateChanged notification.
   g_capture_gated.store(true);
   PersistCaptureGate(true);
-  g_ogg_stream_active.store(false);
-  g_active_ogg_serial = 0;
+  ResetOggCaptureState(track);
 
   std::string prev_track;
   {
@@ -452,12 +472,31 @@ static void ApplySetTrack(const std::string &track) {
   }
 
   g_last_audio_time_ms.store(0);
-  {
-    std::lock_guard<std::mutex> lock(g_playing_mutex);
-    g_confirmed_playing_uri.clear();
-  }
   StateManager::Instance().ResetPlayback(track);
   PersistActiveTrackId(track);
+}
+
+// Called on the IPC worker, never the UI thread. Do not inject the payload
+// into control tools or their children, or redirect their protocol output.
+static bool RunSpotifyTool(NSString *path, NSArray<NSString *> *arguments, double timeout) {
+  @try {
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = [NSURL fileURLWithPath:path];
+    task.arguments = arguments;
+    NSMutableDictionary *env = [[[NSProcessInfo processInfo] environment] mutableCopy];
+    [env removeObjectForKey:@"DYLD_INSERT_LIBRARIES"];
+    task.environment = env;
+    task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = [NSFileHandle fileHandleWithNullDevice];
+    NSError *error = nil;
+    if (![task launchAndReturnError:&error]) return false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds((int)(timeout * 1000));
+    while (task.running && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (task.running) { kill(task.processIdentifier, SIGKILL); [task waitUntilExit]; return false; }
+    [task waitUntilExit];
+    return task.terminationStatus == 0;
+  } @catch (NSException *) { return false; }
 }
 
 void StartIPCServer() {
@@ -531,63 +570,43 @@ void StartIPCServer() {
     } else if (req.rfind("play ", 0) == 0) {
       std::string uri = req.substr(5);
       TrimInPlace(uri);
-      printf("[Soggfy-IPC] Received command: play %s\n", uri.c_str());
-
-      __block OSStatus playErr = noErr;
-      dispatch_sync(dispatch_get_main_queue(), ^{
-        NSAppleEventDescriptor *target = [NSAppleEventDescriptor currentProcessDescriptor];
-        NSAppleEventDescriptor *event = [NSAppleEventDescriptor
-            appleEventWithEventClass:'spfy'
-                             eventID:'PCtx'
-                    targetDescriptor:target
-                            returnID:kAutoGenerateReturnID
-                       transactionID:kAnyTransactionID];
-        NSString *urlStr = [NSString stringWithUTF8String:uri.c_str()];
-        [event setParamDescriptor:[NSAppleEventDescriptor descriptorWithString:urlStr]
-                       forKeyword:keyDirectObject];
-        [event setParamDescriptor:[NSAppleEventDescriptor descriptorWithString:urlStr]
-                       forKeyword:'cotx'];
-
-        AppleEvent reply;
-        playErr = AESendMessage([event aeDesc], &reply, kAENoReply,
-                                kAEDefaultTimeout);
-        printf("[Soggfy-INFO] Sent play event to self. Result: %d\n", (int)playErr);
-
-        if (playErr == noErr) {
-          // Also send 'Play' unpause event in case track was paused at EOS.
-          NSAppleEventDescriptor *unpauseEvent = [NSAppleEventDescriptor
-              appleEventWithEventClass:'spfy'
-                               eventID:'Play'
-                      targetDescriptor:target
-                              returnID:kAutoGenerateReturnID
-                         transactionID:kAnyTransactionID];
-          AESendMessage([unpauseEvent aeDesc], &reply, kAENoReply, kAEDefaultTimeout);
-        }
-      });
-
-      if (playErr == noErr) {
-        SendResponse(client_fd, "ok");
+      if (uri.rfind("spotify:track:", 0) != 0 || uri.size() != 36 ||
+          uri.find_first_not_of("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 14) != std::string::npos) {
+        SendResponse(client_fd, "error invalid track URI");
       } else {
-        char response[64];
-        snprintf(response, sizeof(response), "error:%d", (int)playErr);
-        SendResponse(client_fd, response);
+        // AppleEvent PCtx triggers a second auto_play_on_load context transition
+        // in Spotify 1.2.98. Use Spotify's signed local CLI exactly once instead.
+        @autoreleasepool {
+          NSString *cli = [[[NSBundle mainBundle] bundlePath]
+              stringByAppendingPathComponent:@"Contents/MacOS/spotify_cli"];
+          NSString *pid = [NSString stringWithFormat:@"%d", getpid()];
+          bool ownsListener = RunSpotifyTool(@"/usr/sbin/lsof",
+              @[@"-nP", @"-a", @"-p", pid, @"-iTCP:7768", @"-sTCP:LISTEN"], 2.0);
+          bool signedCli = ownsListener && RunSpotifyTool(@"/usr/bin/codesign",
+              @[@"--verify", @"--strict", @"-R",
+                @"=anchor apple generic and certificate leaf[subject.OU] = \"2FNC3A47ZF\"", cli], 2.0);
+          if (!ownsListener) {
+            SendResponse(client_fd, "error Spotify local control port 7768 is not owned by this instance");
+          } else if (!signedCli) {
+            SendResponse(client_fd, "error Spotify CLI signature invalid; reinstall from the official bundle");
+          } else if (RunSpotifyTool(cli, @[@"play", [NSString stringWithUTF8String:uri.c_str()]], 8.0)) {
+            SendResponse(client_fd, "ok");
+          } else {
+            SendResponse(client_fd, "error Spotify CLI playback failed or timed out; not replaying");
+          }
+        }
       }
     } else if (req == "pause") {
       printf("[Soggfy-IPC] Received command: pause\n");
-      dispatch_async(dispatch_get_main_queue(), ^{
-        NSAppleEventDescriptor *target = [NSAppleEventDescriptor currentProcessDescriptor];
-        NSAppleEventDescriptor *event = [NSAppleEventDescriptor
-            appleEventWithEventClass:'spfy'
-                             eventID:'Paus'
-                    targetDescriptor:target
-                            returnID:kAutoGenerateReturnID
-                       transactionID:kAnyTransactionID];
-        AppleEvent reply;
-        OSStatus err = AESendMessage([event aeDesc], &reply, kAENoReply,
-                                     kAEDefaultTimeout);
-        printf("[Soggfy-INFO] Sent pause event to self. Result: %d\n", (int)err);
-      });
-      SendResponse(client_fd, "ok");
+      @autoreleasepool {
+        NSString *cli = [[[NSBundle mainBundle] bundlePath]
+            stringByAppendingPathComponent:@"Contents/MacOS/spotify_cli"];
+        if (RunSpotifyTool(cli, @[@"pause"], 5.0)) {
+          SendResponse(client_fd, "ok");
+        } else {
+          SendResponse(client_fd, "error Spotify CLI pause failed or timed out");
+        }
+      }
     } else if (req.rfind("set_track ", 0) == 0) {
       std::string track = req.substr(10);
       TrimInPlace(track);
@@ -652,19 +671,23 @@ void StartIPCServer() {
       StateManager::Instance().ResetPlayback(track);
       SendResponse(client_fd, "track reset");
     } else if (req == "get_playing") {
-      std::string uri;
-      {
-        std::lock_guard<std::mutex> lock(g_playing_mutex);
-        uri = g_confirmed_playing_uri;
-      }
-      bool is_ad = (uri.find("spotify:ad:") != std::string::npos);
-      bool gated = g_capture_gated.load();
-      char response[2048];
-      snprintf(response, sizeof(response),
-               "{\"uri\":\"%s\",\"is_ad\":%s,\"gated\":%s}",
-               JsonEscape(uri).c_str(),
-               is_ad ? "true" : "false",
-               gated ? "true" : "false");
+      __block std::string response = "{}";
+      dispatch_sync(dispatch_get_main_queue(), ^{
+        @try {
+          id app = [NSClassFromString(@"NSApplication") performSelector:@selector(sharedApplication)];
+          id track = [app valueForKey:@"currentTrack"];
+          NSString *uri = track ? [track valueForKey:@"applescriptID"] : @"";
+          NSNumber *state = [app valueForKey:@"playerState"];
+          NSNumber *position = [app valueForKey:@"playbackPosition"];
+          NSDictionary *snapshot = @{
+            @"uri": uri ?: @"", @"state": state.intValue == 1 ? @"playing" : state.intValue == 2 ? @"paused" : @"stopped",
+            @"position": position ?: @0, @"is_ad": @([uri hasPrefix:@"spotify:ad:"]),
+            @"gated": @(g_capture_gated.load())
+          };
+          NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:0 error:nil];
+          if (data) response.assign((const char *)data.bytes, data.length);
+        } @catch (NSException *) {}
+      });
       SendResponse(client_fd, response);
     } else {
       SendResponse(client_fd, "error unknown command");
@@ -838,64 +861,102 @@ void SetupAudioHooks() {
 
 // ── Entry Point ──
 
-static bool ReadSharedCaptureGate(const std::string &save_dir) {
+struct SharedCaptureGateState {
+  bool gated = true;
+  uint64_t epoch = 0;
+};
+
+static SharedCaptureGateState ReadSharedCaptureGate(const std::string &save_dir) {
+  SharedCaptureGateState state;
   std::ifstream in(save_dir + "/capture_gate.txt");
   char value = '1';
-  if (in) in >> value;
-  return value != '0';
+  if (in) {
+    in >> value;
+    uint64_t epoch = 0;
+    if (in >> epoch) state.epoch = epoch;
+  }
+  state.gated = value != '0';
+  return state;
+}
+
+static std::mutex g_shared_capture_sync_mutex;
+static std::string g_last_shared_track_token;
+static OggGateEpochTracker g_shared_gate_tracker;
+
+void SyncSharedCaptureStateNow() {
+  std::lock_guard<std::mutex> sync_lock(g_shared_capture_sync_mutex);
+  const std::string save_dir = SharedSaveDir();
+  const std::string track_file_path = save_dir + "/active_track.txt";
+
+  std::ifstream track_file(track_file_path);
+  std::string token;
+  if (track_file) std::getline(track_file, token);
+  TrimInPlace(token);
+  if (!token.empty() && token != g_last_shared_track_token) {
+    std::istringstream parsed(token);
+    std::string track;
+    parsed >> track;
+    if (!track.empty()) {
+      std::string previous;
+      {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
+        previous = g_active_track_id;
+      }
+      if (!previous.empty() && previous != "prototype_track" && previous != track &&
+          StateManager::Instance().OwnsWriter(previous)) {
+        StateManager::Instance().ApplySharedControls(previous);
+        if (StateManager::Instance().GetPlaybackStatus(previous) == "downloading")
+          StateManager::Instance().FinishPlayback(previous);
+      }
+      StateManager::Instance().ResetLocalPlayback(track);
+      {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
+        g_active_track_id = track;
+      }
+      ResetOggCaptureState(track);
+      g_last_shared_track_token = token;
+    }
+  }
+
+  const SharedCaptureGateState gate_state = ReadSharedCaptureGate(save_dir);
+  if (g_shared_gate_tracker.ShouldDiscard(gate_state.gated, gate_state.epoch)) {
+    DiscardPendingOggCapture();
+  }
+  g_capture_gated.store(gate_state.gated);
+
+  std::string active;
+  {
+    std::lock_guard<std::mutex> lock(g_track_mutex);
+    active = g_active_track_id;
+  }
+  if (!active.empty() && active != "prototype_track")
+    StateManager::Instance().ApplySharedControls(active);
 }
 
 static void SyncTrackIdThread() {
-  const std::string save_dir = SharedSaveDir();
-  const std::string track_file_path = save_dir + "/active_track.txt";
-  std::string last_token;
-
   while (true) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-    std::ifstream track_file(track_file_path);
-    std::string token;
-    if (track_file) std::getline(track_file, token);
-    TrimInPlace(token);
-    if (!token.empty() && token != last_token) {
-      std::istringstream parsed(token);
-      std::string track;
-      parsed >> track;
-      if (!track.empty()) {
-        std::string previous;
-        {
-          std::lock_guard<std::mutex> lock(g_track_mutex);
-          previous = g_active_track_id;
-        }
-        if (!previous.empty() && previous != "prototype_track" &&
-            StateManager::Instance().OwnsWriter(previous)) {
-          StateManager::Instance().ApplySharedControls(previous);
-          if (StateManager::Instance().GetPlaybackStatus(previous) == "downloading")
-            StateManager::Instance().FinishPlayback(previous);
-        }
-        StateManager::Instance().ResetLocalPlayback(track);
-        {
-          std::lock_guard<std::mutex> lock(g_track_mutex);
-          g_active_track_id = track;
-        }
-              g_ogg_stream_active.store(false);
-        g_active_ogg_serial = 0;
-        last_token = token;
-      }
-    }
-
-    g_capture_gated.store(ReadSharedCaptureGate(save_dir));
-    std::string active;
-    {
-      std::lock_guard<std::mutex> lock(g_track_mutex);
-      active = g_active_track_id;
-    }
-    if (!active.empty() && active != "prototype_track")
-      StateManager::Instance().ApplySharedControls(active);
+    SyncSharedCaptureStateNow();
   }
 }
 
 __attribute__((constructor)) void SoggfyEntryPoint() {
+  char path[4096] = {0};
+  uint32_t size = sizeof(path);
+  SoggfyProcessRole process_role = SoggfyProcessRole::Unrelated;
+  if (_NSGetExecutablePath(path, &size) == 0) {
+    process_role = ClassifySoggfyProcess(path);
+  }
+
+  // DYLD has already loaded this payload into the current process. Clear the
+  // insertion variable immediately so no child process inherits it. This is
+  // critical for Spotify's system helpers (for example arm64e lsof).
+  unsetenv("DYLD_INSERT_LIBRARIES");
+
+  if (process_role == SoggfyProcessRole::Unrelated) {
+    return;
+  }
+
   const std::string save_dir = SharedSaveDir();
   mkdir(save_dir.c_str(), 0700);
   chmod(save_dir.c_str(), 0700);
@@ -909,23 +970,10 @@ __attribute__((constructor)) void SoggfyEntryPoint() {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
 
-  char path[4096] = {0};
-  uint32_t size = sizeof(path);
-  SoggfyProcessRole process_role = SoggfyProcessRole::Unrelated;
-  if (_NSGetExecutablePath(path, &size) == 0) {
-    process_role = ClassifySoggfyProcess(path);
-  }
-
-  if (process_role == SoggfyProcessRole::Unrelated) {
-    printf("[Soggfy-INFO] Ignoring inherited payload in unrelated child process "
-           "(PID %d, executable=%s)\n",
-           getpid(), path[0] ? path : "unknown");
-    return;
-  }
+  const bool is_main_process = process_role == SoggfyProcessRole::MainSpotify;
 
   SetupImmediateHooks();
 
-  const bool is_main_process = process_role == SoggfyProcessRole::MainSpotify;
   printf("[Soggfy-INFO] Soggfy payload v2.0 active (PID %d, Main=%d)\n",
          getpid(), is_main_process);
 
@@ -941,37 +989,39 @@ __attribute__((constructor)) void SoggfyEntryPoint() {
           NSDictionary *info = note.userInfo;
           NSString *trackIdNS = info[@"Track ID"];
           if (!trackIdNS) return;
+          id playerStateValue = info[@"Player State"];
+          NSString *playerStateNS = [playerStateValue isKindOfClass:[NSString class]]
+                                        ? (NSString *)playerStateValue
+                                        : [playerStateValue description];
 
           std::string uri = [trackIdNS UTF8String];
-          {
-            std::lock_guard<std::mutex> lock(g_playing_mutex);
-            g_confirmed_playing_uri = uri;
-          }
-
+          std::string player_state = playerStateNS ? [playerStateNS UTF8String] : "";
           std::string target;
           {
             std::lock_guard<std::mutex> lock(g_track_mutex);
             target = g_active_track_id;
           }
 
-          bool is_ad = (uri.find("spotify:ad:") != std::string::npos);
+          bool is_ad = (uri.rfind("spotify:ad:", 0) == 0);
           bool matches_target = (!target.empty() &&
-                                 uri.find(target) != std::string::npos);
+                                 uri == "spotify:track:" + target);
+          bool is_playing = (player_state == "Playing" || player_state == "playing");
 
           if (is_ad) {
             g_capture_gated.store(true);
             PersistCaptureGate(true);
+            DiscardPendingOggCapture();
             printf("[Soggfy-AD] Advertisement detected: %s — capture gated\n",
                    uri.c_str());
-          } else if (matches_target) {
+          } else if (matches_target && is_playing) {
             g_capture_gated.store(false);
             PersistCaptureGate(false);
-            printf("[Soggfy-AD] Target track confirmed playing: %s\n",
-                   uri.c_str());
+            printf("[Soggfy-AD] Target track confirmed playing: %s\n", uri.c_str());
           } else {
             // Non-target, non-ad track (e.g. autoplay next song) — keep gated
             g_capture_gated.store(true);
             PersistCaptureGate(true);
+            DiscardPendingOggCapture();
             printf("[Soggfy-AD] Non-target track playing: %s (target: %s) "
                    "— capture gated\n",
                    uri.c_str(), target.c_str());

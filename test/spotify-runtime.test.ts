@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
+import { acquireAuthStateLock } from "../src/core/auth-lock";
 import {
   assertSupportedSpotifyBundle,
   cloneSpotifyLoginState,
@@ -32,6 +33,38 @@ test("cloneSpotifyLoginState copies only session-critical state", () => {
   expect(existsSync(join(dest, "PersistentCache/Users/u/db/session"))).toBe(true);
   expect(existsSync(join(dest, "PersistentCache/user_settings"))).toBe(true);
   expect(existsSync(join(dest, "PersistentCache/Update"))).toBe(false);
+});
+
+test("runtime login clones lock owned auth state without relocking explicit import sources", async () => {
+  const owned = join(root, "auth/spotify");
+  const explicit = join(root, "official");
+  const dest = join(root, "dest");
+  mkdirSync(owned, { recursive: true });
+  mkdirSync(explicit, { recursive: true });
+  writeFileSync(join(owned, "prefs"), "owned-state");
+  writeFileSync(join(explicit, "prefs"), "explicit-state");
+  const run = async (source: string) => {
+    const proc = Bun.spawn([process.execPath, "-e", 'import {cloneSpotifyLoginState} from "./src/core/spotify-runtime"; cloneSpotifyLoginState(process.env.TEST_DEST, process.env.TEST_SOURCE || undefined);'], {
+      cwd: join(import.meta.dir, ".."),
+      env: { ...process.env, SOGGFY_HOME: root, TEST_DEST: dest, TEST_SOURCE: source },
+      stdout: "ignore", stderr: "pipe",
+    });
+    const [code, error] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    return { code, error };
+  };
+  const lock = acquireAuthStateLock(join(root, "auth/.state.lock"));
+  try {
+    const blocked = await run("");
+    expect(blocked.code).not.toBe(0);
+    expect(blocked.error).toContain("Auth state is busy");
+    expect(existsSync(dest)).toBe(false);
+    expect((await run(explicit)).code).toBe(0);
+    expect(await Bun.file(join(dest, "prefs")).text()).toBe("explicit-state");
+  } finally {
+    lock.release();
+  }
+  expect((await run("")).code).toBe(0);
+  expect(await Bun.file(join(dest, "prefs")).text()).toBe("owned-state");
 });
 
 test("descendantPidsFromProcessTable returns deepest children first", () => {

@@ -1,6 +1,7 @@
 #include <os/log.h>
 #include "CapturePolicy.h"
 #include "DecodeHook.h"
+#include "OggPreRoll.h"
 #include "Scanner.h"
 #include "StateManager.h"
 #include <dobby.h>
@@ -23,7 +24,6 @@ struct ogg_page_sys {
 };
 
 static int (*orig_ogg_stream_pagein)(void* os, ogg_page_sys* og) = nullptr;
-uint32_t g_active_ogg_serial = 0;
 
 extern std::mutex g_track_mutex;
 extern std::string g_active_track_id;
@@ -39,8 +39,21 @@ extern std::atomic<bool> g_capture_gated;
 typedef int (*DecodeAudioData_t)(void* x0, float* x1, size_t* x2, const char* x3, size_t* x4, int x5);
 static DecodeAudioData_t orig_DecodeAudioData = nullptr;
 
-std::atomic<bool> g_ogg_stream_active{false};
 std::atomic<bool> g_decoder_hooks_ready{false};
+static std::mutex g_ogg_preroll_mutex;
+static OggPreRollBuffer g_ogg_preroll;
+static OggStreamSelection g_ogg_stream_selection;
+
+void ResetOggCaptureState(const std::string& trackId) {
+    std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+    g_ogg_preroll.Reset(trackId);
+    g_ogg_stream_selection.Reset();
+}
+
+void DiscardPendingOggCapture() {
+    std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+    g_ogg_preroll.Discard();
+}
 
 static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
     if (!orig_ogg_stream_pagein) return 0;
@@ -60,31 +73,81 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
         uint32_t serial = 0;
         memcpy(&serial, hdr + 14, sizeof(serial));
 
+        // Helper-process polling is intentionally coarse. Refresh synchronously
+        // at a stream boundary (and while gated) so the first BOS cannot race
+        // ahead of a newly published set_track/capture-gate generation.
+        if (is_bos || g_capture_gated.load()) SyncSharedCaptureStateNow();
+
         std::string track_id;
         {
             std::lock_guard<std::mutex> lock(g_track_mutex);
             track_id = g_active_track_id;
         }
 
-        // Check if this page is the beginning of a genuine Vorbis audio stream:
-        // A genuine Vorbis stream BOS page has a body starting with \x01vorbis (identification header)
         bool is_vorbis_bos = is_bos && (bdy != nullptr) && (blen >= 7) &&
                              (bdy[0] == 0x01) && (memcmp(bdy + 1, "vorbis", 6) == 0);
 
         if (!track_id.empty() && track_id != "prototype_track" &&
             CaptureBackendAllowsSource("ogg")) {
             auto &state = StateManager::Instance();
-            if (is_vorbis_bos && !g_capture_gated.load() &&
-                state.TryClaimWriter(track_id, "ogg")) {
-                g_ogg_stream_active.store(true);
-                g_active_ogg_serial = serial;
-                printf("[Soggfy-OGG] Claimed Vorbis stream for %s (serial 0x%x)\n",
-                       track_id.c_str(), serial);
-                fflush(stdout);
+            const bool gated = g_capture_gated.load();
+
+            if (gated) {
+                bool buffered = false;
+                {
+                    std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+                    buffered = g_ogg_preroll.BufferPage(
+                        track_id, serial, is_vorbis_bos,
+                        hdr, (size_t)hlen,
+                        bdy, (bdy != nullptr && blen > 0 && blen < 1048576) ? (size_t)blen : 0);
+                }
+                if (is_vorbis_bos && buffered) {
+                    printf("[Soggfy-OGG] Buffered gated Vorbis BOS for %s (serial 0x%x)\n",
+                           track_id.c_str(), serial);
+                    fflush(stdout);
+                }
+                return ret;
             }
 
-            // Only the elected writer may persist pages for this track/serial.
-            if (g_ogg_stream_active.load() && serial == g_active_ogg_serial &&
+            OggStreamSnapshot selection;
+            {
+                std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+                selection = g_ogg_stream_selection.Snapshot();
+            }
+            if (!selection.active) {
+                std::optional<BufferedOggStream> pending;
+                {
+                    std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+                    pending = g_ogg_preroll.TakeForSerial(track_id, serial);
+                    if (!pending && is_vorbis_bos) g_ogg_preroll.Discard();
+                }
+
+                if (pending && state.TryClaimWriter(track_id, "ogg")) {
+                    {
+                        std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+                        g_ogg_stream_selection.Activate(serial);
+                        selection = g_ogg_stream_selection.Snapshot();
+                    }
+                    state.ReceiveOggData(
+                        track_id,
+                        reinterpret_cast<const char*>(pending->bytes.data()),
+                        pending->bytes.size());
+                    printf("[Soggfy-OGG] Promoted %zu pre-roll bytes for %s (serial 0x%x)\n",
+                           pending->bytes.size(), track_id.c_str(), serial);
+                    fflush(stdout);
+                } else if (is_vorbis_bos && state.TryClaimWriter(track_id, "ogg")) {
+                    {
+                        std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+                        g_ogg_stream_selection.Activate(serial);
+                        selection = g_ogg_stream_selection.Snapshot();
+                    }
+                    printf("[Soggfy-OGG] Claimed Vorbis stream for %s (serial 0x%x)\n",
+                           track_id.c_str(), serial);
+                    fflush(stdout);
+                }
+            }
+
+            if (selection.active && serial == selection.serial &&
                 state.OwnsWriter(track_id, "ogg")) {
                 uint64_t eos_granule = 0;
                 double eos_audio_sec = 0.0;
@@ -93,7 +156,10 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
                     eos_audio_sec = (double)eos_granule / 44100.0;
                     if (eos_audio_sec <= 5.0) {
                         state.RestartOggCapture(track_id);
-                        g_ogg_stream_active.store(false);
+                        {
+                            std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+                            g_ogg_stream_selection.Reset();
+                        }
                         printf("[Soggfy-OGG] Discarded aborted stream for %s (serial 0x%x, %.1fs EOS); waiting for replacement BOS\n",
                                track_id.c_str(), serial, eos_audio_sec);
                         fflush(stdout);
@@ -110,7 +176,10 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
                     printf("[Soggfy-OGG] Stream EOS reached for %s (serial 0x%x, %.1fs audio). Finalizing!\n",
                            track_id.c_str(), serial, eos_audio_sec);
                     fflush(stdout);
-                    g_ogg_stream_active.store(false);
+                    {
+                        std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+                        g_ogg_stream_selection.Reset();
+                    }
                     state.FinishPlayback(track_id);
                 }
             }
@@ -123,20 +192,10 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
 static int my_DecodeAudioData(void* x0, float* x1, size_t* x2, const char* x3, size_t* x4, int x5) {
     if (!orig_DecodeAudioData) return 0;
 
-    size_t in_samples = (x2 != nullptr) ? *x2 : 0;
-    size_t in_bytes = (x4 != nullptr) ? *x4 : 0;
 
     int ret = orig_DecodeAudioData(x0, x1, x2, x3, x4, x5);
 
     size_t samplesDecoded = (x2 != nullptr) ? *x2 : 0;
-    size_t bytesRead = (x4 != nullptr) ? *x4 : 0;
-
-    static int call_count = 0;
-    if (++call_count <= 5 || call_count % 200 == 0) {
-        printf("[Soggfy-DECODE] DecodeAudioData #%d: in_bytes=%zu bytesRead=%zu in_samples=%zu samplesDecoded=%zu\n",
-               call_count, in_bytes, bytesRead, in_samples, samplesDecoded);
-        fflush(stdout);
-    }
 
     std::string track;
     {
@@ -144,8 +203,13 @@ static int my_DecodeAudioData(void* x0, float* x1, size_t* x2, const char* x3, s
         track = g_active_track_id;
     }
 
+    OggStreamSnapshot selection;
+    {
+        std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
+        selection = g_ogg_stream_selection.Snapshot();
+    }
     if (CaptureBackendAllowsDecoderMutation() && !g_capture_gated.load() &&
-        g_ogg_stream_active.load() && !track.empty() && track != "prototype_track" &&
+        selection.active && !track.empty() && track != "prototype_track" &&
         StateManager::Instance().OwnsWriter(track, "ogg")) {
         // Accelerate only after the selected Ogg backend has claimed this track.
         constexpr double playSpeed = 12.0;

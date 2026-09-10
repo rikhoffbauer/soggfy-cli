@@ -4,6 +4,7 @@ import { join } from "path";
 import { sendIPC, ping } from "./ipc";
 import { log } from "./log";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "./spotify-runtime";
+import { migrateOfficialSpotifyAuthOnce } from "./auth-migration";
 import {
   PATCHED_APP,
   PROFILES_DIR,
@@ -60,6 +61,12 @@ export class SpotifyInstance {
     mkdirSync(homeDir, { recursive: true, mode: 0o700 });
 
     const appSupportDest = join(this.savePath, "Application Support/Spotify");
+    try {
+      const migration = migrateOfficialSpotifyAuthOnce();
+      if (migration === "migrated") log.info("Migrated existing Spotify login state into Soggfy-owned auth state.");
+    } catch (error) {
+      log.warn(`Could not migrate existing Spotify login state: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const loginState = cloneSpotifyLoginState(appSupportDest);
     if (!loginState.copiedPrefs && !loginState.copiedSessionCache) {
       log.warn("No reusable Spotify login state found; run 'soggfy auth login'.");

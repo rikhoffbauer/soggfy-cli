@@ -11,17 +11,18 @@ export function parsePlaybackConfirmation(response: string, trackId: string): Pl
 
   if (raw.startsWith("{")) {
     try {
-      const parsed = JSON.parse(raw) as { uri?: unknown; is_ad?: unknown; gated?: unknown };
+      const parsed = JSON.parse(raw) as { uri?: unknown; is_ad?: unknown; gated?: unknown; state?: unknown; position?: unknown };
       const uri = typeof parsed.uri === "string" ? parsed.uri : "";
       const isAd = parsed.is_ad === true;
       const gated = parsed.gated === true;
-      return { confirmed: !isAd && !gated && uri.includes(trackId), isAd, gated, uri };
+      const advancing = parsed.state === "playing" && typeof parsed.position === "number" && Number.isFinite(parsed.position) && parsed.position > 0.1;
+      return { confirmed: !isAd && !gated && uri === `spotify:track:${trackId}` && advancing, isAd, gated, uri };
     } catch {
       return { confirmed: false, isAd: false, gated: false, uri: "" };
     }
   }
 
-  return { confirmed: raw.includes(trackId), isAd: false, gated: false, uri: raw };
+  return { confirmed: false, isAd: false, gated: false, uri: raw };
 }
 
 

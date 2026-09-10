@@ -1,7 +1,9 @@
 import { terminateProcessTree } from "./spotify-runtime";
+import { readKernelProcessBirthId } from "./process-birth";
 
 export interface ProcessFingerprint {
   startedAt: string;
+  birthId: string;
   command: string;
 }
 
@@ -90,10 +92,12 @@ export function readProcessFingerprint(pid: number): ProcessFingerprint | null {
     stderr: "pipe",
   });
   if (ps.exitCode !== 0) return null;
+  const birthId = readKernelProcessBirthId(pid);
+  if (!birthId) return null;
   const output = ps.stdout.toString().trimEnd();
   const match = output.match(/^(.{24})\s+(.+)$/);
   if (!match) return null;
-  return { startedAt: match[1]!.trim(), command: match[2]! };
+  return { startedAt: match[1]!.trim(), birthId, command: match[2]! };
 }
 
 export function findDaemonOwner(socketPath: string): number | null {
@@ -120,6 +124,7 @@ function assertProcessFingerprint(
   if (
     !current ||
     current.startedAt !== expected.startedAt ||
+    current.birthId !== expected.birthId ||
     current.command !== expected.command ||
     !isSoggfyDaemonCommand(current.command)
   ) {

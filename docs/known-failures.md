@@ -1,6 +1,6 @@
 # Known Failure Modes
 
-Current as of 2026-09-09.
+Current as of 2026-09-10.
 
 ## Spotify version mismatch
 
@@ -18,11 +18,11 @@ On 2026-09-08, Spotify **1.2.99.317 arm64** was probed with the current implemen
 
 Do not "fix" this by removing the checks or installing guessed offsets. Re-analyze the new Spotify binary, establish new signatures/offsets, rerun `soggfy compat probe`, and record support only after every probe check passes.
 
-## Spotify startup / AppleEvent `-1708`
+## Playback starts then stalls
 
-A newly launched hidden Spotify process may initially return AppleEvent result `-1708` for `play`. This happened during the successful live smoke test.
+Spotify 1.2.98.301 can accept the AppleEvent play-track command, start decoding, then replace the context via auto_play_on_load and stop with AdvanceStuck/unplayable. This also reproduced with the original signed app. Soggfy uses the original signed bundled spotify_cli instead, after verifying that the receiving process owns local control port 7768. An occupied control port fails explicitly; close the competing runtime before capture. A successful command is issued once; a lost response never triggers a replay.
 
-Both capture clients retry the target `play` request while waiting for `get_playing` confirmation. If the requested track is never confirmed, capture fails instead of proceeding from `active_track.txt` or another intent-only signal.
+get_playing reports the actual track, state and position. A matching URI alone is insufficient. Captures fail if playback remains paused, stopped, on another track, or non-advancing for 30 seconds. Unchanged byte count never means EOS.
 
 ## Private hook readiness
 
@@ -32,9 +32,7 @@ If either check fails, the backend logs the mismatch and does not capture. This 
 
 ## Helper-process injection
 
-Spotify spawns multiple processes. Some platform helper processes can have a different architecture/security posture and may reject an inserted arm64 dylib. The capture design does not require every helper to become a writer: the first compatible injected process that sees the Ogg stream atomically claims the track writer, and all others are excluded.
-
-A helper injection error is therefore not automatically a capture failure; the final media validation and shared completion state remain authoritative.
+Spotify also launches shell utilities to verify local API clients. Redirecting their stdout breaks parsing, and inherited arm64 DYLD injection can crash arm64e system tools such as lsof. The payload classifies its host before any filesystem or stdio changes. Unrelated shell children remove DYLD_INSERT_LIBRARIES and return without hooks or logs. Compatible Spotify helpers still participate in atomic writer election.
 
 ## Capture never starts
 
@@ -45,6 +43,8 @@ Likely causes:
 - Spotify version/prologues are unsupported;
 - the Ogg stream never reaches an injected compatible process;
 - IPC or the owning Spotify process exits.
+
+The Ogg hook keeps a bounded pre-roll from the selected track generation while playback confirmation is still gated. This prevents losing the stream's only Vorbis BOS page when Spotify starts decoding slightly before `PlaybackStateChanged` confirms the requested URI. Pre-roll is discarded on ads, non-target playback, track resets, and overflow.
 
 The client pauses and fails after bounded startup/IPC timeouts. It does not manufacture a successful output from a partial file.
 
@@ -78,7 +78,7 @@ Direct track IDs/URIs/URLs can still be captured when the local authenticated Sp
 
 ## Daemon/web readiness
 
-The web server attaches to the daemon-owned Spotify instance. `/api/health` may be reachable before that instance reports ready; check `readyInstances` before queueing capture work. If the daemon-owned Spotify process becomes unresponsive, restart the daemon rather than spawning a second web worker.
+The web server attaches to the daemon-owned Spotify instance and does not begin listening until that attachment succeeds. A reachable `/api/health` therefore implies the initial daemon-backed pool is ready; `readyInstances` remains useful for detecting a later runtime failure. If the daemon-owned Spotify process becomes unresponsive, restart the daemon rather than spawning a second web worker.
 
 ## Cancellation and retries
 
@@ -88,6 +88,8 @@ The web server attaches to the daemon-owned Spotify instance. `/api/health` may 
 - Cancellation can preserve diagnostic partial files, but they are never surfaced as completed output without validation.
 
 ## Signing failures
+
+The original Spotify signature on `spotify_cli` is required for local API authentication. Recursive ad-hoc signing destroys it. All installers and refresh paths use `signSpotifyBundle`, signing only the payload, capture helpers/framework and outer app; deep **verification** remains enabled. An old patched app with an ad-hoc CLI must be rebuilt from an official supported bundle.
 
 Adding/replacing `libsoggfy.dylib` changes the app bundle seal. Setup, CLI install, and webapp payload refresh therefore sign the payload, re-sign the **completed app bundle**, and then run strict deep verification.
 

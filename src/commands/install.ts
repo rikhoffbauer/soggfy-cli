@@ -1,3 +1,4 @@
+import { signSpotifyBundle } from "../core/spotify-signing";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { log } from "../core/log";
@@ -184,9 +185,7 @@ export async function installCommand(args: string[]): Promise<void> {
     mkdirSync(destDir, { recursive: true });
     const destDylib = join(destDir, "libsoggfy.dylib");
     run(["cp", dylibPath, destDylib], "copy dylib");
-    run(["codesign", "-f", "-s", "-", destDylib], "sign dylib");
-    run(["codesign", "-f", "-s", "-", "--deep", stagedApp], "sign patched Spotify bundle");
-    run(["codesign", "--verify", "--deep", "--strict", stagedApp], "verify patched Spotify bundle");
+    signSpotifyBundle(stagedApp);
     log.ok("Staged payload installed, signed, and verified");
 
     replaceDirectoryAtomically(stagedApp, PATCHED_APP);

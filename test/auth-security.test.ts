@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { acquireAuthStateLock } from "../src/core/auth-lock";
 
 const roots: string[] = [];
 
@@ -69,4 +70,39 @@ test("auth logout removes only Soggfy-owned credentials", async () => {
   expect(result.exitCode).toBe(0);
   expect(await Bun.file(join(official, "prefs")).text()).toBe("official");
   expect(Bun.file(join(owned, "prefs")).size).toBe(0);
+  expect(Bun.file(join(home, ".soggfy/auth/.official-import-v1")).size).toBeGreaterThan(0);
+});
+
+
+test("auth logout refuses to race a live auth-state mutation", async () => {
+  const home = mkdtempSync(join(tmpdir(), "soggfy-auth-logout-lock-"));
+  roots.push(home);
+  const authDir = join(home, ".soggfy/auth");
+  const owned = join(authDir, "spotify");
+  mkdirSync(owned, { recursive: true });
+  writeFileSync(join(owned, "prefs"), "owned");
+  const lock = acquireAuthStateLock(join(authDir, ".state.lock"));
+  try {
+    const result = await runCli(home, ["auth", "logout"]);
+    expect(result.exitCode).not.toBe(0);
+    expect(await Bun.file(join(owned, "prefs")).text()).toBe("owned");
+  } finally {
+    lock.release();
+  }
+});
+
+test("auth export refuses to read a snapshot during a live auth-state mutation", async () => {
+  const home = mkdtempSync(join(tmpdir(), "soggfy-auth-export-lock-"));
+  roots.push(home);
+  const authDir = join(home, ".soggfy/auth");
+  mkdirSync(join(authDir, "spotify"), { recursive: true });
+  writeFileSync(join(authDir, "spotify/prefs"), "owned");
+  const lock = acquireAuthStateLock(join(authDir, ".state.lock"));
+  try {
+    const result = await runCli(home, ["auth", "export", join(home, "snapshot.json")]);
+    expect(result.exitCode).not.toBe(0);
+    expect(await Bun.file(join(home, "snapshot.json")).exists()).toBe(false);
+  } finally {
+    lock.release();
+  }
 });

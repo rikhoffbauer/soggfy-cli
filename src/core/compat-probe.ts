@@ -1,3 +1,4 @@
+import { signSpotifyBundle } from "./spotify-signing";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { captureTrack } from "./capture";
@@ -143,9 +144,7 @@ function applyCurrentPatch(sourceApp: string, candidateApp: string, repoRoot: st
   const builtPayload = join(payloadRoot, "build/libsoggfy.dylib");
   const installedPayload = join(candidateApp, "Contents/MacOS/libsoggfy.dylib");
   copyFileSync(builtPayload, installedPayload);
-  runChecked("codesign", ["-f", "-s", "-", installedPayload], "sign compatibility payload");
-  runChecked("codesign", ["-f", "-s", "-", "--deep", candidateApp], "sign candidate Spotify bundle");
-  runChecked("codesign", ["--verify", "--deep", "--strict", candidateApp], "verify candidate Spotify bundle");
+  signSpotifyBundle(candidateApp);
   checks.signing = true;
 }
 

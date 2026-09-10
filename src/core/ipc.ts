@@ -5,6 +5,12 @@ export async function sendIPC(
   command: string,
   { retries = 3, timeoutMs = 3000 }: { retries?: number; timeoutMs?: number } = {},
 ): Promise<string> {
+  // A play command has side effects even if its reply is lost. Never replay it
+  // on a transport error. The native CLI call has a bounded 12 second deadline.
+  if (command.startsWith("play ")) {
+    retries = 1;
+    timeoutMs = Math.max(timeoutMs, 15_000);
+  }
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       return await new Promise<string>((resolve, reject) => {

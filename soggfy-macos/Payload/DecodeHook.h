@@ -11,6 +11,7 @@ struct Buffer {
 #include <atomic>
 
 void InstallDecoderHook();
-extern std::atomic<bool> g_ogg_stream_active;
+void ResetOggCaptureState(const std::string& trackId);
+void DiscardPendingOggCapture();
+void SyncSharedCaptureStateNow();
 extern std::atomic<bool> g_decoder_hooks_ready;
-extern uint32_t g_active_ogg_serial;
