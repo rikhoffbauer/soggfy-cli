@@ -2,12 +2,26 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { createServer } from "node:net";
 
 const root = join(import.meta.dir, "..");
 const outDir = mkdtempSync(join(tmpdir(), "soggfy-release-test-"));
 const bundle = join(outDir, "soggfy");
 
 afterAll(() => rmSync(outDir, { recursive: true, force: true }));
+
+
+async function getFreePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0, exclusive: true }, resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected TCP address");
+  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  return address.port;
+}
 
 function buildReleaseCli(): void {
   const result = Bun.spawnSync([
@@ -31,9 +45,16 @@ test("bundled CLI does not depend on source-tree cli.ts paths", () => {
 test("bundled daemon start re-executes the bundle instead of source files", async () => {
   buildReleaseCli();
   const home = mkdtempSync(join(tmpdir(), "soggfy-bundled-home-"));
+  const port = await getFreePort();
   try {
     const proc = Bun.spawn([process.execPath, bundle, "daemon", "start"], {
-      env: { ...process.env, HOME: home, SOGGFY_HOME: join(home, ".soggfy") },
+      env: {
+        ...process.env,
+        HOME: home,
+        SOGGFY_HOME: join(home, ".soggfy"),
+        SOGGFY_HOST: "127.0.0.1",
+        SOGGFY_PORT: String(port),
+      },
       stdout: "pipe",
       stderr: "pipe",
     });

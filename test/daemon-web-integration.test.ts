@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { createServer } from "node:net";
 import { DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, getHttpOrigin } from "../src/core/http-config";
+import { isHttpEndpointOccupied } from "../src/commands/daemon";
 
 const root = join(import.meta.dir, "..");
 const daemonSource = readFileSync(join(root, "src/commands/daemon.ts"), "utf8");
@@ -31,6 +33,28 @@ test("daemon-owned UI and API share the default 127.0.0.1:8085 listener", () => 
 test("daemon subprocess starts in webapp so Bun loads serve.static plugins", () => {
   expect(daemonSource).toContain("cwd: resolveWebappWorkingDirectory()");
   expect(daemonSource).toContain('existsSync(resolve(candidate, "bunfig.toml"))');
+});
+
+test("HTTP occupancy probe detects an already-bound configured address", async () => {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0, exclusive: true }, resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP address");
+    expect(await isHttpEndpointOccupied({ host: "127.0.0.1", port: address.port })).toBe(true);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("daemon start refuses to spawn when the configured HTTP address is occupied", () => {
+  expect(daemonSource).toContain("isHttpEndpointOccupied(httpConfig)");
+  expect(daemonSource).toContain("Configured web address is already in use; daemon not started.");
+  expect(daemonSource.indexOf("isHttpEndpointOccupied(httpConfig)"))
+    .toBeLessThan(daemonSource.indexOf("const daemonPid = spawnDaemonProcess()"));
 });
 
 test("daemon startup and status include web API health", () => {

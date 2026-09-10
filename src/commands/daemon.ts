@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "fs";
 import { spawn } from "child_process";
+import { createServer } from "node:net";
 import { dirname, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { log } from "../core/log";
@@ -73,6 +74,25 @@ function isAlive(): boolean {
   return readPid() !== null;
 }
 
+export async function isHttpEndpointOccupied(
+  config = getHttpConfig(),
+): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const server = createServer();
+    let settled = false;
+    const finish = (occupied: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(occupied);
+    };
+
+    server.once("error", () => finish(true));
+    server.listen({ host: config.host, port: config.port, exclusive: true }, () => {
+      server.close(() => finish(false));
+    });
+  });
+}
+
 function spawnDaemonProcess(): number {
   const cliEntry = process.argv[1];
   if (!cliEntry) throw new Error("Cannot determine current CLI entrypoint");
@@ -102,10 +122,17 @@ async function daemonStart(): Promise<void> {
   }
 
   ensureDirs();
+  const httpConfig = getHttpConfig();
+  if (await isHttpEndpointOccupied(httpConfig)) {
+    log.info("Configured web address is already in use; daemon not started.");
+    log.dim(`  Address: ${httpConfig.host}:${httpConfig.port}`);
+    return;
+  }
+
   const daemonPid = spawnDaemonProcess();
   log.ok(`Daemon started (PID: ${daemonPid})`);
 
-  const httpOrigin = getHttpOrigin();
+  const httpOrigin = getHttpOrigin(httpConfig);
   log.info("Waiting for Spotify instance and web UI/API to become ready...");
   for (let i = 0; i < 90; i++) {
     await Bun.sleep(1000);
