@@ -16,6 +16,7 @@ interface SearchPanelProps {
   onQueueTrack: (trackId: string) => void;
   onOpenAlbum: (albumId: string) => void;
   onOpenPlaylist: (playlistId: string) => void;
+  detail?: React.ReactNode;
 }
 
 const TABS: Array<{ value: SearchTab; label: string }> = [
@@ -26,7 +27,7 @@ const TABS: Array<{ value: SearchTab; label: string }> = [
 ];
 
 export function SearchPanel(props: SearchPanelProps) {
-  const { query, session, error, onQueryChange, onSubmit, onTabChange, onLoadMore, onPlayTrack, onQueueTrack, onOpenAlbum, onOpenPlaylist } = props;
+  const { query, session, error, onQueryChange, onSubmit, onTabChange, onLoadMore, onPlayTrack, onQueueTrack, onOpenAlbum, onOpenPlaylist, detail } = props;
   const active = session.tabs[session.activeTab];
   const searching = active.loading && !active.loaded;
 
@@ -75,7 +76,7 @@ export function SearchPanel(props: SearchPanelProps) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pt-5">
-        {session.query ? (
+        {detail ?? (session.query ? (
           <SearchResults
             tab={session.activeTab}
             items={active.items}
@@ -90,7 +91,7 @@ export function SearchPanel(props: SearchPanelProps) {
           />
         ) : (
           <div className="grid min-h-72 place-items-center border border-dashed border-white/8 text-center text-sm text-white/30">Search Spotify to browse tracks, albums, playlists, or artists.</div>
-        )}
+        ))}
       </div>
     </section>
   );

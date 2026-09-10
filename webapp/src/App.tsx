@@ -3,7 +3,9 @@ import { IconBook2, IconCheck, IconLoader2 } from "@tabler/icons-react";
 import { AppSidebar } from "./components/soggfy/AppSidebar";
 import { DiagnosticsPanel } from "./components/soggfy/DiagnosticsPanel";
 import { JobWorkspace } from "./components/soggfy/JobWorkspace";
+import { AlbumPanel } from "./components/soggfy/AlbumPanel";
 import type {
+  AlbumPage,
   DownloadJob,
   HealthSnapshot,
   JobsSnapshot,
@@ -16,6 +18,7 @@ import { SearchPanel } from "./components/soggfy/SearchPanel";
 import {
   createSearchSession,
   jobStateByTrack,
+  mergeAlbumPages,
   mergePlaylistPages,
   mergeSearchTabPage,
   partitionJobs,
@@ -53,8 +56,11 @@ export function App() {
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
   const [searchSession, setSearchSession] = useState(() => createSearchSession());
   const [playlistPage, setPlaylistPage] = useState<PlaylistPage | null>(null);
+  const [albumPage, setAlbumPage] = useState<AlbumPage | null>(null);
   const [playlistLoading, setPlaylistLoading] = useState(false);
+  const [albumLoading, setAlbumLoading] = useState(false);
   const [queueAllLoading, setQueueAllLoading] = useState(false);
+  const [albumQueueAllLoading, setAlbumQueueAllLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [playerJobId, setPlayerJobId] = useState<string | null>(null);
@@ -137,9 +143,24 @@ export function App() {
       const response = await fetch(`/api/playlist?id=${encodeURIComponent(playlistId)}&offset=${offset}&limit=100`);
       const data = await response.json();
       if (!response.ok) throw Object.assign(new Error(data.error || "Playlist lookup failed"), { status: response.status });
+      setAlbumPage(null);
       setPlaylistPage((current) => replace || !current ? data : mergePlaylistPages(current, data));
     } finally {
       setPlaylistLoading(false);
+    }
+  };
+
+  const loadAlbum = async (albumId: string, offset = 0, replace = true) => {
+    setAlbumLoading(true);
+    setSearchError(null);
+    try {
+      const response = await fetch(`/api/album?id=${encodeURIComponent(albumId)}&offset=${offset}&limit=100`);
+      const data = await response.json() as AlbumPage & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Album lookup failed");
+      setPlaylistPage(null);
+      setAlbumPage((current) => replace || !current ? data : mergeAlbumPages(current, data));
+    } finally {
+      setAlbumLoading(false);
     }
   };
 
@@ -163,6 +184,7 @@ export function App() {
     const data = await response.json() as SearchResult & { error?: string };
     if (!response.ok) throw new Error(data.error || "Track lookup failed");
     setPlaylistPage(null);
+    setAlbumPage(null);
     setSearchSession(mergeSearchTabPage(createSearchSession(sourceQuery), "track", { items: [data], nextOffset: null }));
   };
 
@@ -181,22 +203,32 @@ export function App() {
         return;
       }
       if (direct?.type === "album") {
-        window.open(`https://open.spotify.com/album/${direct.id}`, "_blank", "noopener,noreferrer");
+        await loadAlbum(direct.id, 0, true);
         return;
       }
       if (direct?.type === "bare") {
-        const response = await fetch(`/api/playlist?id=${encodeURIComponent(direct.id)}&offset=0&limit=100`);
-        if (response.ok) {
-          setPlaylistPage(await response.json());
+        const playlistResponse = await fetch(`/api/playlist?id=${encodeURIComponent(direct.id)}&offset=0&limit=100`);
+        if (playlistResponse.ok) {
+          setAlbumPage(null);
+          setPlaylistPage(await playlistResponse.json());
           return;
         }
-        const data = await response.json().catch(() => ({}));
-        if (response.status !== 404) throw new Error(data.error || "Playlist lookup failed");
+        if (playlistResponse.status !== 404) {
+          const data = await playlistResponse.json().catch(() => ({}));
+          throw new Error(data.error || "Playlist lookup failed");
+        }
+        const albumResponse = await fetch(`/api/album?id=${encodeURIComponent(direct.id)}&offset=0&limit=100`);
+        if (albumResponse.ok) {
+          setPlaylistPage(null);
+          setAlbumPage(await albumResponse.json());
+          return;
+        }
         await loadTrackResult(direct.id, submitted);
         return;
       }
 
       setPlaylistPage(null);
+      setAlbumPage(null);
       setSearchSession(createSearchSession(submitted));
       await requestSearchPage(submitted, "track", 0, false);
     } catch (error) {
@@ -205,6 +237,8 @@ export function App() {
   };
 
   const changeSearchTab = (tab: SearchTab) => {
+    setPlaylistPage(null);
+    setAlbumPage(null);
     const current = searchSession;
     setSearchSession((session) => setActiveSearchTab(session, tab));
     if (current.query && searchTabNeedsLoad(current, tab)) void requestSearchPage(current.query, tab, 0, false);
@@ -250,7 +284,7 @@ export function App() {
     }
   };
 
-  const queueAll = async () => {
+  const queuePlaylistAll = async () => {
     if (!playlistPage) return;
     setQueueAllLoading(true);
     setSearchError(null);
@@ -270,13 +304,39 @@ export function App() {
     }
   };
 
-  const loadMore = async () => {
+  const loadMorePlaylist = async () => {
     if (!playlistPage || playlistPage.nextOffset === null) return;
     try {
       await loadPlaylist(playlistPage.playlist.id, playlistPage.nextOffset, false);
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : "Failed to load more tracks");
     }
+  };
+
+  const queueAlbumAll = async () => {
+    if (!albumPage) return;
+    setAlbumQueueAllLoading(true);
+    try {
+      await queueDownload(`spotify:album:${albumPage.album.id}`);
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "Failed to queue album");
+    } finally {
+      setAlbumQueueAllLoading(false);
+    }
+  };
+
+  const loadMoreAlbum = async () => {
+    if (!albumPage || albumPage.nextOffset === null) return;
+    try {
+      await loadAlbum(albumPage.album.id, albumPage.nextOffset, false);
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "Failed to load more album tracks");
+    }
+  };
+
+  const closeSearchDetail = () => {
+    setAlbumPage(null);
+    setPlaylistPage(null);
   };
 
   const runJobAction = async (jobId: string, action: "cancel" | "retry") => {
@@ -327,8 +387,33 @@ export function App() {
             onLoadMore={loadMoreSearch}
             onPlayTrack={playTrack}
             onQueueTrack={queueTrack}
-            onOpenAlbum={(id) => window.open(`https://open.spotify.com/album/${id}`, "_blank", "noopener,noreferrer")}
+            onOpenAlbum={(id) => void loadAlbum(id, 0, true).catch((error) => setSearchError(error.message))}
             onOpenPlaylist={(id) => void loadPlaylist(id, 0, true).catch((error) => setSearchError(error.message))}
+            detail={albumPage ? (
+              <AlbumPanel
+                page={albumPage}
+                jobsByTrack={jobsByTrack}
+                loading={albumLoading}
+                queueAllLoading={albumQueueAllLoading}
+                onBack={closeSearchDetail}
+                onPlay={playTrack}
+                onQueue={queueTrack}
+                onQueueAll={queueAlbumAll}
+                onLoadMore={loadMoreAlbum}
+              />
+            ) : playlistPage ? (
+              <PlaylistPanel
+                page={playlistPage}
+                jobsByTrack={jobsByTrack}
+                loading={playlistLoading}
+                queueAllLoading={queueAllLoading}
+                onBack={closeSearchDetail}
+                onPlay={playTrack}
+                onQueue={queueTrack}
+                onQueueAll={queuePlaylistAll}
+                onLoadMore={loadMorePlaylist}
+              />
+            ) : undefined}
           />
 
           {notice ? (
@@ -337,18 +422,6 @@ export function App() {
             </div>
           ) : null}
 
-          {playlistPage ? (
-            <PlaylistPanel
-              page={playlistPage}
-              jobsByTrack={jobsByTrack}
-              loading={playlistLoading}
-              queueAllLoading={queueAllLoading}
-              onPlay={playTrack}
-              onQueue={queueTrack}
-              onQueueAll={queueAll}
-              onLoadMore={loadMore}
-            />
-          ) : null}
 
           {!health?.started ? (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-400/15 bg-amber-400/[0.055] px-3 py-2 text-xs text-amber-100/70">

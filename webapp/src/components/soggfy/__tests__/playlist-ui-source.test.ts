@@ -22,3 +22,10 @@ test("playlist detail is explicit and never opened by queueing the playlist URL"
   expect(appSource).toContain("queueAll");
   expect(appSource).toContain("playerJobId");
 });
+
+
+test("playlist detail provides explicit Back to results navigation", () => {
+  const source = readFileSync(playlistPath, "utf8");
+  expect(source).toContain("Back to results");
+  expect(source).toContain("onBack");
+});

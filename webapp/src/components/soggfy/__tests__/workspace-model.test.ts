@@ -153,3 +153,27 @@ describe("typed search session state", () => {
     expect(reset.tabs.album.loaded).toBe(false);
   });
 });
+
+
+test("album pages merge in source order without duplicate tracks", async () => {
+  const { mergeAlbumPages } = await import("../workspace-model");
+  const first: any = {
+    album: { id: "a1", uri: "spotify:album:a1", name: "Album", artists: ["Artist"] },
+    tracks: [
+      { id: "t1", uri: "spotify:track:t1", name: "One", artists: ["Artist"], playable: true, sourceIndex: 0 },
+      { id: "t2", uri: "spotify:track:t2", name: "Two", artists: ["Artist"], playable: true, sourceIndex: 1 },
+    ],
+    trackIds: ["t1", "t2"], offset: 0, limit: 2, totalCount: 3, nextOffset: 2,
+  };
+  const second: any = {
+    ...first,
+    tracks: [
+      { ...first.tracks[1], sourceIndex: 1 },
+      { id: "t3", uri: "spotify:track:t3", name: "Three", artists: ["Artist"], playable: true, sourceIndex: 2 },
+    ],
+    trackIds: ["t2", "t3"], offset: 1, nextOffset: null,
+  };
+  const merged = mergeAlbumPages(first, second);
+  expect(merged.tracks.map((track: any) => track.id)).toEqual(["t1", "t2", "t3"]);
+  expect(merged.trackIds).toEqual(["t1", "t2", "t3"]);
+});

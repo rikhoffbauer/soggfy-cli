@@ -1,4 +1,4 @@
-import type { DownloadJob, DownloadState, PlaylistPage, SearchResult } from "./models";
+import type { AlbumPage, DownloadJob, DownloadState, PlaylistPage, SearchResult } from "./models";
 
 export type SearchFilter = "all" | "track" | "artist" | "playlist";
 
@@ -125,6 +125,25 @@ export function downloadInputForSearchResult(result: FrontendSearchResult): stri
 
 export function actionForSearchResult(result: FrontendSearchResult): FrontendSearchResult["type"] {
   return result.type;
+}
+
+export function mergeAlbumPages(current: AlbumPage, incoming: AlbumPage): AlbumPage {
+  const seen = new Set<string>();
+  const tracks = [...current.tracks, ...incoming.tracks]
+    .filter((track) => {
+      if (seen.has(track.id)) return false;
+      seen.add(track.id);
+      return true;
+    })
+    .sort((a, b) => a.sourceIndex - b.sourceIndex);
+  return {
+    ...incoming,
+    album: current.album,
+    tracks,
+    trackIds: tracks.map((track) => track.id),
+    offset: 0,
+    totalCount: Math.max(current.totalCount, incoming.totalCount),
+  };
 }
 
 export function mergePlaylistPages(current: PlaylistPage, incoming: PlaylistPage): PlaylistPage {
