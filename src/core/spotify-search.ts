@@ -5,7 +5,7 @@ export const invalidateSpotifySearchTokens = invalidateSpotifyWebTokens;
 
 const SEARCH_HASH = "eff59fa0a3d026b88b56fddbcf4bdfa16a186b8175a5c1a358c072e053c2e5b0";
 
-export type SpotifySearchType = "track" | "artist" | "playlist";
+export type SpotifySearchType = "track" | "album" | "artist" | "playlist";
 
 export interface SpotifySearchResult {
   id: string;
@@ -24,8 +24,8 @@ export interface SpotifySearchOptions {
 }
 
 export function normalizeSearchTypes(value = "all"): SpotifySearchType[] {
-  if (value === "all") return ["track", "artist", "playlist"];
-  if (value === "track" || value === "artist" || value === "playlist") return [value];
+  if (value === "all") return ["track", "album", "artist", "playlist"];
+  if (value === "track" || value === "album" || value === "artist" || value === "playlist") return [value];
   throw new Error(`Unsupported search type: ${value}`);
 }
 
@@ -79,6 +79,29 @@ function normalizeTrack(wrapper: unknown): SpotifySearchResult | null {
     name,
     subtitle: artistNames.join(", ") || "Unknown artist",
     imageUrl: firstSourceUrl(asObject(cover)?.sources),
+  };
+}
+
+function normalizeAlbum(wrapper: unknown): SpotifySearchResult | null {
+  const data = itemData(wrapper);
+  if (!data) return null;
+  const uri = typeof data.uri === "string" ? data.uri : undefined;
+  const id = idFrom(uri, data.id);
+  const name = typeof data.name === "string" ? data.name : undefined;
+  if (!id || !name) return null;
+  const artists = asObject(data.artists)?.items;
+  const artistNames = Array.isArray(artists)
+    ? artists.map((entry) => asObject(entry)?.profile?.name ?? asObject(entry)?.name)
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  const cover = asObject(data.coverArt) ?? asObject(data.cover);
+  return {
+    id,
+    uri: uri || `spotify:album:${id}`,
+    type: "album",
+    name,
+    subtitle: artistNames.join(", ") || "Unknown artist",
+    imageUrl: firstSourceUrl(cover?.sources),
   };
 }
 
@@ -141,6 +164,7 @@ export function normalizeSearchResponse(response: unknown): SpotifySearchResult[
   const results: SpotifySearchResult[] = [];
   for (const [keys, normalize] of [
     [["tracksV2", "tracks"], normalizeTrack],
+    [["albumsV2", "albums"], normalizeAlbum],
     [["artists"], normalizeArtist],
     [["playlists"], normalizePlaylist],
   ] as const) {
@@ -218,6 +242,6 @@ export function groupSearchResults(results: readonly SpotifySearchResult[]) {
     tracks: { items: byType("track") },
     artists: { items: byType("artist") },
     playlists: { items: byType("playlist") },
-    albums: { items: [] as SpotifySearchResult[] },
+    albums: { items: byType("album") },
   };
 }

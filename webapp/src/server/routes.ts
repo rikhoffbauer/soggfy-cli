@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { extname } from "path";
 import { ZipArchive } from "archiver";
-import { groupSearchResults, searchSpotify } from "../../../src/core/spotify-search";
+import { clampSearchLimit, searchSpotify, type SpotifySearchType } from "../../../src/core/spotify-search";
 import { fetchAllSpotifyPlaylistTracks, fetchSpotifyPlaylistPage } from "../../../src/core/spotify-playlist";
 import { resolveInput as resolveSpotifyInput } from "../../../src/core/metadata";
 import { fetchSpotifyLyrics } from "../../../src/core/spotify-lyrics";
@@ -86,9 +86,21 @@ export function createApiRoutes() {
         const url = new URL(req.url);
         const query = url.searchParams.get("q");
         if (!query) return jsonResponse({ error: "Missing query" }, { status: 400 });
+        const rawType = url.searchParams.get("type");
+        if (rawType !== "track" && rawType !== "album" && rawType !== "playlist" && rawType !== "artist") {
+          return jsonResponse({ error: "Search type must be track, album, playlist, or artist" }, { status: 400 });
+        }
+        const type = rawType as SpotifySearchType;
+        const requestedLimit = Number.parseInt(url.searchParams.get("limit") || "40", 10);
+        const requestedOffset = Number.parseInt(url.searchParams.get("offset") || "0", 10);
+        const limit = clampSearchLimit(Number.isFinite(requestedLimit) ? requestedLimit : 40);
+        const offset = Number.isFinite(requestedOffset) ? Math.max(0, requestedOffset) : 0;
         try {
-          const results = await searchSpotify(query);
-          return jsonResponse(groupSearchResults(results));
+          const items = await searchSpotify(query, { types: [type], limit, offset });
+          return jsonResponse({
+            type, items, offset, limit,
+            nextOffset: items.length >= limit ? offset + limit : null,
+          });
         } catch (err: any) {
           return jsonResponse({ error: err.message }, { status: 500 });
         }

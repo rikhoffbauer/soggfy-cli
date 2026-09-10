@@ -12,6 +12,11 @@ const response = {
         artists: { items: [{ profile: { name: "Artist One" } }] },
         albumOfTrack: { coverArt: { sources: [{ url: "track.jpg" }] } },
       } } }] },
+      albums: { items: [{ data: {
+        id: "album1", uri: "spotify:album:album1", name: "Album One",
+        artists: { items: [{ profile: { name: "Artist One" } }] },
+        coverArt: { sources: [{ url: "album.jpg" }] },
+      } }] },
       artists: { items: [{ data: {
         id: "artist1", uri: "spotify:artist:artist1",
         profile: { name: "Artist One" },
@@ -26,9 +31,10 @@ const response = {
   },
 };
 
-test("normalizes track, artist, and playlist results", () => {
+test("normalizes track, album, artist, and playlist results", () => {
   expect(normalizeSearchResponse(response)).toEqual([
     { id: "track1", uri: "spotify:track:track1", type: "track", name: "Song One", subtitle: "Artist One", imageUrl: "track.jpg" },
+    { id: "album1", uri: "spotify:album:album1", type: "album", name: "Album One", subtitle: "Artist One", imageUrl: "album.jpg" },
     { id: "artist1", uri: "spotify:artist:artist1", type: "artist", name: "Artist One", subtitle: "Artist", imageUrl: "artist.jpg" },
     { id: "playlist1", uri: "spotify:playlist:playlist1", type: "playlist", name: "Playlist One", subtitle: "Owner One", imageUrl: "playlist.jpg" },
   ]);
@@ -49,13 +55,13 @@ test("normalization ignores malformed entries without discarding valid results",
   const malformed = structuredClone(response) as any;
   malformed.data.searchV2.tracks.items.unshift({ item: { data: null } });
   malformed.data.searchV2.artists.items.unshift({ data: { uri: "spotify:artist:no-name" } });
-  expect(normalizeSearchResponse(malformed).map((item) => item.id)).toEqual(["track1", "artist1", "playlist1"]);
+  expect(normalizeSearchResponse(malformed).map((item) => item.id)).toEqual(["track1", "album1", "artist1", "playlist1"]);
 });
 
 test("search type and limit helpers are strict and deterministic", () => {
-  expect(normalizeSearchTypes("all")).toEqual(["track", "artist", "playlist"]);
+  expect(normalizeSearchTypes("all")).toEqual(["track", "album", "artist", "playlist"]);
   expect(normalizeSearchTypes("artist")).toEqual(["artist"]);
-  expect(() => normalizeSearchTypes("album")).toThrow("Unsupported search type: album");
+  expect(normalizeSearchTypes("album")).toEqual(["album"]);
   expect(clampSearchLimit(0)).toBe(1);
   expect(clampSearchLimit(500)).toBe(50);
   expect(clampSearchLimit(12)).toBe(12);
