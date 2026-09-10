@@ -14,10 +14,16 @@ import { PlayerBar } from "./components/soggfy/PlayerBar";
 import { PlaylistPanel } from "./components/soggfy/PlaylistPanel";
 import { SearchPanel } from "./components/soggfy/SearchPanel";
 import {
+  createSearchSession,
   jobStateByTrack,
   mergePlaylistPages,
+  mergeSearchTabPage,
   partitionJobs,
   revisionResetAfterHealth,
+  searchTabNeedsLoad,
+  setActiveSearchTab,
+  setSearchTabLoading,
+  type SearchTab,
 } from "./components/soggfy/workspace-model";
 import logo from "./logo.png";
 
@@ -45,9 +51,8 @@ export function App() {
   const [query, setQuery] = useState("");
   const [snapshot, setSnapshot] = useState<JobsSnapshot>(EMPTY_SNAPSHOT);
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchSession, setSearchSession] = useState(() => createSearchSession());
   const [playlistPage, setPlaylistPage] = useState<PlaylistPage | null>(null);
-  const [searching, setSearching] = useState(false);
   const [playlistLoading, setPlaylistLoading] = useState(false);
   const [queueAllLoading, setQueueAllLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -133,68 +138,82 @@ export function App() {
       const data = await response.json();
       if (!response.ok) throw Object.assign(new Error(data.error || "Playlist lookup failed"), { status: response.status });
       setPlaylistPage((current) => replace || !current ? data : mergePlaylistPages(current, data));
-      setSearchResults([]);
     } finally {
       setPlaylistLoading(false);
     }
   };
 
-  const loadTrackResult = async (trackId: string) => {
+  const requestSearchPage = async (searchQuery: string, tab: SearchTab, offset = 0, append = false) => {
+    setSearchError(null);
+    setSearchSession((current) => current.query === searchQuery ? setSearchTabLoading(current, tab, true) : current);
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&type=${tab}&offset=${offset}&limit=40`);
+      const data = await response.json() as { items?: SearchResult[]; nextOffset?: number | null; error?: string };
+      if (!response.ok) throw new Error(data.error || "Spotify search failed");
+      const page = { items: Array.isArray(data.items) ? data.items : [], nextOffset: data.nextOffset ?? null };
+      setSearchSession((current) => current.query === searchQuery ? mergeSearchTabPage(current, tab, page, append) : current);
+    } catch (error) {
+      setSearchSession((current) => current.query === searchQuery ? setSearchTabLoading(current, tab, false) : current);
+      setSearchError(error instanceof Error ? error.message : "Spotify search failed");
+    }
+  };
+
+  const loadTrackResult = async (trackId: string, sourceQuery: string) => {
     const response = await fetch(`/api/track?id=${encodeURIComponent(trackId)}`);
-    const data = await response.json();
+    const data = await response.json() as SearchResult & { error?: string };
     if (!response.ok) throw new Error(data.error || "Track lookup failed");
     setPlaylistPage(null);
-    setSearchResults([data]);
+    setSearchSession(mergeSearchTabPage(createSearchSession(sourceQuery), "track", { items: [data], nextOffset: null }));
   };
 
   const submitSearch = async (value: string) => {
-    setSearching(true);
+    const submitted = value.trim();
     setSearchError(null);
     setNotice(null);
     try {
-      const direct = parseDirectSpotifyInput(value);
+      const direct = parseDirectSpotifyInput(submitted);
       if (direct?.type === "playlist") {
         await loadPlaylist(direct.id, 0, true);
-        setQuery("");
         return;
       }
       if (direct?.type === "track") {
-        await loadTrackResult(direct.id);
-        setQuery("");
+        await loadTrackResult(direct.id, submitted);
         return;
       }
       if (direct?.type === "album") {
-        await queueDownload(value);
-        setQuery("");
+        window.open(`https://open.spotify.com/album/${direct.id}`, "_blank", "noopener,noreferrer");
         return;
       }
       if (direct?.type === "bare") {
         const response = await fetch(`/api/playlist?id=${encodeURIComponent(direct.id)}&offset=0&limit=100`);
         if (response.ok) {
           setPlaylistPage(await response.json());
-          setSearchResults([]);
-          setQuery("");
           return;
         }
         const data = await response.json().catch(() => ({}));
         if (response.status !== 404) throw new Error(data.error || "Playlist lookup failed");
-        await loadTrackResult(direct.id);
-        setQuery("");
+        await loadTrackResult(direct.id, submitted);
         return;
       }
 
-      const response = await fetch(`/api/search?q=${encodeURIComponent(value)}`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Spotify search failed");
-      const results = Array.isArray(data.results) ? data.results : [];
       setPlaylistPage(null);
-      setSearchResults(results);
-      if (!results.length) setNotice("No Spotify results found.");
+      setSearchSession(createSearchSession(submitted));
+      await requestSearchPage(submitted, "track", 0, false);
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : "Spotify search failed");
-    } finally {
-      setSearching(false);
     }
+  };
+
+  const changeSearchTab = (tab: SearchTab) => {
+    const current = searchSession;
+    setSearchSession((session) => setActiveSearchTab(session, tab));
+    if (current.query && searchTabNeedsLoad(current, tab)) void requestSearchPage(current.query, tab, 0, false);
+  };
+
+  const loadMoreSearch = (tab: SearchTab) => {
+    const current = searchSession.tabs[tab];
+    if (!searchSession.query || current.loading || current.nextOffset === null) return;
+    void requestSearchPage(searchSession.query, tab, current.nextOffset, true);
   };
 
   const playTrack = async (trackId: string) => {
@@ -300,13 +319,15 @@ export function App() {
         <main className={`mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 xl:px-8 ${playerJob ? "pb-28" : "pb-10"}`}>
           <SearchPanel
             query={query}
-            results={searchResults}
-            loading={searching}
+            session={searchSession}
             error={searchError}
             onQueryChange={setQuery}
             onSubmit={submitSearch}
+            onTabChange={changeSearchTab}
+            onLoadMore={loadMoreSearch}
             onPlayTrack={playTrack}
             onQueueTrack={queueTrack}
+            onOpenAlbum={(id) => window.open(`https://open.spotify.com/album/${id}`, "_blank", "noopener,noreferrer")}
             onOpenPlaylist={(id) => void loadPlaylist(id, 0, true).catch((error) => setSearchError(error.message))}
           />
 
