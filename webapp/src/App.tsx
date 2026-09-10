@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { IconBook2, IconCheck, IconLoader2 } from "@tabler/icons-react";
 import { AppSidebar } from "./components/soggfy/AppSidebar";
 import { DiagnosticsPanel } from "./components/soggfy/DiagnosticsPanel";
-import { JobWorkspace } from "./components/soggfy/JobWorkspace";
+import { DownloadsPage, QueuePage } from "./components/soggfy/JobWorkspace";
 import { AlbumPanel } from "./components/soggfy/AlbumPanel";
+import { MobileNavigation } from "./components/soggfy/MobileNavigation";
 import type {
   AlbumPage,
   DownloadJob,
@@ -17,16 +18,19 @@ import { PlaylistPanel } from "./components/soggfy/PlaylistPanel";
 import { SearchPanel } from "./components/soggfy/SearchPanel";
 import {
   createSearchSession,
+  hashForPage,
   jobStateByTrack,
   mergeAlbumPages,
   mergePlaylistPages,
   mergeSearchTabPage,
+  pageFromHash,
   partitionJobs,
   revisionResetAfterHealth,
   searchTabNeedsLoad,
   setActiveSearchTab,
   setSearchTabLoading,
   type SearchTab,
+  type WorkspacePage,
 } from "./components/soggfy/workspace-model";
 import logo from "./logo.png";
 
@@ -52,6 +56,9 @@ function parseDirectSpotifyInput(value: string): DirectSpotifyInput {
 
 export function App() {
   const [query, setQuery] = useState("");
+  const [activePage, setActivePage] = useState<WorkspacePage>(() =>
+    typeof window === "undefined" ? "search" : pageFromHash(window.location.hash),
+  );
   const [snapshot, setSnapshot] = useState<JobsSnapshot>(EMPTY_SNAPSHOT);
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
   const [searchSession, setSearchSession] = useState(() => createSearchSession());
@@ -106,6 +113,16 @@ export function App() {
       cancelled = true;
       window.clearInterval(jobsTimer);
       window.clearInterval(healthTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncPageFromLocation = () => setActivePage(pageFromHash(window.location.hash));
+    window.addEventListener("hashchange", syncPageFromLocation);
+    window.addEventListener("popstate", syncPageFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncPageFromLocation);
+      window.removeEventListener("popstate", syncPageFromLocation);
     };
   }, []);
 
@@ -355,16 +372,70 @@ export function App() {
     }
   };
 
+  const navigate = (page: WorkspacePage) => {
+    setActivePage(page);
+    const hash = hashForPage(page);
+    if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+  };
+
   const ready = Boolean(health?.started && (health.readyInstances ?? 0) > 0);
 
+  const searchPage = (
+    <SearchPanel
+      query={query}
+      session={searchSession}
+      error={searchError}
+      onQueryChange={setQuery}
+      onSubmit={submitSearch}
+      onTabChange={changeSearchTab}
+      onLoadMore={loadMoreSearch}
+      onPlayTrack={playTrack}
+      onQueueTrack={queueTrack}
+      onOpenAlbum={(id) => void loadAlbum(id, 0, true).catch((error) => setSearchError(error.message))}
+      onOpenPlaylist={(id) => void loadPlaylist(id, 0, true).catch((error) => setSearchError(error.message))}
+      detail={albumPage ? (
+        <AlbumPanel
+          page={albumPage}
+          jobsByTrack={jobsByTrack}
+          loading={albumLoading}
+          queueAllLoading={albumQueueAllLoading}
+          onBack={closeSearchDetail}
+          onPlay={playTrack}
+          onQueue={queueTrack}
+          onQueueAll={queueAlbumAll}
+          onLoadMore={loadMoreAlbum}
+        />
+      ) : playlistPage ? (
+        <PlaylistPanel
+          page={playlistPage}
+          jobsByTrack={jobsByTrack}
+          loading={playlistLoading}
+          queueAllLoading={queueAllLoading}
+          onBack={closeSearchDetail}
+          onPlay={playTrack}
+          onQueue={queueTrack}
+          onQueueAll={queuePlaylistAll}
+          onLoadMore={loadMorePlaylist}
+        />
+      ) : undefined}
+    />
+  );
+
   return (
-    <div className="dark flex min-h-screen w-full bg-[#101215] text-foreground selection:bg-primary/30">
-      <AppSidebar queueCount={queue.length} libraryCount={completedCount} health={health} />
-      <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex h-14 items-center border-b border-white/8 bg-[#101215]/90 px-4 backdrop-blur-xl lg:hidden">
-          <a href="#search" className="flex items-center gap-2.5 font-bold text-white">
+    <div className="dark flex h-screen min-h-0 w-full overflow-hidden bg-[#101215] text-foreground selection:bg-primary/30">
+      <AppSidebar
+        activePage={activePage}
+        onNavigate={navigate}
+        queueCount={queue.length}
+        libraryCount={completedCount}
+        health={health}
+      />
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center border-b border-white/8 bg-[#101215]/95 px-4 lg:hidden">
+          <button type="button" onClick={() => navigate("search")} className="flex items-center gap-2.5 font-bold text-white">
             <img src={logo} alt="" className="size-7 rounded-lg" /> Soggfy
-          </a>
+          </button>
           <div className="ml-auto flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-[11px] text-white/40">
               <span className={`size-1.5 rounded-full ${ready ? "bg-primary" : "bg-amber-400"}`} />
@@ -376,71 +447,25 @@ export function App() {
           </div>
         </header>
 
-        <main className={`mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 xl:px-8 ${playerJob ? "pb-28" : "pb-10"}`}>
-          <SearchPanel
-            query={query}
-            session={searchSession}
-            error={searchError}
-            onQueryChange={setQuery}
-            onSubmit={submitSearch}
-            onTabChange={changeSearchTab}
-            onLoadMore={loadMoreSearch}
-            onPlayTrack={playTrack}
-            onQueueTrack={queueTrack}
-            onOpenAlbum={(id) => void loadAlbum(id, 0, true).catch((error) => setSearchError(error.message))}
-            onOpenPlaylist={(id) => void loadPlaylist(id, 0, true).catch((error) => setSearchError(error.message))}
-            detail={albumPage ? (
-              <AlbumPanel
-                page={albumPage}
-                jobsByTrack={jobsByTrack}
-                loading={albumLoading}
-                queueAllLoading={albumQueueAllLoading}
-                onBack={closeSearchDetail}
-                onPlay={playTrack}
-                onQueue={queueTrack}
-                onQueueAll={queueAlbumAll}
-                onLoadMore={loadMoreAlbum}
-              />
-            ) : playlistPage ? (
-              <PlaylistPanel
-                page={playlistPage}
-                jobsByTrack={jobsByTrack}
-                loading={playlistLoading}
-                queueAllLoading={queueAllLoading}
-                onBack={closeSearchDetail}
-                onPlay={playTrack}
-                onQueue={queueTrack}
-                onQueueAll={queuePlaylistAll}
-                onLoadMore={loadMorePlaylist}
-              />
-            ) : undefined}
-          />
+        <MobileNavigation activePage={activePage} onNavigate={navigate} />
 
+        <main className={`flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5 xl:px-8 ${playerJob ? "pb-20" : ""}`}>
           {notice ? (
-            <div className="mt-3 flex items-center gap-2 rounded-lg border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs text-primary/90">
+            <div className="mb-3 flex shrink-0 items-center gap-2 border border-primary/15 bg-primary/[0.06] px-3 py-2 text-xs text-primary/90">
               <IconCheck className="size-3.5" /> {notice}
             </div>
           ) : null}
 
-
-          {!health?.started ? (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-400/15 bg-amber-400/[0.055] px-3 py-2 text-xs text-amber-100/70">
+          {activePage === "search" && !health?.started ? (
+            <div className="mb-3 flex shrink-0 items-center gap-2 border border-amber-400/15 bg-amber-400/[0.055] px-3 py-2 text-xs text-amber-100/70">
               <IconLoader2 className="size-3.5 animate-spin" /> Capture server is starting. Search remains available while instances initialize.
             </div>
           ) : null}
 
-          <div className="mt-6">
-            <JobWorkspace
-              queue={queue}
-              library={library}
-              onAction={runJobAction}
-              onPlay={(job: DownloadJob) => setPlayerJobId(job.id)}
-            />
-          </div>
-
-          <div className="mt-5">
-            <DiagnosticsPanel health={health} instances={snapshot.instances} jobs={snapshot.jobs} />
-          </div>
+          {activePage === "search" ? searchPage : null}
+          {activePage === "queue" ? <QueuePage queue={queue} onAction={runJobAction} /> : null}
+          {activePage === "downloads" ? <DownloadsPage library={library} onAction={runJobAction} onPlay={(job: DownloadJob) => setPlayerJobId(job.id)} /> : null}
+          {activePage === "diagnostics" ? <DiagnosticsPanel health={health} instances={snapshot.instances} jobs={snapshot.jobs} /> : null}
         </main>
       </div>
 

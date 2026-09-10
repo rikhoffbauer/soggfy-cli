@@ -134,7 +134,7 @@ export function LogViewer({ jobs, instances }: LogViewerProps) {
   };
 
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-white/[0.055] bg-black/15">
+    <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/[0.055] bg-black/15">
       <div className="flex flex-col gap-2 border-b border-white/[0.055] p-3 lg:flex-row lg:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <IconFileText className="size-4 shrink-0 text-white/30" />
@@ -194,7 +194,7 @@ export function LogViewer({ jobs, instances }: LogViewerProps) {
       {error ? <div className="border-b border-red-400/10 bg-red-400/[0.04] px-3 py-2 text-xs text-red-200/70">{error}</div> : null}
       <div
         ref={scrollRef}
-        className="max-h-[460px] min-h-48 overflow-auto bg-[#0d0f12] font-mono text-[11px] leading-5 text-white/55"
+        className="min-h-0 flex-1 overflow-auto bg-[#0d0f12] font-mono text-[11px] leading-5 text-white/55"
       >
         {filteredLines.length ? (
           <pre className="min-w-max whitespace-pre px-3 py-2 [content-visibility:auto]">
