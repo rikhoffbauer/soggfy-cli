@@ -2,6 +2,7 @@
 #include "DecodeHook.h"
 #include "Scanner.h"
 #include "StateManager.h"
+#include "ProcessRole.h"
 #include "dobby.h"
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
@@ -908,19 +909,23 @@ __attribute__((constructor)) void SoggfyEntryPoint() {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
 
-  SetupImmediateHooks();
-
-  bool is_main_process = true;
-  char path[1024];
+  char path[4096] = {0};
   uint32_t size = sizeof(path);
+  SoggfyProcessRole process_role = SoggfyProcessRole::Unrelated;
   if (_NSGetExecutablePath(path, &size) == 0) {
-    std::string exe_path(path);
-    if (exe_path.find("Spotify Helper") != std::string::npos ||
-        exe_path.find("SpotifyHelper") != std::string::npos) {
-      is_main_process = false;
-    }
+    process_role = ClassifySoggfyProcess(path);
   }
 
+  if (process_role == SoggfyProcessRole::Unrelated) {
+    printf("[Soggfy-INFO] Ignoring inherited payload in unrelated child process "
+           "(PID %d, executable=%s)\n",
+           getpid(), path[0] ? path : "unknown");
+    return;
+  }
+
+  SetupImmediateHooks();
+
+  const bool is_main_process = process_role == SoggfyProcessRole::MainSpotify;
   printf("[Soggfy-INFO] Soggfy payload v2.0 active (PID %d, Main=%d)\n",
          getpid(), is_main_process);
 
