@@ -14,6 +14,7 @@ const HTTP_CONFIG = getHttpConfig();
 const PORT = HTTP_CONFIG.port;
 const HOSTNAME = HTTP_CONFIG.host;
 const API_SECURITY = apiSecurityFromEnv(HOSTNAME);
+await pool.start();
 const server = Bun.serve({
   port: PORT,
   hostname: HOSTNAME,
@@ -37,8 +38,6 @@ console.log(`- Runtime: ${USE_DAEMON_INSTANCE ? "daemon-owned Spotify instance" 
 console.log(`- Capture backend: ${CAPTURE_BACKEND}`);
 console.log(`- Health: http://${HOSTNAME}:${PORT}/api/health`);
 console.log(`=============================================================\n`);
-
-pool.start().catch((err) => console.error("[Server] Error initializing Spotify pool:", err));
 
 process.on("SIGINT", async () => {
   console.log("\n[Server] Shutting down...");

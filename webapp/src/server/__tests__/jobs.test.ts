@@ -121,3 +121,11 @@ test("job registry revision increases whenever client-visible state changes", ()
   expect(patched).toBeGreaterThan(created);
   expect(registry.revision).toBeGreaterThan(patched);
 });
+test("non-finite terminal history limits fall back to 500", () => {
+  const registry = new JobRegistry({ maxTerminalJobs: Number.NaN });
+  for (let index = 0; index < 501; index++) {
+    const job = registry.create(`track-${index}`);
+    registry.fail(job, "done");
+  }
+  expect(registry.all()).toHaveLength(500);
+});

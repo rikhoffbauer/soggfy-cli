@@ -74,3 +74,13 @@ export function jobStateByTrack(jobs: readonly FrontendDownloadJob[]): Map<strin
   }
   return map;
 }
+
+export function revisionResetAfterHealth(
+  currentRevision: number,
+  serverRevision: number | undefined,
+): { restarted: boolean; since: number } {
+  if (!Number.isInteger(serverRevision) || serverRevision! < 0 || serverRevision! >= currentRevision) {
+    return { restarted: false, since: currentRevision };
+  }
+  return { restarted: true, since: serverRevision! - 1 };
+}

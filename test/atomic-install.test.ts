@@ -32,3 +32,19 @@ test("atomic replacement commits staged directory and removes backup", () => {
   expect(existsSync(staged)).toBe(false);
   expect(existsSync(`${current}.backup`)).toBe(false);
 });
+
+test("backup cleanup failure cannot roll back a committed replacement", () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-atomic-cleanup-"));
+  roots.push(root);
+  const current = join(root, "PatchedSpotify.app");
+  const staged = join(root, ".PatchedSpotify.app.staged");
+  mkdirSync(current);
+  mkdirSync(staged);
+  writeFileSync(join(current, "version"), "old");
+  writeFileSync(join(staged, "version"), "new");
+
+  replaceDirectoryAtomically(staged, current, { cleanupBackup: () => { throw new Error("cleanup failed"); } });
+
+  expect(readFileSync(join(current, "version"), "utf8")).toBe("new");
+  expect(existsSync(`${current}.backup`)).toBe(true);
+});

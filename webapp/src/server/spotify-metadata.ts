@@ -1,8 +1,12 @@
 import type { TrackMetadata } from "./jobs";
 
-export async function fetchTrackDuration(trackId: string): Promise<number | null> {
+export async function fetchTrackDuration(
+  trackId: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 10_000,
+): Promise<number | null> {
   try {
-    const res = await fetch(`https://open.spotify.com/embed/track/${trackId}`);
+    const res = await fetchImpl(`https://open.spotify.com/embed/track/${trackId}`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const html = await res.text();
     const match = html.match(/"duration"\s*:\s*(\d+)/);
@@ -13,9 +17,13 @@ export async function fetchTrackDuration(trackId: string): Promise<number | null
   }
 }
 
-export async function fetchTrackMetadata(trackId: string): Promise<TrackMetadata | null> {
+export async function fetchTrackMetadata(
+  trackId: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 10_000,
+): Promise<TrackMetadata | null> {
   try {
-    const res = await fetch(`https://open.spotify.com/embed/track/${trackId}`);
+    const res = await fetchImpl(`https://open.spotify.com/embed/track/${trackId}`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const html = await res.text();
     const nextData = html.match(/<script id="__NEXT_DATA__" type="application\/json">({.*?})<\/script>/)?.[1];

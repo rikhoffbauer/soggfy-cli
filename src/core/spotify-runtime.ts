@@ -125,19 +125,30 @@ export function collectDescendantPids(rootPid: number): number[] {
   return descendantPidsFromProcessTable(rootPid, ps.stdout.toString());
 }
 
+export interface ProcessTreeTerminationOptions {
+  collectDescendants?: (rootPid: number) => number[];
+  beforeSignal?: (targetPid: number, signal: NodeJS.Signals) => void;
+  kill?: (targetPid: number, signal: NodeJS.Signals) => void;
+  wait?: (ms: number) => Promise<unknown>;
+}
+
 export async function terminateProcessTree(
   rootPid: number,
   rootExited?: Promise<number>,
+  options: ProcessTreeTerminationOptions = {},
 ): Promise<void> {
-  const targets = [...collectDescendantPids(rootPid), rootPid];
-  for (const targetPid of targets) {
-    try { process.kill(targetPid, "SIGTERM"); } catch {}
-  }
-  await Promise.race([rootExited ?? Bun.sleep(750), Bun.sleep(750)]).catch(() => undefined);
-  for (const targetPid of targets) {
-    try { process.kill(targetPid, "SIGKILL"); } catch {}
-  }
+  const collect = options.collectDescendants ?? collectDescendantPids;
+  const kill = options.kill ?? ((pid, signal) => process.kill(pid, signal));
+  const wait = options.wait ?? Bun.sleep;
+  const targets = [...collect(rootPid), rootPid];
+  const signal = (targetPid: number, signalName: NodeJS.Signals) => {
+    options.beforeSignal?.(targetPid, signalName);
+    try { kill(targetPid, signalName); } catch {}
+  };
+  for (const targetPid of targets) signal(targetPid, "SIGTERM");
+  await Promise.race([rootExited ?? wait(750), wait(750)]).catch(() => undefined);
+  for (const targetPid of targets) signal(targetPid, "SIGKILL");
   if (rootExited) {
-    await Promise.race([rootExited, Bun.sleep(250)]).catch(() => undefined);
+    await Promise.race([rootExited, wait(250)]).catch(() => undefined);
   }
 }

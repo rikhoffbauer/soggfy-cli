@@ -87,3 +87,10 @@ test("job state lookup returns the latest job for each track", async () => {
   expect(jobStateByTrack(jobs).get("a")?.id).toBe("new");
   expect(jobStateByTrack(jobs).get("a")?.state).toBe("capturing");
 });
+
+test("lower health revision forces a full snapshot after daemon restart", async () => {
+  const { revisionResetAfterHealth } = await import("../workspace-model");
+  expect(revisionResetAfterHealth(42, 3)).toEqual({ restarted: true, since: 2 });
+  expect(revisionResetAfterHealth(3, 3)).toEqual({ restarted: false, since: 3 });
+  expect(revisionResetAfterHealth(3, undefined)).toEqual({ restarted: false, since: 3 });
+});

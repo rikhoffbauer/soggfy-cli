@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { acquireDaemonStartLock } from "../src/core/daemon-lock";
@@ -19,4 +19,13 @@ test("daemon start lock permits only one concurrent owner", () => {
   }
   const second = acquireDaemonStartLock(path);
   second.release();
+});
+
+test("daemon start lock recovers once from a stale owner PID", () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-daemon-lock-stale-"));
+  roots.push(root);
+  const path = join(root, "start.lock");
+  writeFileSync(path, "2147483647\n");
+  const lock = acquireDaemonStartLock(path);
+  lock.release();
 });

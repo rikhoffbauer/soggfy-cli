@@ -27,7 +27,11 @@ export class SpotifyPoolManager {
       } catch (err: any) {
         inst.lastError = err.message;
         inst.log(`Startup failed: ${err.message}`);
+        if (USE_DAEMON_INSTANCE) throw err;
       }
+    }
+    if (!this.instances.some((inst) => inst.isReady)) {
+      throw new Error("No Spotify instances became ready; web runtime not started.");
     }
     this.started = true;
     this.startWatchdog();

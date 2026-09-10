@@ -16,6 +16,9 @@ test("daemon registers its live Spotify instance before starting the web server"
   expect(daemonSource).toContain("await import(webappEntryUrl)");
   expect(daemonSource.indexOf("registerDaemonSpotifyInstance(instance)"))
     .toBeLessThan(daemonSource.indexOf("await import(webappEntryUrl)"));
+  expect(webSource).toContain("await pool.start();");
+  expect(webSource.indexOf("await pool.start();")).toBeLessThan(webSource.indexOf("const server = Bun.serve"));
+  expect(webSource).not.toContain("pool.start().catch");
 });
 
 test("daemon-backed web runtime uses the in-process daemon instance", () => {
@@ -57,6 +60,12 @@ test("daemon start refuses to spawn when the configured HTTP address is occupied
   expect(daemonSource).toContain("Configured web address is already in use; daemon not started.");
   expect(daemonSource.indexOf("isHttpEndpointOccupied(httpConfig)"))
     .toBeLessThan(daemonSource.indexOf("const daemonPid = spawnDaemonProcess()"));
+});
+
+test("recovered daemon identity never invents a web origin", () => {
+  expect(daemonSource).toContain("identity.httpOrigin");
+  expect(daemonSource).toContain("Web UI/API: origin unknown");
+  expect(daemonSource).not.toContain("record.httpOrigin ?? getHttpOrigin({ host: DEFAULT_HTTP_HOST");
 });
 
 test("daemon startup and status include web API health", () => {

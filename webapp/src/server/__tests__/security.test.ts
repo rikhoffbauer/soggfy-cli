@@ -28,6 +28,20 @@ test("authorized API request establishes an HttpOnly session cookie usable by me
   expect(cookie).toContain("soggfy_api_session=");
   expect(cookie).toContain("HttpOnly");
   expect(cookie).toContain("SameSite=Strict");
+  expect(cookie).toContain("Max-Age=3600");
+  expect(cookie).not.toContain("; Secure");
   const pair = cookie!.split(";", 1)[0]!;
   expect(authorizeApiRequest(new Request("http://host/api/stream", { headers: { cookie: pair } }), security)).toBe(true);
+
+  const second = await routes["/api/stream"].GET(new Request("http://host/api/stream", {
+    headers: { authorization: "Bearer secret-token" },
+  }));
+  expect(second.headers.get("set-cookie")!.split(";", 1)[0]).not.toBe(pair);
+  security.sessions.clear();
+  expect(authorizeApiRequest(new Request("http://host/api/stream", { headers: { cookie: pair } }), security)).toBe(false);
+
+  const secureResponse = await routes["/api/stream"].GET(new Request("https://host/api/stream", {
+    headers: { authorization: "Bearer secret-token" },
+  }));
+  expect(secureResponse.headers.get("set-cookie")).toContain("; Secure");
 });

@@ -1,7 +1,6 @@
 import { spawn } from "bun";
 import { existsSync, mkdirSync, unlinkSync, statSync } from "fs";
 import { extname, join } from "path";
-import NodeID3 from "node-id3";
 import { cloneSpotifyLoginState, terminateProcessTree } from "../../../src/core/spotify-runtime";
 import { sendIPC as sendIpcCommand } from "../../../src/core/ipc";
 import { getDaemonSpotifyInstance } from "../../../src/core/daemon-runtime";
@@ -11,6 +10,7 @@ import type { DownloadJob, TrackMetadata } from "./jobs";
 import { copyAudioFallback, expectedOggBytes, findCapturedAudioPath, transcodeAudioToMp3, validateAudioFile, writeSidecar } from "./media";
 import { jobs, GLOBAL_METADATA } from "./runtime-state";
 import { fetchTrackDuration, fetchTrackMetadata } from "./spotify-metadata";
+import { writeTrackTags } from "./id3";
 import { BASE_DEBUG_PORT, MUTE_OUTPUT, RUNTIME_DIR, SOGGFY_HIDDEN, USE_DAEMON_INSTANCE } from "./runtime-config";
 
 function parsePlainIpcResponse(raw: string) {
@@ -20,6 +20,16 @@ function parsePlainIpcResponse(raw: string) {
     try { return { ok: true, value: JSON.parse(trimmed), raw }; } catch {}
   }
   return { ok: !trimmed.startsWith("error"), value: trimmed, raw };
+}
+
+
+export function capturedBytesFromPath(capturePath: string, fallback: number): number {
+  try {
+    const size = statSync(capturePath).size;
+    return capturePath.endsWith(".wav") ? Math.max(0, size - 44) : size;
+  } catch {
+    return fallback;
+  }
 }
 
 export class JobCancelledError extends Error {
@@ -503,8 +513,8 @@ export class SpotifyInstance {
   private refreshCapturedBytes(job: DownloadJob): number {
     const capturePath = findCapturedAudioPath(this.savePath, job.trackId);
     if (!capturePath) return job.bytesCaptured;
-    const size = statSync(capturePath).size;
-    const bytes = capturePath.endsWith(".wav") ? Math.max(0, size - 44) : size;
+    const bytes = capturedBytesFromPath(capturePath, job.bytesCaptured);
+    if (bytes === job.bytesCaptured && !existsSync(capturePath)) return job.bytesCaptured;
     jobs.patch(job, {
       bytesCaptured: bytes,
       capturePath,
@@ -515,17 +525,5 @@ export class SpotifyInstance {
   }
 
   private async writeTags(mp3Path: string, meta: TrackMetadata) {
-    let coverBuffer = null;
-    if (meta.coverUrl) {
-      try {
-        const imgRes = await fetch(meta.coverUrl);
-        coverBuffer = Buffer.from(await imgRes.arrayBuffer());
-      } catch {}
-    }
-    const tags: any = { title: meta.title, artist: meta.artist };
-    if (coverBuffer) {
-      tags.image = { mime: "image/jpeg", type: { id: 3, name: "front cover" }, description: "Cover", imageBuffer: coverBuffer };
-    }
-    try { NodeID3.write(tags, mp3Path); } catch (err: any) { this.log(`Warning: failed to write ID3 tags: ${err.message}`); }
-  }
-}
+    await writeTrackTags(mp3Path, meta, (message) => this.log(message));
+  }}

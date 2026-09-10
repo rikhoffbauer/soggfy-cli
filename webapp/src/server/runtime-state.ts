@@ -1,9 +1,10 @@
 import { OUTPUT_DIR } from "../../../src/core/paths";
 import type { SpotifyPlaylistTrack } from "../../../src/core/spotify-playlist";
 import { JobRegistry, type TrackMetadata } from "./jobs";
+import { intFromEnv } from "./runtime-config";
 
 export const jobs = new JobRegistry({
-  maxTerminalJobs: Number.parseInt(process.env.SOGGFY_HISTORY_LIMIT || "250", 10),
+  maxTerminalJobs: intFromEnv(process.env.SOGGFY_HISTORY_LIMIT, 250),
 });
 let persistedJobsRestored = false;
 

@@ -7,6 +7,7 @@ import {
   descendantPidsFromProcessTable,
   readSpotifyBundleVersion,
   SUPPORTED_SPOTIFY_VERSION,
+  terminateProcessTree,
 } from "../src/core/spotify-runtime";
 
 const root = join("/tmp", `soggfy-runtime-test-${process.pid}`);
@@ -63,4 +64,21 @@ test("production support guard is registry-backed", () => {
 test("runtime client-version metadata has a non-throwing empty-registry fallback", () => {
   const source = require("fs").readFileSync(join(import.meta.dir, "../src/core/spotify-runtime.ts"), "utf8");
   expect(source).toContain('latestSupportedSpotifyVersion() ?? "0.0.0"');
+});
+
+
+test("terminateProcessTree runs its identity guard immediately before every signal", async () => {
+  const events: string[] = [];
+  await terminateProcessTree(10, undefined, {
+    collectDescendants: () => [11],
+    wait: async () => {},
+    beforeSignal: (targetPid, signal) => events.push(`guard:${targetPid}:${signal}`),
+    kill: (targetPid, signal) => events.push(`kill:${targetPid}:${signal}`),
+  });
+  expect(events).toEqual([
+    "guard:11:SIGTERM", "kill:11:SIGTERM",
+    "guard:10:SIGTERM", "kill:10:SIGTERM",
+    "guard:11:SIGKILL", "kill:11:SIGKILL",
+    "guard:10:SIGKILL", "kill:10:SIGKILL",
+  ]);
 });

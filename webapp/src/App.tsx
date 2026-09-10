@@ -17,6 +17,7 @@ import {
   jobStateByTrack,
   mergePlaylistPages,
   partitionJobs,
+  revisionResetAfterHealth,
 } from "./components/soggfy/workspace-model";
 import logo from "./logo.png";
 
@@ -53,13 +54,15 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [playerJobId, setPlayerJobId] = useState<string | null>(null);
   const latestSnapshotRevision = useRef(0);
+  const snapshotGeneration = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
+      const generation = snapshotGeneration.current;
       try {
         const jobsResponse = await fetch(`/api/jobs?since=${latestSnapshotRevision.current}`);
-        if (cancelled) return;
+        if (cancelled || generation !== snapshotGeneration.current) return;
         if (jobsResponse.status !== 204 && jobsResponse.ok) {
           const incoming = await jobsResponse.json() as JobsSnapshot;
           if (incoming.revision >= latestSnapshotRevision.current) {
@@ -72,7 +75,16 @@ export function App() {
     const pollHealth = async () => {
       try {
         const response = await fetch("/api/health");
-        if (!cancelled && response.ok) setHealth(await response.json());
+        if (cancelled || !response.ok) return;
+        const incoming = await response.json() as HealthSnapshot;
+        const reset = revisionResetAfterHealth(latestSnapshotRevision.current, incoming.revision);
+        if (reset.restarted) {
+          snapshotGeneration.current += 1;
+          latestSnapshotRevision.current = reset.since;
+          setSnapshot(EMPTY_SNAPSHOT);
+          void poll();
+        }
+        setHealth(incoming);
       } catch {}
     };
     void poll();

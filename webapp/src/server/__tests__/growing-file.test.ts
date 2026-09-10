@@ -74,7 +74,7 @@ test("client abort closes the producer without changing capture state", async ()
   expect(state).toBe("capturing");
 });
 
-test("startup timeout rejects when no capture file appears", async () => {
+test("startup timeout closes the media response cleanly when no capture file appears", async () => {
   const path = tempPath();
   const response = streamGrowingFile({
     getPath: () => path,
@@ -82,7 +82,7 @@ test("startup timeout rejects when no capture file appears", async () => {
     startupTimeoutMs: 30,
     pollMs: 5,
   });
-  await expect(response.arrayBuffer()).rejects.toThrow("capture file did not appear");
+  expect(Buffer.from(await response.arrayBuffer())).toHaveLength(0);
 });
 
 test("stream route attaches to an existing exact job and never creates one", async () => {

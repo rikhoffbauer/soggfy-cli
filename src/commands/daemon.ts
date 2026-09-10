@@ -23,7 +23,16 @@ import { registerDaemonSpotifyInstance, unregisterDaemonSpotifyInstance } from "
 import { ping } from "../core/ipc";
 import { getHttpConfig, getHttpOrigin } from "../core/http-config";
 import { acquireDaemonStartLock } from "../core/daemon-lock";
-import { startDaemonIdentityServer, verifyDaemonIdentity } from "../core/daemon-identity";
+import {
+  readDaemonIdentity,
+  startDaemonIdentityServer,
+  verifyDaemonIdentity,
+} from "../core/daemon-identity";
+import {
+  findDaemonOwner,
+  findLegacyDaemonOwner,
+  retireLegacyDaemonOwner,
+} from "../core/daemon-owner";
 
 export async function daemonCommand(args: string[]): Promise<void> {
   const sub = args[0];
@@ -67,6 +76,7 @@ interface DaemonRecord {
   pid: number;
   token: string;
   startedAt: string;
+  httpOrigin?: string;
 }
 
 function readDaemonRecord(): DaemonRecord | null {
@@ -80,10 +90,16 @@ function readDaemonRecord(): DaemonRecord | null {
       pid: value.pid,
       token: value.token,
       startedAt: typeof value.startedAt === "string" ? value.startedAt : "unknown",
+      httpOrigin: typeof value.httpOrigin === "string" ? value.httpOrigin : undefined,
     };
   } catch {
     return null;
   }
+}
+
+function writeDaemonRecord(record: DaemonRecord): void {
+  writeFileSync(PID_FILE, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  chmodSync(PID_FILE, 0o600);
 }
 
 function processExists(pid: number): boolean {
@@ -98,18 +114,39 @@ function removePidRecord(record?: DaemonRecord): void {
   try { unlinkSync(PID_FILE); } catch {}
 }
 
+async function recoverDaemonRecordFromIdentity(): Promise<DaemonRecord | null> {
+  const identity = await readDaemonIdentity(DAEMON_SOCKET);
+  if (!identity) return null;
+  const pid = findDaemonOwner(DAEMON_SOCKET);
+  if (!pid || !processExists(pid)) return null;
+  const record: DaemonRecord = {
+    pid,
+    token: identity.token,
+    startedAt: "recovered",
+    httpOrigin: identity.httpOrigin,
+  };
+  writeDaemonRecord(record);
+  return record;
+}
+
 async function getVerifiedDaemonRecord(): Promise<DaemonRecord | null> {
   const record = readDaemonRecord();
-  if (!record) return null;
-  if (!processExists(record.pid)) {
-    removePidRecord(record);
-    return null;
+  if (record && processExists(record.pid) && await verifyDaemonIdentity(DAEMON_SOCKET, record.token)) {
+    return record;
   }
-  if (!(await verifyDaemonIdentity(DAEMON_SOCKET, record.token))) {
-    removePidRecord(record);
-    return null;
+  if (record) removePidRecord(record);
+  return recoverDaemonRecordFromIdentity();
+}
+
+async function retireLegacyRuntimeOwnerIfPresent(): Promise<void> {
+  const legacy = findLegacyDaemonOwner(IPC_SOCKET);
+  if (!legacy) return;
+  log.warn(`Retiring legacy Soggfy daemon PID ${legacy.daemonPid} owning Spotify PID ${legacy.spotifyPid}.`);
+  await retireLegacyDaemonOwner(legacy);
+  for (let i = 0; i < 20 && await ping(IPC_SOCKET); i++) await Bun.sleep(100);
+  if (await ping(IPC_SOCKET)) {
+    throw new Error(`Legacy Soggfy runtime still owns ${IPC_SOCKET}; refusing to start another daemon.`);
   }
-  return record;
 }
 
 export async function isHttpEndpointOccupied(
@@ -174,6 +211,8 @@ async function daemonStart(): Promise<void> {
       log.info(`Daemon already running (PID: ${running.pid})`);
       return;
     }
+
+    if (!existsSync(DAEMON_SOCKET)) await retireLegacyRuntimeOwnerIfPresent();
 
     const httpConfig = getHttpConfig();
     if (await isHttpEndpointOccupied(httpConfig)) {
@@ -246,10 +285,13 @@ async function daemonStatus(): Promise<void> {
   if (ipcAlive) log.ok("Spotify IPC: responsive");
   else log.warn("Spotify IPC: not responding");
 
-  const httpOrigin = getHttpOrigin();
-  const webAlive = await isWebServerHealthy(httpOrigin);
-  if (webAlive) log.ok(`Web UI/API: responsive (${httpOrigin})`);
-  else log.warn(`Web UI/API: not responding (${httpOrigin})`);
+  if (record.httpOrigin) {
+    const webAlive = await isWebServerHealthy(record.httpOrigin);
+    if (webAlive) log.ok(`Web UI/API: responsive (${record.httpOrigin})`);
+    else log.warn(`Web UI/API: not responding (${record.httpOrigin})`);
+  } else {
+    log.warn("Web UI/API: origin unknown for recovered legacy identity; health probe skipped.");
+  }
 
   log.dim(`  PID file: ${PID_FILE}`);
   log.dim(`  Identity socket: ${DAEMON_SOCKET}`);
@@ -318,15 +360,23 @@ export function resolveWebappServerEntry(moduleDir = dirname(fileURLToPath(impor
 
 async function daemonRun(): Promise<void> {
   ensureDirs();
+  const httpConfig = getHttpConfig();
   const token = randomUUID();
-  const identityServer = await startDaemonIdentityServer(DAEMON_SOCKET, token);
+  const httpOrigin = getHttpOrigin(httpConfig);
+  const identityServer = await startDaemonIdentityServer(DAEMON_SOCKET, token, httpOrigin);
+  try {
+    await retireLegacyRuntimeOwnerIfPresent();
+  } catch (error) {
+    await identityServer.close().catch(() => undefined);
+    throw error;
+  }
   const record: DaemonRecord = {
     pid: process.pid,
     token,
     startedAt: new Date().toISOString(),
+    httpOrigin,
   };
-  writeFileSync(PID_FILE, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-  chmodSync(PID_FILE, 0o600);
+  writeDaemonRecord(record);
   appendDaemonLog("Daemon starting...");
 
   const instance = new SpotifyInstance(IPC_SOCKET, SAVE_PATH);
@@ -354,8 +404,7 @@ async function daemonRun(): Promise<void> {
     process.env.SOGGFY_USE_DAEMON_INSTANCE = "1";
     const webappEntryUrl = pathToFileURL(resolveWebappServerEntry()).href;
     await import(webappEntryUrl);
-    const httpConfig = getHttpConfig();
-    appendDaemonLog(`Web UI/API ready at ${getHttpOrigin(httpConfig)}.`);
+    appendDaemonLog(`Web UI/API ready at ${httpOrigin}.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     appendDaemonLog(`Daemon startup failed: ${message}`);

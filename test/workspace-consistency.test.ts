@@ -46,3 +46,23 @@ test("setup and doctor use the tracked exact-version compatibility registry", ()
   expect(doctor).toContain('supportedSpotifyVersions');
   expect(doctor).toContain('workspace:version');
 });
+
+
+test("explicit SOGGFY_HOME isolates shared runtime socket and save paths", () => {
+  const customHome = `/tmp/soggfy-isolated-${process.pid}`;
+  const script = `import { IPC_SOCKET, SAVE_PATH } from ${JSON.stringify(join(root, "src/core/paths.ts"))}; console.log(JSON.stringify({ IPC_SOCKET, SAVE_PATH }));`;
+  const env = { ...process.env };
+  delete env.SOGGFY_SOCKET_PATH;
+  delete env.SOGGFY_SAVE_PATH;
+  env.SOGGFY_HOME = customHome;
+  const result = Bun.spawnSync([process.execPath, "-e", script], {
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(result.stdout.toString())).toEqual({
+    IPC_SOCKET: join(customHome, "runtime", "spotify.sock"),
+    SAVE_PATH: join(customHome, "runtime", "spotify"),
+  });
+});

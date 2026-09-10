@@ -85,7 +85,7 @@ export function streamGrowingFile(options: GrowingFileOptions): Response {
         }
 
         if (activePath === null && Date.now() - startedAt >= startupTimeoutMs) {
-          controller.error(new Error("capture file did not appear before startup timeout"));
+          controller.close();
           return;
         }
 

@@ -113,7 +113,8 @@ export class JobRegistry {
   private maxTerminalJobs: number;
 
   constructor(options: JobRegistryOptions = {}) {
-    this.maxTerminalJobs = Math.max(1, options.maxTerminalJobs ?? 500);
+    const requested = options.maxTerminalJobs;
+    this.maxTerminalJobs = Number.isFinite(requested) ? Math.max(1, Math.trunc(requested!)) : 500;
   }
 
   create(trackId: string, metadata?: TrackMetadata): DownloadJob {

@@ -48,7 +48,7 @@ test("webapp download jobs never blindly replay a successfully requested track",
   const start = instanceSource.indexOf("  async downloadJob(job: DownloadJob)");
   const end = instanceSource.indexOf("  private refreshCapturedBytes", start);
   const downloadJob = instanceSource.slice(start, end);
-  expect(instanceSource).toContain("requestTrackPlayback");
+  expect(downloadJob).toContain("requestTrackPlayback");
   expect(downloadJob).toContain("await requestTrackPlayback(");
   expect(downloadJob).not.toContain("re-requested target track playback");
 });

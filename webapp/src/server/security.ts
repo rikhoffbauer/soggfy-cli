@@ -1,19 +1,21 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { isLoopbackHost } from "../../../src/core/http-config";
+
+const SESSION_COOKIE = "soggfy_api_session";
+const SESSION_TTL_SECONDS = 60 * 60;
+const MAX_SESSIONS = 128;
 
 export interface ApiSecurity {
   required: boolean;
   token?: string;
+  sessions: Map<string, number>;
 }
 
-
 export function apiSecurityFromEnv(host: string, env: NodeJS.ProcessEnv = process.env): ApiSecurity {
-  if (isLoopbackHost(host)) return { required: false };
+  if (isLoopbackHost(host)) return { required: false, sessions: new Map() };
   const token = env.SOGGFY_API_TOKEN?.trim();
-  if (!token) {
-    throw new Error("SOGGFY_API_TOKEN is required when SOGGFY_HOST is not loopback");
-  }
-  return { required: true, token };
+  if (!token) throw new Error("SOGGFY_API_TOKEN is required when SOGGFY_HOST is not loopback");
+  return { required: true, token, sessions: new Map() };
 }
 
 function secureEqual(left: string, right: string): boolean {
@@ -22,16 +24,14 @@ function secureEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const SESSION_COOKIE = "soggfy_api_session";
-
 function suppliedApiToken(req: Request): string {
   const authorization = req.headers.get("authorization") || "";
   const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
   return bearer || req.headers.get("x-soggfy-token") || "";
 }
 
-function sessionDigest(token: string): string {
-  return createHash("sha256").update(`soggfy-api-session:${token}`).digest("hex");
+function sessionDigest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function cookieValue(req: Request, name: string): string {
@@ -42,20 +42,43 @@ function cookieValue(req: Request, name: string): string {
   return "";
 }
 
+function pruneSessions(security: ApiSecurity): void {
+  const now = Date.now();
+  for (const [digest, expiresAt] of security.sessions) {
+    if (expiresAt <= now) security.sessions.delete(digest);
+  }
+  while (security.sessions.size >= MAX_SESSIONS) {
+    const oldest = security.sessions.keys().next().value;
+    if (!oldest) break;
+    security.sessions.delete(oldest);
+  }
+}
+
+function suppliedTokenIsValid(req: Request, security: ApiSecurity): boolean {
+  const supplied = suppliedApiToken(req);
+  return Boolean(supplied && security.token && secureEqual(supplied, security.token));
+}
+
 export function authorizeApiRequest(req: Request, security: ApiSecurity): boolean {
   if (!security.required) return true;
   if (!security.token) return false;
-  const supplied = suppliedApiToken(req);
-  if (supplied && secureEqual(supplied, security.token)) return true;
+  if (suppliedTokenIsValid(req, security)) return true;
+  pruneSessions(security);
   const session = cookieValue(req, SESSION_COOKIE);
-  return Boolean(session && secureEqual(session, sessionDigest(security.token)));
+  if (!session) return false;
+  const expiresAt = security.sessions.get(sessionDigest(session));
+  return typeof expiresAt === "number" && expiresAt > Date.now();
 }
 
-function withSessionCookie(response: Response, token: string): Response {
+function withSessionCookie(response: Response, security: ApiSecurity, req: Request): Response {
+  pruneSessions(security);
+  const session = randomBytes(32).toString("base64url");
+  security.sessions.set(sessionDigest(session), Date.now() + SESSION_TTL_SECONDS * 1000);
   const headers = new Headers(response.headers);
+  const secure = new URL(req.url).protocol === "https:" ? "; Secure" : "";
   headers.append(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${sessionDigest(token)}; Path=/api; HttpOnly; SameSite=Strict`,
+    `${SESSION_COOKIE}=${session}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_SECONDS}${secure}`,
   );
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
@@ -69,16 +92,10 @@ export function protectApiRoutes(routes: Record<string, any>, security: ApiSecur
       if (typeof handler !== "function") continue;
       wrapped[method] = async (req: Request, ...args: unknown[]) => {
         if (!authorizeApiRequest(req, security)) {
-          return Response.json({ error: "Unauthorized" }, {
-            status: 401,
-            headers: { "Cache-Control": "no-store" },
-          });
+          return Response.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
         }
         const response = await handler(req, ...args);
-        if (security.required && security.token && suppliedApiToken(req)) {
-          return withSessionCookie(response, security.token);
-        }
-        return response;
+        return suppliedTokenIsValid(req, security) ? withSessionCookie(response, security, req) : response;
       };
     }
     protectedRoutes[path] = wrapped;
