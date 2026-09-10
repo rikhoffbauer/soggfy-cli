@@ -129,6 +129,14 @@ Examples:
 `);
 }
 
+
+export function shouldRemoveCaptureAfterOutput(options: {
+  keepCapture: boolean;
+  outputSucceeded: boolean;
+}): boolean {
+  return options.outputSucceeded && !options.keepCapture;
+}
+
 export async function downloadCommand(args: string[]): Promise<void> {
   const { inputs, opts } = parseDownloadArgs(args);
 
@@ -196,6 +204,7 @@ export async function downloadCommand(args: string[]): Promise<void> {
       }
 
       const result = await captureTrack(socketPath, savePath, trackId);
+      let outputSucceeded = false;
       try {
         if (opts.output) {
           let outputPath: string;
@@ -225,8 +234,9 @@ export async function downloadCommand(args: string[]): Promise<void> {
           });
           await streamToWriter(result.wavPath, stdout, opts.format!);
         }
+        outputSucceeded = true;
       } finally {
-        if (!opts.keepWav && existsSync(result.wavPath)) {
+        if (shouldRemoveCaptureAfterOutput({ keepCapture: Boolean(opts.keepWav), outputSucceeded }) && existsSync(result.wavPath)) {
           try { unlinkSync(result.wavPath); } catch {}
         }
       }

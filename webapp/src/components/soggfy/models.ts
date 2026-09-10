@@ -61,6 +61,7 @@ export interface InstanceSnapshot {
 }
 
 export interface JobsSnapshot {
+  revision: number;
   jobs: DownloadJob[];
   queue: string[];
   instances: InstanceSnapshot[];
@@ -76,6 +77,7 @@ export interface HealthSnapshot {
   completedJobs: number;
   failedJobs: number;
   captureBackend?: string;
+  revision?: number;
 }
 
 export interface LogSource {

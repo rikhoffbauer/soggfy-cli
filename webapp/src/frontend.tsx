@@ -8,7 +8,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { installApiAuthentication } from "./api-auth";
 import "./index.css"
+
+installApiAuthentication();
 
 const elem = document.getElementById("root")!;
 const app = (

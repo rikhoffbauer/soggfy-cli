@@ -15,10 +15,14 @@ Soggfy intentionally has a small configuration surface. Runtime state defaults t
 | --- | --- | --- |
 | `SOGGFY_HOST` | `127.0.0.1` | HTTP bind address. |
 | `SOGGFY_PORT` | `8085` | HTTP port. |
-| `SOGGFY_MAX_ATTEMPTS` | `2` | Job attempt limit. |
+| `SOGGFY_MAX_ATTEMPTS` | `3` | Job attempt limit. |
 | `SOGGFY_MUTE_OUTPUT` | `1` | Mute audible Spotify output while capturing. |
+| `SOGGFY_HISTORY_LIMIT` | `250` | Maximum terminal jobs retained in the in-memory/history view. |
+| `SOGGFY_API_TOKEN` | unset | Required bearer token whenever `SOGGFY_HOST` is not loopback. |
 
 The normal runtime has one daemon-owned Spotify instance. The daemon and web UI/API share that same instance in-process; no additional web worker is created.
+
+The default loopback listener is intentionally tokenless. Binding to a non-loopback address (for example `0.0.0.0`) fails closed unless `SOGGFY_API_TOKEN` is set. API clients then send `Authorization: Bearer <token>`. The web UI accepts `?token=<token>` once, stores it in session storage, removes it from the visible URL, and sends it only to same-origin `/api/*` requests. Wildcard CORS is not enabled.
 
 ## Spotify web data
 

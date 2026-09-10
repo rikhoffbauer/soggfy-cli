@@ -28,6 +28,6 @@ soggfy daemon logs
 
 The daemon-owned patched Spotify process is intentionally faceless: its patched app bundle is background-only and the payload prevents normal application activation or visible window ordering. It therefore stays out of the Dock and app switcher while capture is running. Interactive authentication still uses the untouched system Spotify app.
 
-The web UI and `/api/*` routes share one listener at `127.0.0.1:8085` by default. Set `SOGGFY_HOST` and `SOGGFY_PORT` before starting or restarting the daemon to change the bind address. There is no separate web-server CLI lifecycle.
+The web UI and `/api/*` routes share one listener at `127.0.0.1:8085` by default. Set `SOGGFY_HOST` and `SOGGFY_PORT` before starting or restarting the daemon to change the bind address. There is no separate web-server CLI lifecycle. Non-loopback binds require `SOGGFY_API_TOKEN`; the daemon fails before spawning if it is missing. Wildcard CORS is disabled.
 
 If the daemon is unavailable, `download` can still fall back to a temporary isolated instance unless other startup requirements fail. Binary capture output is never routed into the daemon log.

@@ -100,3 +100,37 @@ test("raw output refuses compressed captures and WAV streaming transcodes them",
   const output = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
   expect(output.subarray(0, 4).toString("ascii")).toBe("RIFF");
 });
+
+test("validateAudioFile accepts a legitimate long silent intro when later audio has signal", () => {
+  const path = join(makeRoot(), "silent-intro.wav");
+  const sampleRate = 44_100;
+  const channels = 2;
+  const durationMs = 15_000;
+  const frames = Math.round((sampleRate * durationMs) / 1000);
+  const dataBytes = frames * channels * 4;
+  const buffer = Buffer.alloc(44 + dataBytes);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataBytes, 4);
+  buffer.write("WAVEfmt ", 8);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(3, 20);
+  buffer.writeUInt16LE(channels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * channels * 4, 28);
+  buffer.writeUInt16LE(channels * 4, 32);
+  buffer.writeUInt16LE(32, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataBytes, 40);
+  const signalStart = sampleRate * 11;
+  for (let frame = signalStart; frame < frames; frame++) {
+    const sample = Math.sin((2 * Math.PI * 440 * frame) / sampleRate) * 0.25;
+    for (let channel = 0; channel < channels; channel++) {
+      buffer.writeFloatLE(sample, 44 + (frame * channels + channel) * 4);
+    }
+  }
+  writeFileSync(path, buffer);
+
+  const result = validateAudioFile(path, durationMs);
+  expect(result.ok).toBe(true);
+  expect(result.peak).toBeGreaterThan(0.1);
+});

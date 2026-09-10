@@ -1,6 +1,6 @@
 # `soggfy auth`
 
-Manage the Spotify desktop login state used by Soggfy capture instances.
+Manage the private Spotify desktop login state used by Soggfy capture instances. Soggfy stores its copy under `~/.soggfy/auth/spotify`; logout/import never modify Spotify's normal Application Support profile.
 
 ## Usage
 
@@ -10,11 +10,11 @@ soggfy auth <login|logout|status|export|import>
 
 ## Commands
 
-- `login` launches the official Spotify app for interactive authentication, then verifies the resulting local prefs.
-- `status` reports whether a username can be resolved from Spotify's local login state.
-- `logout` removes the local Spotify prefs/users credential state used by Soggfy.
-- `export [file]` writes a portable JSON snapshot with mode `0600`.
-- `import <file>` restores a previously exported snapshot and rejects paths escaping Spotify's Users directory.
+- `login` launches the official Spotify app for interactive authentication, then atomically snapshots the session-critical state into Soggfy-owned storage.
+- `status` reports the account found in Soggfy-owned login state.
+- `logout` removes only Soggfy-owned credentials.
+- `export [file]` writes a portable version-2 JSON snapshot with mode `0600`, including nested session-cache files.
+- `import <file>` atomically restores a version-2 snapshot; legacy version-1 snapshots remain accepted. Every restored path is constrained to the private auth root.
 
 ## Examples
 

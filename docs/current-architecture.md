@@ -126,3 +126,13 @@ Live verification on the same date:
 - Spotify search and playlist browsing use private Web Player APIs and anonymous web/client tokens by default; optional authenticated cookie/direct-token overrides remain supported. Direct track capture does not depend on that catalog path.
 - IPC is still a compact string protocol rather than a typed/versioned protocol.
 - Web job scheduling and CLI download orchestration are still separate request layers around the same daemon-owned Spotify instance; high-level cross-client job serialization is not yet centralized.
+
+## Daemon and web runtime integrity
+
+The daemon records `{pid, token, startedAt}` and owns a private Unix-domain identity socket. `status` and `stop` trust a PID only when the live socket proves the matching launch token, preventing stale/reused PID files from targeting unrelated processes. `daemon start` is serialized by an atomic start lock, and all startup failures use the same cleanup path that stops the daemon-owned Spotify process.
+
+Release artifacts contain a bundled `webapp/server.js` plus generated frontend assets. The release smoke test copies that runtime outside the source checkout and requires both `/api/health` and the HTML UI to respond, so runtime operation cannot accidentally depend on repository TypeScript files.
+
+Completed web downloads are reconstructed from sidecars on startup. Terminal history is bounded, and job snapshots carry a monotonic revision; unchanged `GET /api/jobs?since=<revision>` requests return `204`, avoiding full idle snapshot retransmission and stale client overwrites.
+
+The web server is decomposed into route composition (`webapp/src/index.ts`), process/capture supervision (`server/spotify-instance.ts`), queue scheduling (`server/pool.ts`), runtime state/configuration, metadata, output lookup, and security modules.

@@ -1,6 +1,11 @@
 export const DEFAULT_HTTP_HOST = "127.0.0.1";
 export const DEFAULT_HTTP_PORT = 8085;
 
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
+}
+
 export interface HttpConfig {
   host: string;
   port: number;
@@ -12,6 +17,9 @@ export function getHttpConfig(env: NodeJS.ProcessEnv = process.env): HttpConfig 
   const port = rawPort ? Number.parseInt(rawPort, 10) : DEFAULT_HTTP_PORT;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`Invalid SOGGFY_PORT: ${rawPort}`);
+  }
+  if (!isLoopbackHost(host) && !env.SOGGFY_API_TOKEN?.trim()) {
+    throw new Error("SOGGFY_API_TOKEN is required when SOGGFY_HOST is not loopback");
   }
   return { host, port };
 }

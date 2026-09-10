@@ -209,9 +209,16 @@ export async function resolvePlayableTrackId(
  * Resolve a spotify URL/URI to a list of track IDs.
  * Supports single tracks, playlists, and albums.
  */
-export async function resolveInput(input: string): Promise<string[]> {
-  // Import inline to avoid circular dep
-  const { parseTrackId, parsePlaylistId, parseAlbumId, extractTrackIds } = await import("./spotify-url");
+export interface ResolveInputOptions {
+  fetchPlaylistTrackIds?: (id: string) => Promise<string[]>;
+  fetchAlbumTrackIds?: (id: string) => Promise<string[]>;
+}
+
+export async function resolveInput(
+  input: string,
+  options: ResolveInputOptions = {},
+): Promise<string[]> {
+  const { parseTrackId, parsePlaylistId, parseAlbumId } = await import("./spotify-url");
 
   const trackId = parseTrackId(input);
   if (trackId) {
@@ -221,22 +228,22 @@ export async function resolveInput(input: string): Promise<string[]> {
 
   const playlistId = parsePlaylistId(input);
   if (playlistId) {
-    try {
-      const res = await fetch(`https://open.spotify.com/embed/playlist/${playlistId}`);
-      return extractTrackIds(await res.text());
-    } catch {
-      return [];
-    }
+    const fetchIds = options.fetchPlaylistTrackIds ?? (async (id: string) => {
+      const { fetchAllSpotifyPlaylistTracks } = await import("./spotify-playlist");
+      return (await fetchAllSpotifyPlaylistTracks(id)).tracks
+        .filter((track) => track.playable)
+        .map((track) => track.id);
+    });
+    return fetchIds(playlistId);
   }
 
   const albumId = parseAlbumId(input);
   if (albumId) {
-    try {
-      const res = await fetch(`https://open.spotify.com/embed/album/${albumId}`);
-      return extractTrackIds(await res.text());
-    } catch {
-      return [];
-    }
+    const fetchIds = options.fetchAlbumTrackIds ?? (async (id: string) => {
+      const { fetchAllSpotifyAlbumTrackIds } = await import("./spotify-album");
+      return fetchAllSpotifyAlbumTrackIds(id);
+    });
+    return fetchIds(albumId);
   }
 
   return [];

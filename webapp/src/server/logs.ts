@@ -83,6 +83,20 @@ export function listLogSources(roots: LogRoots): LogSource[] {
   ];
 }
 
+export function decodeLogTail(
+  buffer: Buffer,
+  options: { bytesRead: number; start: number; lineLimit: number; previousByte?: number },
+) {
+  const text = buffer.subarray(0, Math.max(0, options.bytesRead)).toString("utf8");
+  let lines = text.split(/\r?\n/);
+  const startsMidLine = options.start > 0 && options.previousByte !== 0x0a && options.previousByte !== 0x0d;
+  if (startsMidLine) lines = lines.slice(1);
+  if (lines.at(-1) === "") lines.pop();
+  const truncated = options.start > 0 || lines.length > options.lineLimit;
+  if (lines.length > options.lineLimit) lines = lines.slice(-options.lineLimit);
+  return { lines, truncated };
+}
+
 export function readLogTail(source: LogSource, maxLines = 500) {
   const lineLimit = Math.max(1, Math.min(5000, Math.floor(maxLines)));
   const fd = openSync(source.path, "r");
@@ -91,16 +105,16 @@ export function readLogTail(source: LogSource, maxLines = 500) {
     const start = Math.max(0, stat.size - MAX_TAIL_BYTES);
     const length = stat.size - start;
     const buffer = Buffer.alloc(length);
-    if (length > 0) readSync(fd, buffer, 0, length, start);
-    let lines = buffer.toString("utf8").split(/\r?\n/);
-    if (start > 0) lines = lines.slice(1);
-    if (lines.at(-1) === "") lines.pop();
-    const truncated = start > 0 || lines.length > lineLimit;
-    if (lines.length > lineLimit) lines = lines.slice(-lineLimit);
+    const bytesRead = length > 0 ? readSync(fd, buffer, 0, length, start) : 0;
+    let previousByte: number | undefined;
+    if (start > 0) {
+      const previous = Buffer.alloc(1);
+      if (readSync(fd, previous, 0, 1, start - 1) === 1) previousByte = previous[0];
+    }
+    const decoded = decodeLogTail(buffer, { bytesRead, start, lineLimit, previousByte });
     return {
       source: { ...source, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() },
-      lines,
-      truncated,
+      ...decoded,
     };
   } finally {
     closeSync(fd);

@@ -29,7 +29,7 @@ jobs:
 
       - name: Install webapp dependencies
         working-directory: webapp
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Typecheck root CLI
         run: bun run typecheck
@@ -58,15 +58,21 @@ jobs:
         working-directory: webapp
         run: bun run build
 
-      - name: Build CLI Bundle
-        run: bun run build:cli
+      - name: Build Release Runtime
+        run: bun run build:release
+
+      - name: Smoke-test bundled web runtime
+        run: bun test test/web-runtime-bundle.test.ts
 
       - name: Create Distribution Archive
         run: |
-          mkdir -p release-bundle/bin release-bundle/payload release-artifacts
+          mkdir -p release-bundle/bin release-bundle/payload release-bundle/webapp release-artifacts
           cp dist/cli.js release-bundle/bin/soggfy
           chmod +x release-bundle/bin/soggfy
           cp soggfy-macos/build/libsoggfy.dylib release-bundle/payload/libsoggfy.dylib
+          cp -R dist/webapp/. release-bundle/webapp/
+          test -f release-bundle/webapp/server.js
+          test -f release-bundle/webapp/index.html
           cp README.md release-bundle/ 2>/dev/null || true
           tar -czvf soggfy-macos-arm64.tar.gz -C release-bundle .
           cp soggfy-macos-arm64.tar.gz release-artifacts/

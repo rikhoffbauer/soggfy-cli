@@ -64,3 +64,29 @@ test("readLogTail returns bounded newest lines without exposing arbitrary paths"
   })[0]!;
   expect(readLogTail(source, 2)).toMatchObject({ lines: ["three", "four"], truncated: true });
 });
+
+import { decodeLogTail } from "../logs";
+
+
+test("readLogTail keeps a complete first line when byte window starts after newline", () => {
+  const f = fixture();
+  const path = join(f.logs, "boundary.log");
+  const maxTailBytes = 2 * 1024 * 1024;
+  const tail = `first\n${"x".repeat(maxTailBytes - 6)}`;
+  writeFileSync(path, `prefix\n${tail}`);
+  const source = listLogSources({
+    logDir: f.logs,
+    runtimeDir: f.runtime,
+    profilesDir: f.profiles,
+    payloadDir: f.payload,
+  }).find((item) => item.label === "boundary.log")!;
+  expect(readLogTail(source, 10).lines[0]).toBe("first");
+});
+
+test("tail decoding ignores unread bytes when a file shrinks during read", () => {
+  const buffer = Buffer.concat([Buffer.from("one\ntwo"), Buffer.alloc(8, 0)]);
+  expect(decodeLogTail(buffer, { bytesRead: 7, start: 0, lineLimit: 10 })).toEqual({
+    lines: ["one", "two"],
+    truncated: false,
+  });
+});

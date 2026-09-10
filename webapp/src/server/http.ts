@@ -1,10 +1,6 @@
 import { existsSync, statSync, createReadStream } from "fs";
 
-export const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, Range",
-};
+export const CORS_HEADERS: Record<string, string> = {};
 
 export function jsonResponse(data: unknown, init?: ResponseInit) {
   return Response.json(data, {

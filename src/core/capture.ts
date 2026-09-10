@@ -110,11 +110,6 @@ export async function captureTrack(
       log.progress("Capturing", bytes, expectedBytes);
     }
 
-    if (expectedBytes > 0 && bytes >= expectedBytes) {
-      log.ok("Track stream capture completed!");
-      break;
-    }
-
     if (bytes === lastBytes) stagnantTicks++;
     else stagnantTicks = 0;
     lastBytes = bytes;

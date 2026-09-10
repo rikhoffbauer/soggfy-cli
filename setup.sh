@@ -48,7 +48,17 @@ SPOTIFY_COMPATIBILITY_REGISTRY="$ROOT_DIR/compatibility/spotify-versions.json"
 SOGGFY_HOME="${SOGGFY_HOME:-$HOME/.soggfy}"
 WORKSPACE_DIR="$SOGGFY_HOME/workspace"
 PATCHED_APP="$WORKSPACE_DIR/PatchedSpotify.app"
-PROFILE_TEMPLATE="$WORKSPACE_DIR/profile_template"
+STAGED_APP="$WORKSPACE_DIR/.PatchedSpotify.app.staging.$$"
+BACKUP_APP="$WORKSPACE_DIR/.PatchedSpotify.app.backup"
+BACKUP_CREATED=0
+
+cleanup_transaction() {
+  rm -rf "$STAGED_APP"
+  if [[ "$BACKUP_CREATED" -eq 1 && ! -e "$PATCHED_APP" && -e "$BACKUP_APP" ]]; then
+    mv "$BACKUP_APP" "$PATCHED_APP"
+  fi
+}
+trap cleanup_transaction EXIT
 
 require_command() {
   local cmd="$1"
@@ -58,32 +68,6 @@ require_command() {
   fi
 }
 
-terminate_process_tree() {
-  local root_pid="$1"
-  local table descendants pid
-  table="$(ps -axo pid=,ppid=)"
-  descendants="$(awk -v root="$root_pid" '
-    { parent[$1]=$2 }
-    END {
-      for (pid in parent) {
-        current=pid
-        while (current in parent) {
-          if (parent[current] == root) { print pid; break }
-          current=parent[current]
-        }
-      }
-    }
-  ' <<<"$table")"
-  while read -r pid; do
-    [[ -n "$pid" ]] && kill -TERM "$pid" >/dev/null 2>&1 || true
-  done <<<"$descendants"
-  kill -TERM "$root_pid" >/dev/null 2>&1 || true
-  sleep 1
-  while read -r pid; do
-    [[ -n "$pid" ]] && kill -KILL "$pid" >/dev/null 2>&1 || true
-  done <<<"$descendants"
-  kill -KILL "$root_pid" >/dev/null 2>&1 || true
-}
 
 echo -e "${BLUE}=== Soggfy macOS Setup ===${NC}"
 
@@ -152,69 +136,55 @@ if ! isSpotifyVersionSupported "$SPOTIFY_VERSION"; then
 fi
 echo -e "${GREEN}✓ Spotify build $SPOTIFY_VERSION is capture-compatible${NC}"
 
-mkdir -p "$SOGGFY_HOME" "$WORKSPACE_DIR" "$PROFILE_TEMPLATE"
-chmod 700 "$SOGGFY_HOME" "$WORKSPACE_DIR" "$PROFILE_TEMPLATE"
+mkdir -p "$SOGGFY_HOME" "$WORKSPACE_DIR"
+chmod 700 "$SOGGFY_HOME" "$WORKSPACE_DIR"
 
 if [[ "$SKIP_LOGIN" -eq 0 ]]; then
-  echo -e "\n${BLUE}[3/6] Login/profile preparation${NC}"
-  echo "Spotify will open once. Log in, wait for the main UI, then return here."
-  "/Applications/Spotify.app/Contents/MacOS/Spotify" --user-data-dir="$PROFILE_TEMPLATE" >/dev/null 2>&1 &
-  SPOTIFY_LOGIN_PID=$!
-  read -r -p "Press [Enter] after Spotify is logged in and loaded..."
-  terminate_process_tree "$SPOTIFY_LOGIN_PID"
+  echo -e "\n${BLUE}[3/6] Capturing Soggfy login state${NC}"
+  bun "$ROOT_DIR/src/cli.ts" auth login
 else
-  echo -e "\n${BLUE}[3/6] Login/profile preparation skipped${NC}"
+  echo -e "\n${BLUE}[3/6] Login preparation skipped${NC}"
 fi
 
-echo -e "\n${BLUE}[4/6] Preparing patched workspace app${NC}"
-if [[ "$RESET_WORKSPACE" -eq 1 ]]; then
-  echo "Resetting Soggfy workspace state..."
-  rm -rf "$PATCHED_APP" "$WORKSPACE_DIR/profiles"
-fi
-
-rm -rf "$PATCHED_APP"
-ditto "/Applications/Spotify.app" "$PATCHED_APP"
-
-# The patched daemon runtime is deliberately faceless. Do this before signing,
-# because changing Info.plist after codesign invalidates the app bundle seal.
-/usr/libexec/PlistBuddy -c 'Delete :LSUIElement' "$PATCHED_APP/Contents/Info.plist" >/dev/null 2>&1 || true
-/usr/libexec/PlistBuddy -c 'Delete :LSBackgroundOnly' "$PATCHED_APP/Contents/Info.plist" >/dev/null 2>&1 || true
-/usr/libexec/PlistBuddy -c 'Add :LSBackgroundOnly bool true' "$PATCHED_APP/Contents/Info.plist"
-
-adhoc_sign_if_present() {
-  local target="$1"
-  if [[ -e "$target" ]]; then
-    codesign -f -s - "$target" >/dev/null
-    echo -e "${GREEN}✓ ad-hoc signed $target${NC}"
-  else
-    echo -e "${YELLOW}warning: signature target missing: $target${NC}"
-  fi
-}
-
-adhoc_sign_if_present "$PATCHED_APP/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework"
-adhoc_sign_if_present "$PATCHED_APP/Contents/MacOS/Spotify"
-
-if [[ ! -f "$PATCHED_APP/Contents/MacOS/Spotify" ]]; then
-  echo -e "${RED}Error: Failed to copy Spotify binary to $PATCHED_APP/Contents/MacOS/Spotify${NC}"
-  exit 1
-fi
-echo -e "${GREEN}✓ Patched app prepared at $PATCHED_APP${NC}"
-
-echo -e "\n${BLUE}[5/6] Building payload${NC}"
+echo -e "\n${BLUE}[4/6] Building payload${NC}"
 cd "$ROOT_DIR/soggfy-macos"
 if [[ "$REBUILD" -eq 1 ]]; then rm -rf build; fi
 cmake -S . -B build
 cmake --build build
-mkdir -p "$PATCHED_APP/Contents/MacOS"
-cp "$ROOT_DIR/soggfy-macos/build/libsoggfy.dylib" "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib"
-codesign -f -s - "$PATCHED_APP/Contents/MacOS/libsoggfy.dylib" >/dev/null
-codesign -f -s - --deep "$PATCHED_APP" >/dev/null
-codesign --verify --deep --strict "$PATCHED_APP"
 cd "$ROOT_DIR"
+
+echo -e "\n${BLUE}[5/6] Staging and verifying patched Spotify${NC}"
+rm -rf "$STAGED_APP"
+ditto "/Applications/Spotify.app" "$STAGED_APP"
+/usr/libexec/PlistBuddy -c 'Delete :LSUIElement' "$STAGED_APP/Contents/Info.plist" >/dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c 'Delete :LSBackgroundOnly' "$STAGED_APP/Contents/Info.plist" >/dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c 'Add :LSBackgroundOnly bool true' "$STAGED_APP/Contents/Info.plist"
+mkdir -p "$STAGED_APP/Contents/MacOS"
+cp "$ROOT_DIR/soggfy-macos/build/libsoggfy.dylib" "$STAGED_APP/Contents/MacOS/libsoggfy.dylib"
+codesign -f -s - "$STAGED_APP/Contents/MacOS/libsoggfy.dylib" >/dev/null
+codesign -f -s - --deep "$STAGED_APP" >/dev/null
+codesign --verify --deep --strict "$STAGED_APP"
+
+if [[ -e "$BACKUP_APP" ]]; then
+  echo -e "${RED}Refusing install with stale backup present: $BACKUP_APP${NC}"
+  exit 1
+fi
+if [[ -e "$PATCHED_APP" ]]; then
+  mv "$PATCHED_APP" "$BACKUP_APP"
+  BACKUP_CREATED=1
+fi
+if ! mv "$STAGED_APP" "$PATCHED_APP"; then
+  [[ -e "$BACKUP_APP" ]] && mv "$BACKUP_APP" "$PATCHED_APP"
+  exit 1
+fi
+rm -rf "$BACKUP_APP"
+BACKUP_CREATED=0
+if [[ "$RESET_WORKSPACE" -eq 1 ]]; then rm -rf "$WORKSPACE_DIR/profiles"; fi
+echo -e "${GREEN}✓ Patched app committed at $PATCHED_APP${NC}"
 
 echo -e "\n${BLUE}[6/6] Installing webapp dependencies${NC}"
 cd "$ROOT_DIR/webapp"
-bun install --frozen-lockfile
+bun install --frozen-lockfile --ignore-scripts
 cd "$ROOT_DIR"
 
 echo -e "\n${GREEN}=== Setup complete ===${NC}"

@@ -130,15 +130,15 @@ function probeDurationMs(path: string): { ok: boolean; durationMs?: number; cont
   }
 }
 
-function analyzeDecodedSignal(path: string): {
+function analyzeDecodedSignal(path: string, startSeconds = 0, durationSeconds = 10): {
   ok: boolean;
   rms?: number;
   peak?: number;
   silenceRatio?: number;
 } {
   const decoded = spawnSync("ffmpeg", [
-    "-v", "error", "-i", path,
-    "-t", "10", "-ac", "1", "-ar", "16000",
+    "-v", "error", ...(startSeconds > 0 ? ["-ss", String(startSeconds)] : []), "-i", path,
+    "-t", String(durationSeconds), "-ac", "1", "-ar", "16000",
     "-f", "f32le", "pipe:1",
   ], { stdio: ["ignore", "pipe", "pipe"], maxBuffer: 2 * 1024 * 1024 });
   if (decoded.status !== 0 || !decoded.stdout || decoded.stdout.length < 4) return { ok: false };
@@ -186,16 +186,31 @@ export function validateAudioFile(path: string, expectedDurationMs?: number): Au
     }
   }
 
-  const signal = analyzeDecodedSignal(path);
-  validation.decodedSignalOk = signal.ok;
-  validation.rms = signal.rms;
-  validation.peak = signal.peak;
-  validation.silenceRatio = signal.silenceRatio;
-  if (!signal.ok) validation.warnings.push("decode_failed");
-  if (signal.peak !== undefined && signal.peak < 0.0001) {
+  const durationSeconds = probe.durationMs ? probe.durationMs / 1000 : undefined;
+  const offsets = durationSeconds && durationSeconds > 12
+    ? [...new Set([
+        0,
+        Math.max(0, durationSeconds / 2 - 5),
+        Math.max(0, durationSeconds - 10),
+      ].map((value) => Math.round(value * 1000) / 1000))]
+    : [0];
+  const signals = offsets.map((offset) => analyzeDecodedSignal(path, offset));
+  const usableSignals = signals.filter((signal) => signal.ok);
+  validation.decodedSignalOk = usableSignals.length > 0;
+  validation.rms = usableSignals.length
+    ? Math.max(...usableSignals.map((signal) => signal.rms ?? 0))
+    : undefined;
+  validation.peak = usableSignals.length
+    ? Math.max(...usableSignals.map((signal) => signal.peak ?? 0))
+    : undefined;
+  validation.silenceRatio = usableSignals.length
+    ? Math.min(...usableSignals.map((signal) => signal.silenceRatio ?? 1))
+    : undefined;
+  if (usableSignals.length === 0) validation.warnings.push("decode_failed");
+  if (validation.peak !== undefined && validation.peak < 0.0001) {
     validation.warnings.push("near_silent_peak");
   }
-  if (signal.silenceRatio !== undefined && signal.silenceRatio > 0.98) {
+  if (validation.silenceRatio !== undefined && validation.silenceRatio > 0.98) {
     validation.warnings.push("mostly_silent_sample_window");
   }
 

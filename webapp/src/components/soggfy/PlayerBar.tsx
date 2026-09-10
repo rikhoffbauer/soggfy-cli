@@ -66,12 +66,14 @@ export function PlayerBar({ job, onClose }: PlayerBarProps) {
     if (!audio) return;
     const resumeAt = audio.currentTime;
     const resumePlaying = !audio.paused;
-    audio.src = streamUrl(job);
-    audio.load();
-    audio.addEventListener("loadedmetadata", () => {
+    const handleLoadedMetadata = () => {
       if (Number.isFinite(audio.duration)) audio.currentTime = Math.min(resumeAt, audio.duration);
       if (resumePlaying) void audio.play().catch(() => setPlaying(false));
-    }, { once: true });
+    };
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata, { once: true });
+    audio.src = streamUrl(job);
+    audio.load();
+    return () => audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
   }, [job?.state, job?.id]);
 
   if (!job) return <audio ref={audioRef} />;

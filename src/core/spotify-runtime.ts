@@ -6,9 +6,9 @@ import {
   mkdirSync,
   rmSync,
 } from "fs";
-import { homedir } from "os";
 import { join } from "path";
 import { isSpotifyVersionSupported, latestSupportedSpotifyVersion, supportedSpotifyVersions } from "./spotify-compatibility";
+import { AUTH_STATE_DIR } from "./paths";
 
 export interface LoginStateCloneResult {
   copiedPrefs: boolean;
@@ -58,7 +58,7 @@ function cloneDirectoryCow(source: string, destination: string): void {
 
 export function cloneSpotifyLoginState(
   appSupportDest: string,
-  sourceDir = join(homedir(), "Library/Application Support/Spotify"),
+  sourceDir = AUTH_STATE_DIR,
 ): LoginStateCloneResult {
   ensurePrivateDir(appSupportDest);
   let copiedPrefs = false;

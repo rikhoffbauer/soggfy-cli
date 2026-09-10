@@ -87,7 +87,7 @@ test("startup timeout rejects when no capture file appears", async () => {
 
 test("stream route attaches to an existing exact job and never creates one", async () => {
   const { readFileSync } = await import("fs");
-  const source = readFileSync(join(import.meta.dir, "../../index.ts"), "utf8");
+  const source = readFileSync(join(import.meta.dir, "../routes.ts"), "utf8");
   expect(source).toContain("streamGrowingFile");
   expect(source).toContain('url.searchParams.get("job")');
   expect(source).not.toContain("stream-triggered job failed");

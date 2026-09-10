@@ -1,8 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createServer } from "node:net";
+import { resolveWebappServerEntry, resolveWebappWorkingDirectory } from "../src/commands/daemon";
 
 const root = join(import.meta.dir, "..");
 const outDir = mkdtempSync(join(tmpdir(), "soggfy-release-test-"));
@@ -40,6 +41,21 @@ test("bundled CLI does not depend on source-tree cli.ts paths", () => {
   buildReleaseCli();
   const source = readFileSync(bundle, "utf8");
   expect(source).not.toContain("../cli.ts");
+});
+
+test("release layout resolves bundled web runtime without a source checkout", () => {
+  const releaseRoot = mkdtempSync(join(tmpdir(), "soggfy-release-layout-"));
+  const binDir = join(releaseRoot, "bin");
+  const webDir = join(releaseRoot, "webapp");
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(webDir, { recursive: true });
+  writeFileSync(join(webDir, "server.js"), "// bundled server\n");
+  try {
+    expect(resolveWebappServerEntry(binDir)).toBe(join(webDir, "server.js"));
+    expect(resolveWebappWorkingDirectory(binDir)).toBe(webDir);
+  } finally {
+    rmSync(releaseRoot, { recursive: true, force: true });
+  }
 });
 
 test("bundled daemon start re-executes the bundle instead of source files", async () => {

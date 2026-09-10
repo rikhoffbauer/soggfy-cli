@@ -9,15 +9,21 @@ import {
   writeFileSync,
 } from "fs";
 import { spawn } from "child_process";
+import { randomUUID } from "crypto";
 import { createServer } from "node:net";
 import { dirname, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { log } from "../core/log";
-import { PID_FILE, DAEMON_LOG, IPC_SOCKET, SAVE_PATH, ensureDirs } from "../core/paths";
+import {
+  PID_FILE, DAEMON_LOG, DAEMON_SOCKET, DAEMON_START_LOCK,
+  IPC_SOCKET, SAVE_PATH, ensureDirs,
+} from "../core/paths";
 import { SpotifyInstance } from "../core/instance";
 import { registerDaemonSpotifyInstance, unregisterDaemonSpotifyInstance } from "../core/daemon-runtime";
 import { ping } from "../core/ipc";
 import { getHttpConfig, getHttpOrigin } from "../core/http-config";
+import { acquireDaemonStartLock } from "../core/daemon-lock";
+import { startDaemonIdentityServer, verifyDaemonIdentity } from "../core/daemon-identity";
 
 export async function daemonCommand(args: string[]): Promise<void> {
   const sub = args[0];
@@ -57,21 +63,53 @@ Subcommands:
   }
 }
 
-function readPid(): number | null {
+interface DaemonRecord {
+  pid: number;
+  token: string;
+  startedAt: string;
+}
+
+function readDaemonRecord(): DaemonRecord | null {
   if (!existsSync(PID_FILE)) return null;
-  const pid = Number.parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
-  if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
-    process.kill(pid, 0);
-    return pid;
+    const value = JSON.parse(readFileSync(PID_FILE, "utf8"));
+    if (!Number.isInteger(value?.pid) || value.pid <= 0 || typeof value?.token !== "string" || !value.token) {
+      return null;
+    }
+    return {
+      pid: value.pid,
+      token: value.token,
+      startedAt: typeof value.startedAt === "string" ? value.startedAt : "unknown",
+    };
   } catch {
-    try { unlinkSync(PID_FILE); } catch {}
     return null;
   }
 }
 
-function isAlive(): boolean {
-  return readPid() !== null;
+function processExists(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function removePidRecord(record?: DaemonRecord): void {
+  if (record) {
+    const current = readDaemonRecord();
+    if (!current || current.pid !== record.pid || current.token !== record.token) return;
+  }
+  try { unlinkSync(PID_FILE); } catch {}
+}
+
+async function getVerifiedDaemonRecord(): Promise<DaemonRecord | null> {
+  const record = readDaemonRecord();
+  if (!record) return null;
+  if (!processExists(record.pid)) {
+    removePidRecord(record);
+    return null;
+  }
+  if (!(await verifyDaemonIdentity(DAEMON_SOCKET, record.token))) {
+    removePidRecord(record);
+    return null;
+  }
+  return record;
 }
 
 export async function isHttpEndpointOccupied(
@@ -116,76 +154,94 @@ function spawnDaemonProcess(): number {
 
 async function daemonStart(): Promise<void> {
   log.header("Starting Daemon");
-  if (isAlive()) {
-    log.info(`Daemon already running (PID: ${readPid()})`);
-    return;
-  }
-
   ensureDirs();
-  const httpConfig = getHttpConfig();
-  if (await isHttpEndpointOccupied(httpConfig)) {
-    log.info("Configured web address is already in use; daemon not started.");
-    log.dim(`  Address: ${httpConfig.host}:${httpConfig.port}`);
-    return;
-  }
 
-  const daemonPid = spawnDaemonProcess();
-  log.ok(`Daemon started (PID: ${daemonPid})`);
-
-  const httpOrigin = getHttpOrigin(httpConfig);
-  log.info("Waiting for Spotify instance and web UI/API to become ready...");
-  for (let i = 0; i < 90; i++) {
-    await Bun.sleep(1000);
-    try {
-      process.kill(daemonPid, 0);
-    } catch {
-      throw new Error("Daemon process exited unexpectedly. Check: soggfy daemon logs");
-    }
-
-    const spotifyReady = await ping(IPC_SOCKET);
-    const webReady = spotifyReady && await isWebServerHealthy(httpOrigin);
-    if (spotifyReady && webReady) {
-      log.ok("Daemon ready: Spotify IPC and web UI/API are responsive.");
-      log.dim(`  Web UI/API: ${httpOrigin}`);
+  let startLock;
+  try {
+    startLock = acquireDaemonStartLock(DAEMON_START_LOCK);
+  } catch (error) {
+    const running = await getVerifiedDaemonRecord();
+    if (running) {
+      log.info(`Daemon already running (PID: ${running.pid})`);
       return;
     }
+    throw error;
   }
 
-  try { process.kill(daemonPid, "SIGTERM"); } catch {}
-  throw new Error("Daemon did not become fully ready within 90 seconds. Check: soggfy daemon logs");
+  try {
+    const running = await getVerifiedDaemonRecord();
+    if (running) {
+      log.info(`Daemon already running (PID: ${running.pid})`);
+      return;
+    }
+
+    const httpConfig = getHttpConfig();
+    if (await isHttpEndpointOccupied(httpConfig)) {
+      log.info("Configured web address is already in use; daemon not started.");
+      log.dim(`  Address: ${httpConfig.host}:${httpConfig.port}`);
+      return;
+    }
+
+    const daemonPid = spawnDaemonProcess();
+    log.ok(`Daemon started (PID: ${daemonPid})`);
+    const httpOrigin = getHttpOrigin(httpConfig);
+    log.info("Waiting for Spotify instance and web UI/API to become ready...");
+
+    for (let i = 0; i < 90; i++) {
+      await Bun.sleep(1000);
+      if (!processExists(daemonPid)) {
+        throw new Error("Daemon process exited unexpectedly. Check: soggfy daemon logs");
+      }
+      const identity = await getVerifiedDaemonRecord();
+      const spotifyReady = identity?.pid === daemonPid && await ping(IPC_SOCKET);
+      const webReady = spotifyReady && await isWebServerHealthy(httpOrigin);
+      if (identity?.pid === daemonPid && spotifyReady && webReady) {
+        log.ok("Daemon ready: Spotify IPC and web UI/API are responsive.");
+        log.dim(`  Web UI/API: ${httpOrigin}`);
+        return;
+      }
+    }
+
+    try { process.kill(daemonPid, "SIGTERM"); } catch {}
+    throw new Error("Daemon did not become fully ready within 90 seconds. Check: soggfy daemon logs");
+  } finally {
+    startLock.release();
+  }
 }
 
 async function daemonStop(): Promise<void> {
   log.header("Stopping Daemon");
-  const pid = readPid();
-  if (!pid) {
-    log.info("Daemon is not running.");
+  const record = await getVerifiedDaemonRecord();
+  if (!record) {
+    log.info("Daemon is not running or its identity cannot be verified.");
     return;
   }
 
   try {
-    process.kill(pid, "SIGTERM");
+    process.kill(record.pid, "SIGTERM");
     for (let i = 0; i < 20; i++) {
       await Bun.sleep(250);
-      try { process.kill(pid, 0); } catch { break; }
+      if (!processExists(record.pid)) break;
     }
-    try { process.kill(pid, "SIGKILL"); } catch {}
-  } finally {
-    try { unlinkSync(PID_FILE); } catch {}
+    if (processExists(record.pid)) {
+      process.kill(record.pid, "SIGKILL");
+    }
+  } catch {} finally {
+    removePidRecord(record);
   }
 
-  log.ok(`Daemon stopped (was PID: ${pid})`);
+  log.ok(`Daemon stopped (was PID: ${record.pid})`);
 }
 
 async function daemonStatus(): Promise<void> {
   log.header("Daemon Status");
-  const pid = readPid();
-  if (!pid) {
-    log.info("Daemon is not running.");
+  const record = await getVerifiedDaemonRecord();
+  if (!record) {
+    log.info("Daemon is not running or its identity cannot be verified.");
     return;
   }
 
-  log.ok(`Daemon running (PID: ${pid})`);
+  log.ok(`Daemon running (PID: ${record.pid})`);
   const ipcAlive = await ping(IPC_SOCKET);
   if (ipcAlive) log.ok("Spotify IPC: responsive");
   else log.warn("Spotify IPC: not responding");
@@ -196,6 +252,7 @@ async function daemonStatus(): Promise<void> {
   else log.warn(`Web UI/API: not responding (${httpOrigin})`);
 
   log.dim(`  PID file: ${PID_FILE}`);
+  log.dim(`  Identity socket: ${DAEMON_SOCKET}`);
   log.dim(`  IPC socket: ${IPC_SOCKET}`);
   log.dim(`  Log file: ${DAEMON_LOG}`);
 }
@@ -214,7 +271,10 @@ function daemonLogs(): void {
 
 async function isWebServerHealthy(origin = getHttpOrigin()): Promise<boolean> {
   try {
-    const response = await fetch(`${origin}/api/health`);
+    const token = process.env.SOGGFY_API_TOKEN?.trim();
+    const response = await fetch(`${origin}/api/health`, token ? {
+      headers: { authorization: `Bearer ${token}` },
+    } : undefined);
     if (!response.ok) return false;
     const body = await response.json() as { ok?: boolean; started?: boolean };
     return body.ok === true && body.started === true;
@@ -235,17 +295,18 @@ export function resolveWebappWorkingDirectory(
   moduleDir = dirname(fileURLToPath(import.meta.url)),
 ): string | undefined {
   const candidates = [
-    resolve(moduleDir, "../../webapp"),
     resolve(moduleDir, "../webapp"),
+    resolve(moduleDir, "../../webapp"),
   ];
   for (const candidate of candidates) {
-    if (existsSync(resolve(candidate, "bunfig.toml"))) return candidate;
+    if (existsSync(resolve(candidate, "server.js")) || existsSync(resolve(candidate, "bunfig.toml"))) return candidate;
   }
   return undefined;
 }
 
 export function resolveWebappServerEntry(moduleDir = dirname(fileURLToPath(import.meta.url))): string {
   const candidates = [
+    resolve(moduleDir, "../webapp/server.js"),
     resolve(moduleDir, "../../webapp/src/index.ts"),
     resolve(moduleDir, "../webapp/src/index.ts"),
   ];
@@ -257,7 +318,14 @@ export function resolveWebappServerEntry(moduleDir = dirname(fileURLToPath(impor
 
 async function daemonRun(): Promise<void> {
   ensureDirs();
-  writeFileSync(PID_FILE, String(process.pid), { mode: 0o600 });
+  const token = randomUUID();
+  const identityServer = await startDaemonIdentityServer(DAEMON_SOCKET, token);
+  const record: DaemonRecord = {
+    pid: process.pid,
+    token,
+    startedAt: new Date().toISOString(),
+  };
+  writeFileSync(PID_FILE, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   chmodSync(PID_FILE, 0o600);
   appendDaemonLog("Daemon starting...");
 
@@ -269,8 +337,11 @@ async function daemonRun(): Promise<void> {
     shuttingDown = true;
     appendDaemonLog("Daemon shutting down...");
     unregisterDaemonSpotifyInstance(instance);
-    await instance.stop();
-    try { unlinkSync(PID_FILE); } catch {}
+    try { await instance.stop(); } catch (error) {
+      appendDaemonLog(`Spotify shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try { await identityServer.close(); } catch {}
+    removePidRecord(record);
   };
 
   process.on("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
@@ -287,8 +358,8 @@ async function daemonRun(): Promise<void> {
     appendDaemonLog(`Web UI/API ready at ${getHttpOrigin(httpConfig)}.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    appendDaemonLog(`Failed to start Spotify instance: ${message}`);
-    try { unlinkSync(PID_FILE); } catch {}
+    appendDaemonLog(`Daemon startup failed: ${message}`);
+    await shutdown();
     throw error;
   }
 

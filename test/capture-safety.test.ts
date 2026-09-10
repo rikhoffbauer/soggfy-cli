@@ -4,7 +4,7 @@ import { join } from "path";
 
 const root = join(import.meta.dir, "..");
 const cliCapture = readFileSync(join(root, "src/core/capture.ts"), "utf8");
-const webCapture = readFileSync(join(root, "webapp/src/index.ts"), "utf8");
+const webCapture = readFileSync(join(root, "webapp/src/server/spotify-instance.ts"), "utf8");
 const auth = readFileSync(join(root, "src/commands/auth.ts"), "utf8");
 
 test("capture clients fail closed when target playback cannot be confirmed", () => {

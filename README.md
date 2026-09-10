@@ -160,7 +160,7 @@ soggfy daemon start
 soggfy lyrics --format lrc spotify:track:3z8h0TU7ReDPLIbEnYhWZb
 ```
 
-The web layer uses the daemon's live `SpotifyInstance` through an internal in-process API; it does not launch a second Spotify worker. UI and API both use `http://127.0.0.1:8085` by default. Set `SOGGFY_HOST` or `SOGGFY_PORT` before starting/restarting the daemon to override the bind address.
+The web layer uses the daemon's live `SpotifyInstance` through an internal in-process API; it does not launch a second Spotify worker. UI and API both use `http://127.0.0.1:8085` by default. Set `SOGGFY_HOST` or `SOGGFY_PORT` before starting/restarting the daemon to override the bind address. Non-loopback binds require `SOGGFY_API_TOKEN`; API clients send it as a bearer token. Wildcard CORS is disabled. Completed web downloads are restored from sidecars after daemon restart, and terminal history is bounded by `SOGGFY_HISTORY_LIMIT` (default `250`).
 
 The daemon-owned patched Spotify copy runs as a macOS background-only application. It has no Dock/app-switcher presence and the injected payload suppresses window ordering/activation, so capture runs without a visible Spotify GUI. The normal `/Applications/Spotify.app` remains unchanged and is still used when interactive login is required.
 

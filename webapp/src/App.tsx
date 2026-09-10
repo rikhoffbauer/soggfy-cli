@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IconBook2, IconCheck, IconLoader2 } from "@tabler/icons-react";
 import { AppSidebar } from "./components/soggfy/AppSidebar";
 import { DiagnosticsPanel } from "./components/soggfy/DiagnosticsPanel";
@@ -20,7 +20,7 @@ import {
 } from "./components/soggfy/workspace-model";
 import logo from "./logo.png";
 
-const EMPTY_SNAPSHOT: JobsSnapshot = { jobs: [], queue: [], instances: [] };
+const EMPTY_SNAPSHOT: JobsSnapshot = { revision: 0, jobs: [], queue: [], instances: [] };
 const DOCS_URL = "https://rikhoffbauer.github.io/soggfy-cli/";
 const SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
 
@@ -52,25 +52,37 @@ export function App() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [playerJobId, setPlayerJobId] = useState<string | null>(null);
+  const latestSnapshotRevision = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       try {
-        const [jobsResponse, healthResponse] = await Promise.all([
-          fetch("/api/jobs"),
-          fetch("/api/health"),
-        ]);
+        const jobsResponse = await fetch(`/api/jobs?since=${latestSnapshotRevision.current}`);
         if (cancelled) return;
-        if (jobsResponse.ok) setSnapshot(await jobsResponse.json());
-        if (healthResponse.ok) setHealth(await healthResponse.json());
+        if (jobsResponse.status !== 204 && jobsResponse.ok) {
+          const incoming = await jobsResponse.json() as JobsSnapshot;
+          if (incoming.revision >= latestSnapshotRevision.current) {
+            latestSnapshotRevision.current = incoming.revision;
+            setSnapshot(incoming);
+          }
+        }
+      } catch {}
+    };
+    const pollHealth = async () => {
+      try {
+        const response = await fetch("/api/health");
+        if (!cancelled && response.ok) setHealth(await response.json());
       } catch {}
     };
     void poll();
-    const timer = window.setInterval(poll, 1000);
+    void pollHealth();
+    const jobsTimer = window.setInterval(poll, 1000);
+    const healthTimer = window.setInterval(pollHealth, 5000);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearInterval(jobsTimer);
+      window.clearInterval(healthTimer);
     };
   }, []);
 
@@ -184,8 +196,11 @@ export function App() {
       const data = await response.json();
       if (!response.ok || !data.success || !data.job?.id) throw new Error(data.error || "Failed to start playback");
       setPlayerJobId(data.job.id);
+      const revision = Number(data.revision || 0);
+      latestSnapshotRevision.current = Math.max(latestSnapshotRevision.current, revision);
       setSnapshot((current) => ({
         ...current,
+        revision: Math.max(current.revision, revision),
         jobs: current.jobs.some((job) => job.id === data.job.id)
           ? current.jobs.map((job) => job.id === data.job.id ? data.job : job)
           : [...current.jobs, data.job],

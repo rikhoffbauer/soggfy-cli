@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { log } from "../core/log";
 import { assertSupportedSpotifyBundle } from "../core/spotify-runtime";
+import { replaceDirectoryAtomically } from "../core/atomic-directory";
 import {
   SOGGFY_HOME,
   WORKSPACE_DIR,
@@ -111,100 +112,87 @@ export async function installCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Step 3: Create patched workspace
-  log.step(3, totalSteps, "Creating patched workspace app");
-
-  if (existsSync(PATCHED_APP)) {
-    Bun.spawnSync(["rm", "-rf", PATCHED_APP]);
-  }
+  // Steps 3-6 are transactional: build and verify a staged app before replacing the current workspace.
+  const stagedApp = join(WORKSPACE_DIR, `.PatchedSpotify.app.staging-${process.pid}`);
+  rmSync(stagedApp, { recursive: true, force: true });
   mkdirSync(WORKSPACE_DIR, { recursive: true });
 
-  log.info("Cloning Spotify.app...");
-  run(["ditto", SPOTIFY_APP, PATCHED_APP], "ditto copy Spotify.app");
+  try {
+    log.step(3, totalSteps, "Creating staged patched workspace app");
+    log.info("Cloning Spotify.app into staging...");
+    run(["ditto", SPOTIFY_APP, stagedApp], "ditto copy Spotify.app");
 
-  // The patched runtime is daemon-owned and must remain faceless. Background-only
-  // prevents Launch Services/AppKit from exposing it in the Dock or app switcher.
-  const infoPlist = join(PATCHED_APP, "Contents/Info.plist");
-  Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSUIElement", infoPlist], {
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSBackgroundOnly", infoPlist], {
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  run(
-    ["/usr/libexec/PlistBuddy", "-c", "Add :LSBackgroundOnly bool true", infoPlist],
-    "configure patched Spotify as background-only",
-  );
+    const infoPlist = join(stagedApp, "Contents/Info.plist");
+    Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSUIElement", infoPlist], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Delete :LSBackgroundOnly", infoPlist], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    run(
+      ["/usr/libexec/PlistBuddy", "-c", "Add :LSBackgroundOnly bool true", infoPlist],
+      "configure patched Spotify as background-only",
+    );
 
-  // Step 4: Strip and re-sign
-  log.step(4, totalSteps, "Stripping signatures and ad-hoc signing");
+    log.step(4, totalSteps, "Stripping signatures and ad-hoc signing");
+    const signTargets = [
+      join(stagedApp, "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework"),
+      join(stagedApp, "Contents/MacOS/Spotify"),
+    ];
+    for (const target of signTargets) {
+      if (existsSync(target)) {
+        run(["codesign", "-f", "-s", "-", target], `codesign ${target}`);
+        log.ok(`Signed: ${target.split("/").pop()}`);
+      } else {
+        log.warn(`Signature target missing: ${target}`);
+      }
+    }
 
-  const signTargets = [
-    join(PATCHED_APP, "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework"),
-    join(PATCHED_APP, "Contents/MacOS/Spotify"),
-  ];
+    log.step(5, totalSteps, "Building payload (libsoggfy.dylib)");
+    const repoPayloadDir = join(import.meta.dir, "..", "..", "soggfy-macos");
+    const bundledPrebuiltDylib = join(import.meta.dir, "..", "payload", "libsoggfy.dylib");
+    const hasPayloadSource = existsSync(join(repoPayloadDir, "CMakeLists.txt"));
+    let dylibPath = "";
 
-  for (const target of signTargets) {
-    if (existsSync(target)) {
-      run(["codesign", "-f", "-s", "-", target], `codesign ${target}`);
-      log.ok(`Signed: ${target.split("/").pop()}`);
+    if (!hasPayloadSource && !rebuild && existsSync(bundledPrebuiltDylib)) {
+      log.ok("Using bundled prebuilt payload (libsoggfy.dylib)");
+      dylibPath = bundledPrebuiltDylib;
     } else {
-      log.warn(`Signature target missing: ${target}`);
+      let payloadSourceDir = PAYLOAD_SOURCE_DIR;
+      if (hasPayloadSource) {
+        payloadSourceDir = repoPayloadDir;
+      } else if (!existsSync(PAYLOAD_SOURCE_DIR)) {
+        throw new Error("Payload source not found. Cannot build libsoggfy.dylib.");
+      }
+
+      const buildDir = join(payloadSourceDir, "build");
+      if (rebuild && existsSync(buildDir)) rmSync(buildDir, { recursive: true, force: true });
+      log.info("Running cmake...");
+      run(["cmake", "-S", ".", "-B", "build"], "cmake configure", { cwd: payloadSourceDir });
+      log.info("Building...");
+      run(["cmake", "--build", "build"], "cmake build", { cwd: payloadSourceDir });
+      dylibPath = join(buildDir, "libsoggfy.dylib");
+      if (!existsSync(dylibPath)) {
+        throw new Error("Build succeeded but libsoggfy.dylib not found.");
+      }
     }
+
+    log.step(6, totalSteps, "Installing payload into staged app");
+    const destDir = join(stagedApp, "Contents/MacOS");
+    mkdirSync(destDir, { recursive: true });
+    const destDylib = join(destDir, "libsoggfy.dylib");
+    run(["cp", dylibPath, destDylib], "copy dylib");
+    run(["codesign", "-f", "-s", "-", destDylib], "sign dylib");
+    run(["codesign", "-f", "-s", "-", "--deep", stagedApp], "sign patched Spotify bundle");
+    run(["codesign", "--verify", "--deep", "--strict", stagedApp], "verify patched Spotify bundle");
+    log.ok("Staged payload installed, signed, and verified");
+
+    replaceDirectoryAtomically(stagedApp, PATCHED_APP);
+  } finally {
+    rmSync(stagedApp, { recursive: true, force: true });
   }
-
-  // Step 5: Build payload
-  log.step(5, totalSteps, "Building payload (libsoggfy.dylib)");
-
-  const repoPayloadDir = join(import.meta.dir, "..", "..", "soggfy-macos");
-  const bundledPrebuiltDylib = join(import.meta.dir, "..", "payload", "libsoggfy.dylib");
-  const hasPayloadSource = existsSync(join(repoPayloadDir, "CMakeLists.txt"));
-
-  let dylibPath = "";
-
-  if (!hasPayloadSource && !rebuild && existsSync(bundledPrebuiltDylib)) {
-    log.ok("Using bundled prebuilt payload (libsoggfy.dylib)");
-    dylibPath = bundledPrebuiltDylib;
-  } else {
-    let payloadSourceDir = PAYLOAD_SOURCE_DIR;
-    if (hasPayloadSource) {
-      payloadSourceDir = repoPayloadDir;
-    } else if (!existsSync(PAYLOAD_SOURCE_DIR)) {
-      log.error("Payload source not found. Cannot build libsoggfy.dylib.");
-      process.exit(1);
-    }
-
-    const buildDir = join(payloadSourceDir, "build");
-    if (rebuild && existsSync(buildDir)) {
-      Bun.spawnSync(["rm", "-rf", buildDir]);
-    }
-
-    log.info("Running cmake...");
-    run(["cmake", "-S", ".", "-B", "build"], "cmake configure", { cwd: payloadSourceDir });
-
-    log.info("Building...");
-    run(["cmake", "--build", "build"], "cmake build", { cwd: payloadSourceDir });
-
-    dylibPath = join(buildDir, "libsoggfy.dylib");
-    if (!existsSync(dylibPath)) {
-      log.error("Build succeeded but libsoggfy.dylib not found.");
-      process.exit(1);
-    }
-  }
-
-  // Step 6: Copy payload into patched app
-  log.step(6, totalSteps, "Installing payload into patched app");
-
-  const destDir = join(PATCHED_APP, "Contents/MacOS");
-  mkdirSync(destDir, { recursive: true });
-  const destDylib = join(destDir, "libsoggfy.dylib");
-  run(["cp", dylibPath, destDylib], "copy dylib");
-  run(["codesign", "-f", "-s", "-", destDylib], "sign dylib");
-  run(["codesign", "-f", "-s", "-", "--deep", PATCHED_APP], "sign patched Spotify bundle");
-  run(["codesign", "--verify", "--deep", "--strict", PATCHED_APP], "verify patched Spotify bundle");
-  log.ok("Payload installed, signed, and verified");
 
   log.header("Installation Complete");
   log.ok("Patched app ready at: " + PATCHED_APP);

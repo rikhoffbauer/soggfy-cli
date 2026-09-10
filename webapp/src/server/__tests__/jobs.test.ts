@@ -60,3 +60,64 @@ test("priority interruption requeues the same job without spending an attempt", 
   expect(job.error).toBeUndefined();
   expect(job.priorityInterrupted).toBeUndefined();
 });
+
+import { afterEach } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+const historyRoots: string[] = [];
+afterEach(() => historyRoots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+
+test("job registry hydrates completed downloads from sidecars", () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-job-history-"));
+  historyRoots.push(root);
+  const audio = join(root, `${trackId}.mp3`);
+  writeFileSync(audio, "audio");
+  writeFileSync(`${audio}.json`, JSON.stringify({
+    jobId: "persisted-job",
+    trackId,
+    state: "completed",
+    outputFormat: "mp3",
+    savedPath: audio,
+    sizeBytes: 5,
+    completedAt: "2026-09-10T08:00:00.000Z",
+    metadata: { title: "Persisted", artist: "Artist" },
+  }));
+  const registry = new JobRegistry();
+  registry.hydrateFromOutputDir(root);
+  expect(registry.findByTrack(trackId)).toMatchObject({
+    id: "persisted-job",
+    state: "completed",
+    savedPath: audio,
+  });
+});
+
+test("job registry bounds terminal history while retaining active work", () => {
+  const registry = new JobRegistry({ maxTerminalJobs: 2 });
+  const active = registry.create("1111111111111111111111");
+  for (const id of [
+    "2222222222222222222222",
+    "3333333333333333333333",
+    "4444444444444444444444",
+  ]) {
+    const job = registry.create(id);
+    registry.complete(job, { savedPath: `/tmp/${id}.mp3`, outputFormat: "mp3" });
+  }
+  const jobs = registry.all();
+  expect(jobs.some((job) => job.id === active.id)).toBe(true);
+  expect(jobs.filter((job) => job.state === "completed")).toHaveLength(2);
+});
+
+test("job registry revision increases whenever client-visible state changes", () => {
+  const registry = new JobRegistry();
+  const initial = registry.revision;
+  const job = registry.create(trackId);
+  const created = registry.revision;
+  registry.patch(job, { bytesCaptured: 10 });
+  const patched = registry.revision;
+  registry.complete(job);
+  expect(created).toBeGreaterThan(initial);
+  expect(patched).toBeGreaterThan(created);
+  expect(registry.revision).toBeGreaterThan(patched);
+});

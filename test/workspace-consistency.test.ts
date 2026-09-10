@@ -5,7 +5,8 @@ import { join } from "path";
 const root = join(import.meta.dir, "..");
 const setup = readFileSync(join(root, "setup.sh"), "utf8");
 const doctor = readFileSync(join(root, "scripts/doctor.ts"), "utf8");
-const webapp = readFileSync(join(root, "webapp/src/index.ts"), "utf8");
+const runtimeConfig = readFileSync(join(root, "webapp/src/server/runtime-config.ts"), "utf8");
+const instanceSource = readFileSync(join(root, "webapp/src/server/spotify-instance.ts"), "utf8");
 
 test("setup uses the same ~/.soggfy workspace as the CLI", () => {
   expect(setup).toContain('SOGGFY_HOME="${SOGGFY_HOME:-$HOME/.soggfy}"');
@@ -21,19 +22,19 @@ test("doctor consumes shared runtime paths and current dependencies", () => {
 });
 
 
-test("setup terminates only the login process tree it launches", () => {
-  expect(setup).toContain('SPOTIFY_LOGIN_PID=$!');
-  expect(setup).toContain('terminate_process_tree "$SPOTIFY_LOGIN_PID"');
+test("setup delegates login capture to the isolated auth command", () => {
+  expect(setup).toContain('bun "$ROOT_DIR/src/cli.ts" auth login');
   expect(setup).not.toContain('killall Spotify');
+  expect(setup).not.toContain('rm -rf "$PATCHED_APP"');
 });
 
 
 test("webapp runtime state is scoped under the shared SOGGFY_HOME", () => {
-  expect(webapp).toContain('const RUNTIME_DIR = join(SOGGFY_HOME, "runtime")');
-  expect(webapp).toContain('this.socketPath = join(RUNTIME_DIR');
-  expect(webapp).toContain('this.savePath = join(RUNTIME_DIR');
-  expect(webapp).not.toContain('/tmp/soggfy_instance_');
-  expect(webapp).not.toContain('/tmp/Soggfy_instance_');
+  expect(runtimeConfig).toContain('RUNTIME_DIR = join(SOGGFY_HOME, "runtime")');
+  expect(instanceSource).toContain('this.socketPath = join(RUNTIME_DIR');
+  expect(instanceSource).toContain('this.savePath = join(RUNTIME_DIR');
+  expect(instanceSource).not.toContain('/tmp/soggfy_instance_');
+  expect(instanceSource).not.toContain('/tmp/Soggfy_instance_');
 });
 
 
