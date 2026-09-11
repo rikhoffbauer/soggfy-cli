@@ -1,11 +1,12 @@
 import { existsSync, statSync } from "fs";
 import { join } from "path";
-import { sendIPC } from "./ipc";
+import { sendIPC as rawSendIPC } from "./ipc";
 import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "./capture-control";
 import { log } from "./log";
 import { fetchTrackMetadata, type TrackMetadata } from "./metadata";
 import { validateAudioFile } from "./media";
 import { captureMaxWaitMs, captureMonitorDecision, PlaybackProgressMonitor } from "./capture-monitor";
+import { CaptureTraceRecorder } from "./capture-trace";
 
 export interface CaptureResult {
   trackId: string;
@@ -20,15 +21,29 @@ export async function captureTrack(
   savePath: string,
   trackId: string,
 ): Promise<CaptureResult> {
+  const trace = new CaptureTraceRecorder(trackId);
+  const tracedSend = async (
+    command: string,
+    options?: Parameters<typeof rawSendIPC>[2],
+  ): Promise<string> => {
+    trace.command(command);
+    const response = await rawSendIPC(socketPath, command, options);
+    trace.response(command, response);
+    return response;
+  };
+  trace.record({ type: "phase", phase: "prepare" });
+  log.info(`Capture trace: ${trace.path}`);
+
   // Fetch metadata in parallel
   const metadataPromise = fetchTrackMetadata(trackId);
 
   // Reset and prepare
-  await sendIPC(socketPath, `reset_track ${trackId}`);
-  await sendIPC(socketPath, `set_track ${trackId}`);
+  await tracedSend(`reset_track ${trackId}`);
+  await tracedSend(`set_track ${trackId}`);
 
   // Tell Spotify to play the track
-  await requestTrackPlayback((command) => sendIPC(socketPath, command), trackId);
+  trace.record({ type: "phase", phase: "awaiting_playback" });
+  await requestTrackPlayback((command) => tracedSend(command), trackId);
   log.info(`Playback started for ${trackId}`);
 
   // Wait for the correct track to be confirmed playing
@@ -36,7 +51,8 @@ export async function captureTrack(
   for (let i = 0; i < 30; i++) {
     await Bun.sleep(500);
     try {
-      const playingRaw = await sendIPC(socketPath, "get_playing").catch(() => "");
+      const playingRaw = await tracedSend("get_playing").catch(() => "");
+      trace.record({ type: "playback", raw: playingRaw });
       if (parsePlaybackConfirmation(playingRaw, trackId).confirmed) {
         trackConfirmed = true;
         break;
@@ -49,15 +65,18 @@ export async function captureTrack(
   }
 
   if (!trackConfirmed) {
-    await sendIPC(socketPath, "pause").catch(() => {});
-    throw new Error(`Target track ${trackId} was not confirmed playing`);
+    trace.record({ type: "timeout", prerequisite: "target playback confirmation", elapsedMs: 15_000 });
+    await tracedSend("pause").catch(() => {});
+    throw new Error(`Target track ${trackId} was not confirmed playing; trace: ${trace.path}`);
   }
 
+  trace.record({ type: "phase", phase: "awaiting_capture" });
   // Wait for capture to start
   let status = "idle";
   for (let i = 0; i < 50; i++) {
     await Bun.sleep(500);
-    status = await sendIPC(socketPath, `get_status ${trackId}`, { retries: 1 }).catch(() => "idle");
+    status = await tracedSend(`get_status ${trackId}`, { retries: 1 }).catch(() => "idle");
+    trace.record({ type: "status", status });
     if (status === "downloading" || status === "completed") break;
 
     // Do not re-send `play` after the target is confirmed. Spotify treats that
@@ -66,15 +85,17 @@ export async function captureTrack(
   }
 
   if (status !== "downloading" && status !== "completed") {
-    await sendIPC(socketPath, "pause").catch(() => {});
-    throw new Error("Audio interception timed out before capture started");
+    trace.record({ type: "timeout", prerequisite: "audio interception", elapsedMs: 25_000 });
+    await tracedSend("pause").catch(() => {});
+    throw new Error(`Audio interception timed out before capture started; trace: ${trace.path}`);
   }
+  trace.record({ type: "phase", phase: "capturing" });
 
   // Set duration limit if we have metadata
   const metadata = await metadataPromise;
   const durationMs = metadata.durationMs;
   if (durationMs && durationMs > 0) {
-    await sendIPC(socketPath, `set_duration ${trackId} ${durationMs}`).catch(() => {});
+    await tracedSend(`set_duration ${trackId} ${durationMs}`).catch(() => {});
   }
 
   log.info(`Capturing audio${durationMs ? ` (~${Math.round(durationMs / 1000)}s)` : ""}...`);
@@ -89,18 +110,21 @@ export async function captureTrack(
 
   while (captureMonitorDecision(status, Date.now() - started, maxCaptureMs) === "continue") {
     await Bun.sleep(250);
-    const newStatus = await sendIPC(socketPath, `get_status ${trackId}`, { retries: 2, timeoutMs: 1500 }).catch(() => "ipc_lost");
+    const newStatus = await tracedSend(`get_status ${trackId}`, { retries: 2, timeoutMs: 1500 }).catch(() => "ipc_lost");
     if (newStatus === "ipc_lost") {
       if (++ipcLossTicks >= 12) throw new Error("IPC lost during capture");
     } else {
       ipcLossTicks = 0;
       status = newStatus;
+      trace.record({ type: "status", status });
       if (status !== "completed") {
         try {
-          playback.observe(await sendIPC(socketPath, "get_playing", { retries: 1 }).catch(() => "{}"));
+          const playbackRaw = await tracedSend("get_playing", { retries: 1 }).catch(() => "{}");
+          trace.record({ type: "playback", raw: playbackRaw });
+          playback.observe(playbackRaw);
         } catch (error) {
-          await sendIPC(socketPath, `cancel_track ${trackId}`).catch(() => {});
-          await sendIPC(socketPath, "pause").catch(() => {});
+          await tracedSend(`cancel_track ${trackId}`).catch(() => {});
+          await tracedSend( "pause").catch(() => {});
           throw error;
         }
       }
@@ -109,6 +133,8 @@ export async function captureTrack(
     const currentPath = existsSync(oggPath) ? oggPath : wavPath;
     const isOgg = currentPath.endsWith(".ogg");
     const bytes = existsSync(currentPath) ? statSync(currentPath).size : 0;
+    trace.record({ type: "bytes", path: currentPath, bytes });
+    playback.observeCaptureBytes(bytes);
 
     let expectedBytes = 0;
     if (durationMs) {
@@ -122,19 +148,21 @@ export async function captureTrack(
   }
 
   // Finalize
+  trace.record({ type: "phase", phase: "finalizing" });
   if (status !== "completed") {
-    await sendIPC(socketPath, `finish_track ${trackId}`).catch(() => {});
+    await tracedSend(`finish_track ${trackId}`).catch(() => {});
     const completed = await waitForTrackCompletion(
-      (command) => sendIPC(socketPath, command, { retries: 1, timeoutMs: 1000 }),
+      (command) => tracedSend(command, { retries: 1, timeoutMs: 1000 }),
       trackId,
     );
     if (!completed) {
-      await sendIPC(socketPath, "pause").catch(() => {});
-      throw new Error(`Capture finalization timed out for ${trackId}`);
+      trace.record({ type: "timeout", prerequisite: "capture finalization", elapsedMs: 5_000 });
+      await tracedSend("pause").catch(() => {});
+      throw new Error(`Capture finalization timed out for ${trackId}; trace: ${trace.path}`);
     }
     status = "completed";
   }
-  await sendIPC(socketPath, "pause").catch(() => {});
+  await tracedSend( "pause").catch(() => {});
 
   const finalPath = existsSync(oggPath) ? oggPath : wavPath;
   if (!existsSync(finalPath)) {
@@ -148,6 +176,7 @@ export async function captureTrack(
       `Captured audio failed validation (${validation.warnings.join(", ")}); preserved at ${finalPath}`,
     );
   }
+  trace.record({ type: "phase", phase: "completed" });
   log.ok(`Captured ${(bytesWritten / 1024 / 1024).toFixed(1)} MB of validated audio`);
 
   return {

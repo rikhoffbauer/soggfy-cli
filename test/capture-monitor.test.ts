@@ -19,6 +19,22 @@ test("playback monitor fails a paused or frozen player without finalizing bytes"
   expect(() => new PlaybackProgressMonitor("track", 0).observe(snapshot(0, "paused"), 31_000)).toThrow("paused");
 });
 
+test("capture byte progress keeps a reset player alive", () => {
+  const monitor = new PlaybackProgressMonitor("track", 0);
+  const snapshot = (position: number, state = "playing") => JSON.stringify({
+    uri: "spotify:track:track",
+    state,
+    position,
+  });
+
+  monitor.observe(snapshot(20), 20_000);
+  monitor.observeCaptureBytes(1024, 29_000);
+  expect(() => monitor.observe(snapshot(0, "paused"), 31_000)).not.toThrow();
+  monitor.observeCaptureBytes(2048, 50_000);
+  expect(() => monitor.observe(snapshot(0, "paused"), 55_000)).not.toThrow();
+  expect(() => monitor.observe(snapshot(0, "paused"), 81_000)).toThrow("paused");
+});
+
 test("playback monitor rejects stale target position and invalid telemetry", () => {
   const monitor = new PlaybackProgressMonitor("target", 0);
   expect(() => monitor.observe(JSON.stringify({ uri: "spotify:track:other", state: "playing", position: 99 }), 31_000)).toThrow("target");

@@ -103,6 +103,11 @@ async function main(): Promise<void> {
       await fingerprintCommand(subArgs);
       break;
     }
+    case "trace": {
+      const { traceCommand } = await import("./commands/trace");
+      await traceCommand(subArgs);
+      break;
+    }
     default:
       log.error(`Unknown command: ${command}`);
       printUsage();

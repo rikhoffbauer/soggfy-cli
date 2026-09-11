@@ -4,6 +4,7 @@ import lyricsHelp from "../../docs/cli/lyrics.md" with { type: "text" };
 import compatHelp from "../../docs/cli/compat.md" with { type: "text" };
 import authHelp from "../../docs/cli/auth.md" with { type: "text" };
 import daemonHelp from "../../docs/cli/daemon.md" with { type: "text" };
+import traceHelp from "../../docs/cli/trace.md" with { type: "text" };
 import installHelp from "../../docs/cli/install.md" with { type: "text" };
 import fingerprintHelp from "../../docs/cli/fingerprint.md" with { type: "text" };
 import scriptingHelp from "../../docs/guides/scripting.md" with { type: "text" };
@@ -18,6 +19,7 @@ const TOPICS: Readonly<Record<string, string>> = {
   compat: compatHelp,
   auth: authHelp,
   daemon: daemonHelp,
+  trace: traceHelp,
   install: installHelp,
   fingerprint: fingerprintHelp,
   scripting: scriptingHelp,

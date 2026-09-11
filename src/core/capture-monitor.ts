@@ -16,10 +16,18 @@ export function captureMonitorDecision(
 
 export class PlaybackProgressMonitor {
   private lastPosition = -1;
+  private lastBytes = 0;
   private lastAdvance: number;
 
   constructor(private readonly trackId: string, now = Date.now()) {
     this.lastAdvance = now;
+  }
+
+  observeCaptureBytes(bytes: number, now = Date.now()): void {
+    if (bytes > this.lastBytes) {
+      this.lastBytes = bytes;
+      this.lastAdvance = now;
+    }
   }
 
   observe(response: string, now = Date.now()): void {

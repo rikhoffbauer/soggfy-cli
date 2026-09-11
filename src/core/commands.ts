@@ -14,6 +14,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { name: "install", description: "Install dependencies and prepare the patched Spotify app" },
   { name: "auth", usage: "<action>", description: "Manage Spotify authentication state" },
   { name: "fingerprint", usage: "<file>", description: "Generate a Chromaprint audio fingerprint" },
+  { name: "trace", usage: "replay <file>", description: "Replay and validate a capture JSONL trace" },
   { name: "help", usage: "[topic]", description: "Read the embedded Markdown documentation" },
 ];
 

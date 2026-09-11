@@ -26,6 +26,7 @@ export default defineConfig({
           { text: "compat", link: "/cli/compat" },
           { text: "auth", link: "/cli/auth" },
           { text: "daemon", link: "/cli/daemon" },
+          { text: "trace", link: "/cli/trace" },
           { text: "install", link: "/cli/install" },
           { text: "fingerprint", link: "/cli/fingerprint" },
         ],
