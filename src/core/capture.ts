@@ -124,7 +124,7 @@ export async function captureTrack(
           playback.observe(playbackRaw);
         } catch (error) {
           await tracedSend(`cancel_track ${trackId}`).catch(() => {});
-          await tracedSend( "pause").catch(() => {});
+          await tracedSend("pause").catch(() => {});
           throw error;
         }
       }
@@ -162,7 +162,7 @@ export async function captureTrack(
     }
     status = "completed";
   }
-  await tracedSend( "pause").catch(() => {});
+  await tracedSend("pause").catch(() => {});
 
   const finalPath = existsSync(oggPath) ? oggPath : wavPath;
   if (!existsSync(finalPath)) {
