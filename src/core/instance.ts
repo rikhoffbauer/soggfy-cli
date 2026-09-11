@@ -5,6 +5,7 @@ import { sendIPC, ping } from "./ipc";
 import { log } from "./log";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "./spotify-runtime";
 import { migrateOfficialSpotifyAuthOnce } from "./auth-migration";
+import { findOrphanSpotifyOwner, retireOrphanSpotifyOwner } from "./daemon-owner";
 import {
   PATCHED_APP,
   PROFILES_DIR,
@@ -54,6 +55,12 @@ export class SpotifyInstance {
       throw new Error(`Payload dylib not found: ${dylibPath}. Run 'soggfy install' first.`);
     }
     if (this.enforceSupportedVersion) assertSupportedSpotifyBundle(this.appPath);
+
+    const orphan = findOrphanSpotifyOwner(binaryPath, this.profileDir);
+    if (orphan) {
+      log.warn(`Retiring orphaned Soggfy Spotify process ${orphan.spotifyPid} before replacement launch.`);
+      await retireOrphanSpotifyOwner(orphan);
+    }
 
     // Prepare directories
     mkdirSync(this.savePath, { recursive: true, mode: 0o700 });

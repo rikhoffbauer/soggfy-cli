@@ -33,3 +33,11 @@ test("SpotifyInstance does not override Spotify's cache path", () => {
   expect(source).not.toContain("--cache-path=");
   expect(source).toContain("--user-data-dir=");
 });
+
+
+test("SpotifyInstance retires an exact orphaned runtime before spawning a replacement", () => {
+  const retire = source.indexOf("retireOrphanSpotifyOwner");
+  const spawn = source.indexOf("this.process = spawn");
+  expect(retire).toBeGreaterThan(-1);
+  expect(spawn).toBeGreaterThan(retire);
+});

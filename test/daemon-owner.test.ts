@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import {
   findDaemonOwnerFromSnapshots,
   findLegacyDaemonOwnerFromSnapshots,
+  findOrphanSpotifyOwnerFromSnapshots,
   retireLegacyDaemonOwner,
+  retireOrphanSpotifyOwner,
 } from "../src/core/daemon-owner";
 
 const socket = "/tmp/soggfy_cli.sock";
@@ -79,6 +81,46 @@ test("legacy daemon retirement refuses a reused PID with a different fingerprint
       startedAt: "Thu Sep 10 13:47:01 2026",
       birthId: "1789047328:000001",
       command: "/usr/bin/python3 unrelated.py",
+    }),
+    terminate: async () => { terminated = true; },
+  })).rejects.toThrow("identity changed");
+  expect(terminated).toBe(false);
+});
+
+
+test("identifies only an orphaned Soggfy Spotify root for the exact profile", () => {
+  const binary = "/Users/user/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify";
+  const profile = "/Users/user/.soggfy/workspace/profiles/cli_instance";
+  const ps = [
+    `8061 1 ${binary} --disable-gpu --user-data-dir=${profile}`,
+    `9000 7000 ${binary} --user-data-dir=${profile}`,
+    `9100 1 ${binary} --user-data-dir=/tmp/compat-profile`,
+    `9200 1 /Applications/Spotify.app/Contents/MacOS/Spotify --user-data-dir=${profile}`,
+  ].join("\n");
+
+  expect(findOrphanSpotifyOwnerFromSnapshots(binary, profile, ps)).toBe(8061);
+  expect(findOrphanSpotifyOwnerFromSnapshots(binary, "/tmp/other-profile", ps)).toBeNull();
+});
+
+test("orphan Spotify retirement refuses PID reuse before signaling", async () => {
+  const binary = "/Users/user/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify";
+  const profile = "/Users/user/.soggfy/workspace/profiles/cli_instance";
+  const owner = {
+    spotifyPid: 8061,
+    binaryPath: binary,
+    profileDir: profile,
+    spotifyFingerprint: {
+      startedAt: "Thu Sep 11 02:12:14 2026",
+      birthId: "1789092734:111111",
+      command: `${binary} --user-data-dir=${profile}`,
+    },
+  };
+  let terminated = false;
+  await expect(retireOrphanSpotifyOwner(owner, {
+    readFingerprint: () => ({
+      startedAt: "Thu Sep 11 02:12:14 2026",
+      birthId: "1789092734:222222",
+      command: `${binary} --user-data-dir=${profile}`,
     }),
     terminate: async () => { terminated = true; },
   })).rejects.toThrow("identity changed");

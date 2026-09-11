@@ -18,8 +18,9 @@ Spotify compatibility is exact and registry-backed. Production launch accepts on
 6. Ogg pages arriving before target confirmation are retained only in a bounded generation-scoped pre-roll. Once the requested URI is confirmed, the matching Vorbis BOS/header pages are promoted and the Ogg path atomically claims `.capture-owner`. Ads, non-target playback, resets, and overflow discard pre-roll. Only the elected process may append Ogg pages or enable accelerated decode mutation.
 7. A shared status/control protocol (`.status`, `.duration`, `.finish`, `.cancel`) lets the IPC-owning process and writer process coordinate even when they are different Spotify processes.
 8. Capture finishes on Ogg EOS, explicit `finish_track`, duration controls, or cancellation. Byte stagnation is never treated as EOS; a 30-second playback-position stall fails the job. Clients wait for shared `completed` instead of sleeping for a fixed delay.
-9. `validateAudioFile` checks the container with ffprobe, compares duration when known, decodes signal through ffmpeg, and rejects malformed, silent, or mostly-silent output.
-10. The CLI streams/transcodes only validated media. The webapp transcodes validated captures to MP3 when possible and preserves the validated Ogg/WAV container if transcode fails.
+9. Daemon identity replies tolerate readiness clients disconnecting during synchronous startup work. A restart also retires only an orphaned Soggfy-owned Spotify root that matches the exact patched binary/profile and a kernel-birth process fingerprint before launching its replacement.
+10. `validateAudioFile` checks the container with ffprobe, compares duration when known, decodes signal through ffmpeg, and rejects malformed, silent, or mostly-silent output.
+11. The CLI streams/transcodes only validated media. The webapp transcodes validated captures to MP3 when possible and preserves the validated Ogg/WAV container if transcode fails.
 
 ## Native ownership and gating
 
@@ -106,7 +107,7 @@ The 2026-09-10 playback repair and four-track evidence are recorded in [Playback
 
 Automated verification on 2026-09-08:
 
-- `bun test`: 252 passed, 0 failed.
+- `bun test`: 256 passed, 0 failed.
 - root TypeScript: passed.
 - native StateManager/CapturePolicy fixture: passed.
 - native dylib build: passed.

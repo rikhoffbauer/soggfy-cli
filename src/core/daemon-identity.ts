@@ -69,7 +69,13 @@ export async function startDaemonIdentityServer(
 
   const identity: DaemonIdentity = { token, ...(httpOrigin ? { httpOrigin } : {}) };
   const payload = `${IDENTITY_V1_PREFIX}${JSON.stringify(identity)}\n`;
-  const server = createServer((socket) => socket.end(payload));
+  const server = createServer((socket) => {
+    // Readiness probes may time out while daemon startup is synchronously
+    // preparing Spotify state. A peer that disconnects before this callback
+    // writes its reply must not crash the daemon with an unhandled EPIPE.
+    socket.on("error", () => socket.destroy());
+    socket.end(payload);
+  });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(socketPath, resolve);

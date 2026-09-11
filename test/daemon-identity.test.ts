@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
+import { createConnection } from "node:net";
 import { tmpdir } from "os";
 import {
   readDaemonIdentity,
@@ -59,4 +60,48 @@ test("JSON-looking legacy daemon tokens stay opaque without a protocol marker", 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+
+test("daemon identity server survives clients that disconnect before a delayed reply", async () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-daemon-id-disconnect-"));
+  roots.push(root);
+  const socketPath = join(root, "daemon.sock");
+  const child = Bun.spawn([
+    process.execPath,
+    "-e",
+    `import { startDaemonIdentityServer } from "./src/core/daemon-identity.ts";
+const server = await startDaemonIdentityServer(${JSON.stringify(socketPath)}, "token");
+process.stdout.write("READY\\n");
+const until = Date.now() + 350;
+while (Date.now() < until) {}
+await Bun.sleep(150);
+await server.close();`,
+  ], {
+    cwd: join(import.meta.dir, ".."),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const reader = child.stdout.getReader();
+  let ready = "";
+  while (!ready.includes("READY\n")) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    ready += new TextDecoder().decode(chunk.value);
+  }
+  expect(ready).toContain("READY\n");
+
+  const socket = createConnection({ path: socketPath });
+  await new Promise<void>((resolve, reject) => {
+    socket.once("connect", resolve);
+    socket.once("error", reject);
+  });
+  socket.destroy();
+
+  const [exitCode, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stderr).text(),
+  ]);
+  expect(exitCode, stderr).toBe(0);
 });

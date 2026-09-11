@@ -16,6 +16,13 @@ export interface LegacyDaemonOwner extends LegacyDaemonCandidate {
   daemonFingerprint: ProcessFingerprint;
 }
 
+export interface OrphanSpotifyOwner {
+  spotifyPid: number;
+  spotifyFingerprint: ProcessFingerprint;
+  binaryPath: string;
+  profileDir: string;
+}
+
 interface ProcessRow {
   pid: number;
   ppid: number;
@@ -77,12 +84,35 @@ export function findLegacyDaemonOwnerFromSnapshots(
   return null;
 }
 
+function isExactSoggfySpotifyCommand(command: string, binaryPath: string, profileDir: string): boolean {
+  const executableMatches = command === binaryPath || command.startsWith(`${binaryPath} `);
+  return executableMatches && command.includes(`--user-data-dir=${profileDir}`);
+}
+
+export function findOrphanSpotifyOwnerFromSnapshots(
+  binaryPath: string,
+  profileDir: string,
+  psText: string,
+): number | null {
+  const processes = processRows(psText);
+  for (const process of processes.values()) {
+    if (process.ppid !== 1) continue;
+    if (isExactSoggfySpotifyCommand(process.command, binaryPath, profileDir)) return process.pid;
+  }
+  return null;
+}
+
 function ownershipSnapshots(): { lsof: string; ps: string } | null {
   const lsof = Bun.spawnSync(["lsof", "-n", "-U"], { stdout: "pipe", stderr: "pipe" });
   if (lsof.exitCode !== 0) return null;
   const ps = Bun.spawnSync(["ps", "-ww", "-axo", "pid=,ppid=,command="], { stdout: "pipe", stderr: "pipe" });
   if (ps.exitCode !== 0) return null;
   return { lsof: lsof.stdout.toString(), ps: ps.stdout.toString() };
+}
+
+function processTableSnapshot(): string | null {
+  const ps = Bun.spawnSync(["ps", "-ww", "-axo", "pid=,ppid=,command="], { stdout: "pipe", stderr: "pipe" });
+  return ps.exitCode === 0 ? ps.stdout.toString() : null;
 }
 
 export function readProcessFingerprint(pid: number): ProcessFingerprint | null {
@@ -115,6 +145,18 @@ export function findLegacyDaemonOwner(socketPath: string, currentPid = process.p
   return { ...candidate, daemonFingerprint };
 }
 
+export function findOrphanSpotifyOwner(binaryPath: string, profileDir: string): OrphanSpotifyOwner | null {
+  const psText = processTableSnapshot();
+  if (!psText) return null;
+  const spotifyPid = findOrphanSpotifyOwnerFromSnapshots(binaryPath, profileDir, psText);
+  if (!spotifyPid) return null;
+  const spotifyFingerprint = readProcessFingerprint(spotifyPid);
+  if (!spotifyFingerprint || !isExactSoggfySpotifyCommand(spotifyFingerprint.command, binaryPath, profileDir)) {
+    return null;
+  }
+  return { spotifyPid, spotifyFingerprint, binaryPath, profileDir };
+}
+
 function assertProcessFingerprint(
   pid: number,
   expected: ProcessFingerprint,
@@ -129,6 +171,53 @@ function assertProcessFingerprint(
     !isSoggfyDaemonCommand(current.command)
   ) {
     throw new Error(`Legacy Soggfy daemon identity changed for PID ${pid}; refusing to terminate it.`);
+  }
+}
+
+function assertOrphanSpotifyFingerprint(
+  owner: OrphanSpotifyOwner,
+  readFingerprint: (pid: number) => ProcessFingerprint | null,
+): void {
+  const current = readFingerprint(owner.spotifyPid);
+  if (
+    !current ||
+    current.startedAt !== owner.spotifyFingerprint.startedAt ||
+    current.birthId !== owner.spotifyFingerprint.birthId ||
+    current.command !== owner.spotifyFingerprint.command ||
+    !isExactSoggfySpotifyCommand(current.command, owner.binaryPath, owner.profileDir)
+  ) {
+    throw new Error(`Orphaned Soggfy Spotify identity changed for PID ${owner.spotifyPid}; refusing to terminate it.`);
+  }
+}
+
+export interface OrphanSpotifyRetireDependencies {
+  readFingerprint?: (pid: number) => ProcessFingerprint | null;
+  terminate?: (
+    pid: number,
+    expectedFingerprint: ProcessFingerprint,
+    readFingerprint: (pid: number) => ProcessFingerprint | null,
+  ) => Promise<void>;
+}
+
+async function terminateVerifiedOrphanSpotify(
+  owner: OrphanSpotifyOwner,
+  readFingerprint: (pid: number) => ProcessFingerprint | null,
+): Promise<void> {
+  await terminateProcessTree(owner.spotifyPid, undefined, {
+    beforeSignal: () => assertOrphanSpotifyFingerprint(owner, readFingerprint),
+  });
+}
+
+export async function retireOrphanSpotifyOwner(
+  owner: OrphanSpotifyOwner,
+  dependencies: OrphanSpotifyRetireDependencies = {},
+): Promise<void> {
+  const readFingerprint = dependencies.readFingerprint ?? readProcessFingerprint;
+  assertOrphanSpotifyFingerprint(owner, readFingerprint);
+  if (dependencies.terminate) {
+    await dependencies.terminate(owner.spotifyPid, owner.spotifyFingerprint, readFingerprint);
+  } else {
+    await terminateVerifiedOrphanSpotify(owner, readFingerprint);
   }
 }
 
