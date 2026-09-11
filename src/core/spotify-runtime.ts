@@ -25,6 +25,12 @@ export interface LoginStateCloneOptions {
 
 export const SUPPORTED_SPOTIFY_VERSION = latestSupportedSpotifyVersion() ?? "0.0.0";
 
+export function resetSpotifyTransientRuntimeState(savePath: string): void {
+  for (const directory of ["Application Support", "Caches", "tmp"]) {
+    rmSync(join(savePath, directory), { recursive: true, force: true });
+  }
+}
+
 export function readSpotifyBundleVersion(appPath: string): string | null {
   const infoPlist = join(appPath, "Contents/Info.plist");
   if (!existsSync(infoPlist)) return null;

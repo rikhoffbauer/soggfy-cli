@@ -7,6 +7,7 @@ import {
   cloneSpotifyLoginState,
   descendantPidsFromProcessTable,
   readSpotifyBundleVersion,
+  resetSpotifyTransientRuntimeState,
   SUPPORTED_SPOTIFY_VERSION,
   terminateProcessTree,
 } from "../src/core/spotify-runtime";
@@ -87,6 +88,43 @@ test("runtime login clones lock owned auth state without relocking explicit impo
   }
   expect((await run("")).code).toBe(0);
   expect(await Bun.file(join(dest, "prefs")).text()).toBe("owned-state");
+});
+
+
+test("resetSpotifyTransientRuntimeState removes only Spotify transient directories", () => {
+  const runtime = join(root, "runtime-save");
+  const transientFiles = [
+    "Application Support/Spotify/prefs",
+    "Caches/spotify/cache.bin",
+    "tmp/session.sock",
+  ];
+  for (const relative of transientFiles) {
+    const path = join(runtime, relative);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, relative);
+  }
+
+  const preservedFiles = [
+    "track.ogg",
+    "track.status",
+    "track.duration",
+    "payload-123.log",
+    "diagnostics/nested.txt",
+  ];
+  for (const relative of preservedFiles) {
+    const path = join(runtime, relative);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, relative);
+  }
+
+  resetSpotifyTransientRuntimeState(runtime);
+
+  for (const directory of ["Application Support", "Caches", "tmp"]) {
+    expect(existsSync(join(runtime, directory))).toBe(false);
+  }
+  for (const relative of preservedFiles) {
+    expect(readFileSync(join(runtime, relative), "utf8")).toBe(relative);
+  }
 });
 
 test("descendantPidsFromProcessTable returns deepest children first", () => {

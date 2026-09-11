@@ -41,3 +41,13 @@ test("SpotifyInstance retires an exact orphaned runtime before spawning a replac
   expect(retire).toBeGreaterThan(-1);
   expect(spawn).toBeGreaterThan(retire);
 });
+
+
+test("SpotifyInstance resets transient save state before cloning login state", () => {
+  const reset = source.indexOf("resetSpotifyTransientRuntimeState(this.savePath)");
+  const clone = source.indexOf("cloneSpotifyLoginState(appSupportDest");
+  const spawn = source.indexOf("this.process = spawn");
+  expect(reset).toBeGreaterThan(-1);
+  expect(clone).toBeGreaterThan(reset);
+  expect(spawn).toBeGreaterThan(clone);
+});

@@ -1,7 +1,7 @@
 import { spawn } from "bun";
 import { existsSync, mkdirSync, unlinkSync, statSync } from "fs";
 import { extname, join } from "path";
-import { cloneSpotifyLoginState, terminateProcessTree } from "../../../src/core/spotify-runtime";
+import { cloneSpotifyLoginState, resetSpotifyTransientRuntimeState, terminateProcessTree } from "../../../src/core/spotify-runtime";
 import { sendIPC as sendIpcCommand } from "../../../src/core/ipc";
 import { getDaemonSpotifyInstance } from "../../../src/core/daemon-runtime";
 import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "../../../src/core/capture-control";
@@ -168,6 +168,7 @@ export class SpotifyInstance {
 
     mkdirSync(this.savePath, { recursive: true, mode: 0o700 });
     mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
+    resetSpotifyTransientRuntimeState(this.savePath);
 
     const appSupportSpotify = join(this.savePath, "Application Support/Spotify");
     try {

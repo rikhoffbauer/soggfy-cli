@@ -52,3 +52,15 @@ test("webapp download jobs never blindly replay a successfully requested track",
   expect(downloadJob).toContain("await requestTrackPlayback(");
   expect(downloadJob).not.toContain("re-requested target track playback");
 });
+
+
+test("standalone web Spotify instances reset transient save state before cloning login state", () => {
+  const daemonAttach = instanceSource.indexOf("if (USE_DAEMON_INSTANCE && this.id === 1)");
+  const daemonReturn = instanceSource.indexOf("return;", daemonAttach);
+  const reset = instanceSource.indexOf("resetSpotifyTransientRuntimeState(this.savePath)", daemonReturn);
+  const clone = instanceSource.indexOf("cloneSpotifyLoginState(appSupportSpotify", daemonReturn);
+  const spawn = instanceSource.indexOf("this.process = spawn", daemonReturn);
+  expect(reset).toBeGreaterThan(daemonReturn);
+  expect(clone).toBeGreaterThan(reset);
+  expect(spawn).toBeGreaterThan(clone);
+});

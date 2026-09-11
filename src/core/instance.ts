@@ -3,7 +3,7 @@ import { existsSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { sendIPC, ping } from "./ipc";
 import { log } from "./log";
-import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, terminateProcessTree } from "./spotify-runtime";
+import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, resetSpotifyTransientRuntimeState, terminateProcessTree } from "./spotify-runtime";
 import { migrateOfficialSpotifyAuthOnce } from "./auth-migration";
 import { findOrphanSpotifyOwner, retireOrphanSpotifyOwner } from "./daemon-owner";
 import {
@@ -65,6 +65,7 @@ export class SpotifyInstance {
     // Prepare directories
     mkdirSync(this.savePath, { recursive: true, mode: 0o700 });
     mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
+    resetSpotifyTransientRuntimeState(this.savePath);
     const homeDir = join(this.profileDir, "home");
     mkdirSync(homeDir, { recursive: true, mode: 0o700 });
 
