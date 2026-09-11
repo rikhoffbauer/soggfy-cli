@@ -177,3 +177,35 @@ test("album pages merge in source order without duplicate tracks", async () => {
   expect(merged.tracks.map((track: any) => track.id)).toEqual(["t1", "t2", "t3"]);
   expect(merged.trackIds).toEqual(["t1", "t2", "t3"]);
 });
+
+
+test("album page merge preserves repeated tracks at distinct source positions", async () => {
+  const { mergeAlbumPages } = await import("../workspace-model");
+  const first: any = {
+    album: { id: "a1", uri: "spotify:album:a1", name: "Album", artists: ["Artist"] },
+    tracks: [
+      { id: "t1", uri: "spotify:track:t1", name: "One", artists: ["Artist"], playable: true, sourceIndex: 0 },
+      { id: "t2", uri: "spotify:track:t2", name: "Repeat", artists: ["Artist"], playable: true, sourceIndex: 1 },
+    ],
+    trackIds: ["t1", "t2"], offset: 0, limit: 2, totalCount: 3, nextOffset: 2,
+  };
+  const second: any = { ...first, tracks: [
+    { ...first.tracks[1], sourceIndex: 1 },
+    { ...first.tracks[1], sourceIndex: 2 },
+  ], trackIds: ["t2", "t2"], offset: 1, nextOffset: null };
+  const merged = mergeAlbumPages(first, second);
+  expect(merged.tracks.map((track: any) => [track.sourceIndex, track.id])).toEqual([[0, "t1"], [1, "t2"], [2, "t2"]]);
+  expect(merged.trackIds).toEqual(["t1", "t2", "t2"]);
+});
+
+test("workspace hashes round-trip search tabs and details", async () => {
+  const { workspaceLocationFromHash, hashForWorkspaceLocation } = await import("../workspace-model");
+  const album = "4eLPsYPBmXABThSJ821sqY";
+  const playlist = "37i9dQZF1DXcBWIGoYBM5M";
+  expect(workspaceLocationFromHash(`#search?tab=album&album=${album}`)).toEqual({ page: "search", searchTab: "album", detail: { type: "album", id: album } });
+  expect(workspaceLocationFromHash(`#search?tab=playlist&playlist=${playlist}`)).toEqual({ page: "search", searchTab: "playlist", detail: { type: "playlist", id: playlist } });
+  expect(workspaceLocationFromHash(`#search?tab=track&album=${album}`)).toEqual({ page: "search", searchTab: "album", detail: { type: "album", id: album } });
+  expect(workspaceLocationFromHash(`#search?tab=artist&playlist=${playlist}`)).toEqual({ page: "search", searchTab: "playlist", detail: { type: "playlist", id: playlist } });
+  expect(hashForWorkspaceLocation({ page: "search", searchTab: "album", detail: { type: "album", id: album } })).toBe(`#search?tab=album&album=${album}`);
+  expect(hashForWorkspaceLocation({ page: "downloads" })).toBe("#downloads");
+});

@@ -31,3 +31,9 @@ test("album detail preserves metadata from the selected search result", () => {
   expect(appSource).toContain("albumHint");
   expect(appSource).toContain("albumHint.subtitle");
 });
+
+
+test("album loads ignore stale responses from an older selection", () => {
+  expect(appSource).toContain("albumRequestGeneration");
+  expect(appSource).toContain("requestGeneration !== albumRequestGeneration.current");
+});

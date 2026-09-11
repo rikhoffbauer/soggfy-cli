@@ -4,11 +4,11 @@ Start with `bun run doctor` in a source checkout. It checks command dependencies
 
 ## Unsupported Spotify build
 
-Production support comes from exact `supported` entries in `compatibility/spotify-versions.json`; currently that is Spotify 1.2.98.301 arm64. Unrecorded and failed versions are rejected even if their version number lies between two supported builds. The native payload independently verifies the expected function prologues before installing private hooks.
+Production support comes from exact `supported` entries in `compatibility/spotify-versions.json`; currently those are Spotify 1.2.98.301 and 1.2.99.317 arm64. Unrecorded and failed versions are rejected even if their version number lies between two supported builds. The native payload independently verifies the expected function prologues before installing private hooks.
 
 Use `soggfy compat list` to inspect the registry and `soggfy compat probe /Applications/Spotify.app --keep --json` to test a candidate in an isolated clone without changing production state. Add `--record` only when you want to persist the exact result.
 
-Spotify 1.2.99.317 was tested on 2026-09-08: IPC initialized, but `DecodeAudioData` and `ogg_stream_pagein` both failed their current prologue checks, so it remains unsupported. Do not bypass those checks; supporting such a build requires locating and validating new hook offsets/signatures, then rerunning the probe.
+Spotify 1.2.99.317 was re-analyzed on 2026-09-11. Its private hook functions had relocated, so Soggfy now selects exact version-specific offsets and still validates both prologues before hooking. Four consecutive non-instrumented compatibility captures passed before the build was recorded as supported.
 
 ## Target track was not confirmed playing
 

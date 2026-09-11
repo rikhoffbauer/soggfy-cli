@@ -29,3 +29,16 @@ test("playlist detail provides explicit Back to results navigation", () => {
   expect(source).toContain("Back to results");
   expect(source).toContain("onBack");
 });
+
+
+test("track terminal status labels use display capitalization", () => {
+  const row = readFileSync(join(componentDir, "TrackListRow.tsx"), "utf8");
+  expect(row).toContain('job.state === "failed") return "Failed"');
+  expect(row).toContain('job.state === "cancelled") return "Cancelled"');
+});
+
+
+test("playlist loads ignore stale responses from an older selection", () => {
+  expect(appSource).toContain("playlistRequestGeneration");
+  expect(appSource).toContain("requestGeneration !== playlistRequestGeneration.current");
+});

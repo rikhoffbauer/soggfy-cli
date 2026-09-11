@@ -36,6 +36,14 @@ export interface SpotifyAlbumOptions {
   offset?: number;
   limit?: number;
   fetchImpl?: typeof fetch;
+  identityTimeoutMs?: number;
+}
+
+export class SpotifyAlbumRequestError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "SpotifyAlbumRequestError";
+  }
 }
 
 function asObject(value: unknown): Record<string, any> | null {
@@ -156,12 +164,17 @@ function clampLimit(value = 100): number {
   return Math.max(1, Math.min(300, Math.trunc(value)));
 }
 
-async function fetchSpotifyAlbumIdentity(id: string, fetchImpl: typeof fetch): Promise<SpotifyAlbumSummary> {
-  const fallback: SpotifyAlbumSummary = { id, uri: `spotify:album:${id}`, name: "Untitled album", artists: [] };
+function fallbackAlbumIdentity(id: string): SpotifyAlbumSummary {
+  return { id, uri: `spotify:album:${id}`, name: "Untitled album", artists: [] };
+}
+
+async function fetchSpotifyAlbumIdentity(id: string, fetchImpl: typeof fetch, signal?: AbortSignal): Promise<SpotifyAlbumSummary> {
+  const fallback = fallbackAlbumIdentity(id);
   try {
     const target = `https://open.spotify.com/album/${id}`;
     const response = await fetchImpl(`https://open.spotify.com/oembed?url=${encodeURIComponent(target)}`, {
       headers: { accept: "application/json", "user-agent": SPOTIFY_WEB_USER_AGENT },
+      signal,
     });
     if (!response.ok) return fallback;
     const data = asObject(await response.json());
@@ -183,7 +196,21 @@ export async function fetchSpotifyAlbumPage(
   const limit = clampLimit(options.limit);
   const fetchImpl = options.fetchImpl ?? fetch;
   const tokens = await getSpotifyWebTokens(fetchImpl);
-  const identityPromise = fetchSpotifyAlbumIdentity(albumId, fetchImpl);
+  const identityTimeoutMs = Number.isFinite(options.identityTimeoutMs)
+    ? Math.max(0, Math.trunc(options.identityTimeoutMs!))
+    : 1_500;
+  const identityAbort = new AbortController();
+  let identityTimer: ReturnType<typeof setTimeout> | undefined;
+  const identityPromise = fetchSpotifyAlbumIdentity(albumId, fetchImpl, identityAbort.signal);
+  const identityDeadline = new Promise<SpotifyAlbumSummary>((resolve) => {
+    identityTimer = setTimeout(() => {
+      identityAbort.abort();
+      resolve(fallbackAlbumIdentity(albumId));
+    }, identityTimeoutMs);
+  });
+  const boundedIdentity = Promise.race([identityPromise, identityDeadline]).finally(() => {
+    if (identityTimer) clearTimeout(identityTimer);
+  });
   const response = await fetchImpl("https://api-partner.spotify.com/pathfinder/v2/query", {
     method: "POST",
     headers: {
@@ -200,7 +227,12 @@ export async function fetchSpotifyAlbumPage(
     }),
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(`Spotify album request failed with HTTP ${response.status}: ${text.slice(0, 240)}`);
+  if (!response.ok) {
+    throw new SpotifyAlbumRequestError(
+      response.status,
+      `Spotify album request failed with HTTP ${response.status}: ${text.slice(0, 240)}`,
+    );
+  }
   let data: unknown;
   try { data = JSON.parse(text); }
   catch { throw new Error(`Spotify album returned invalid JSON: ${text.slice(0, 240)}`); }
@@ -209,7 +241,7 @@ export async function fetchSpotifyAlbumPage(
     const message = asObject(errors[0])?.message;
     throw new Error(typeof message === "string" ? message : "Spotify album request failed");
   }
-  const identity = await identityPromise;
+  const identity = await boundedIdentity;
   return normalizeSpotifyAlbumResponse(data, offset, limit, identity);
 }
 

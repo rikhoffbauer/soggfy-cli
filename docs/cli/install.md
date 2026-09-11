@@ -19,7 +19,7 @@ soggfy install [--skip-spotify-install] [--rebuild]
 
 ## Spotify version
 
-The native private hooks currently support Spotify **1.2.98.301 arm64** only. Installation fails closed on a different version instead of guessing offsets.
+The native private hooks currently support the exact arm64 builds recorded as `supported` in `compatibility/spotify-versions.json` (currently Spotify **1.2.98.301** and **1.2.99.317**). Installation fails closed on any other version instead of guessing offsets.
 
 ## Options
 

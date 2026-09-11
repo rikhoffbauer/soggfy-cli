@@ -4,6 +4,7 @@
 #include "OggPreRoll.h"
 #include "Scanner.h"
 #include "StateManager.h"
+#include "SpotifyHookTargets.h"
 #include <dobby.h>
 #include <vector>
 #import <Foundation/Foundation.h>
@@ -29,7 +30,7 @@ extern std::mutex g_track_mutex;
 extern std::string g_active_track_id;
 extern std::atomic<bool> g_capture_gated;
 
-// ARM64 DecodeAudioData (0x10127fe94 in Spotify ARM64)
+// ARM64 DecodeAudioData; image-relative address is selected per validated Spotify build.
 // x0: this (Decoder)
 // x1: float* sampleBuffer (PCM output)
 // x2: size_t* sampleCount (in: capacity, out: samplesDecoded)
@@ -265,10 +266,21 @@ void InstallDecoderHook() {
         fflush(stdout);
         return;
     }
-    printf("[Soggfy-DEBUG] Found Spotify image base = 0x%lx\n", base);
+    NSString *bundleVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+    const char *version = bundleVersion.UTF8String;
+    const SpotifyHookTargets *targets = SpotifyHookTargetsForVersion(version);
+    if (!targets) {
+        printf("[Soggfy-ERROR] Unsupported Spotify build: no native hook targets for %s\n",
+               version ? version : "unknown");
+        fflush(stdout);
+        return;
+    }
+
+    printf("[Soggfy-DEBUG] Found Spotify image base = 0x%lx (version %s)\n",
+           base, targets->version);
     fflush(stdout);
 
-    // Validated against Spotify 1.2.98.301 arm64. Unknown builds fail closed.
+    // Prologues are validated again at runtime. Unknown builds fail closed above.
     static constexpr uint8_t decodePrologue[] = {
         0xff, 0xc3, 0x01, 0xd1, 0xfc, 0x6f, 0x01, 0xa9,
         0xfa, 0x67, 0x02, 0xa9, 0xf8, 0x5f, 0x03, 0xa9,
@@ -278,8 +290,8 @@ void InstallDecoderHook() {
         0xf4, 0x4f, 0xbe, 0xa9, 0xfd, 0x7b, 0x01, 0xa9,
     };
 
-    const uintptr_t decodeAddr = base + 0x127fe94;
-    const uintptr_t oggPageinAddr = base + 0x12b32c8;
+    const uintptr_t decodeAddr = base + targets->decodeAudioDataOffset;
+    const uintptr_t oggPageinAddr = base + targets->oggStreamPageinOffset;
     const bool decodeOk = InstallCheckedHook(
         "DecodeAudioData", decodeAddr, decodePrologue, sizeof(decodePrologue),
         reinterpret_cast<void*>(my_DecodeAudioData),

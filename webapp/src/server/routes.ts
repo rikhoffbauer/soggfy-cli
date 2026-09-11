@@ -3,7 +3,7 @@ import { extname } from "path";
 import { ZipArchive } from "archiver";
 import { clampSearchLimit, searchSpotify, type SpotifySearchType } from "../../../src/core/spotify-search";
 import { fetchAllSpotifyPlaylistTracks, fetchSpotifyPlaylistPage } from "../../../src/core/spotify-playlist";
-import { fetchSpotifyAlbumPage } from "../../../src/core/spotify-album";
+import { fetchSpotifyAlbumPage, SpotifyAlbumRequestError } from "../../../src/core/spotify-album";
 import { resolveInput as resolveSpotifyInput } from "../../../src/core/metadata";
 import { fetchSpotifyLyrics } from "../../../src/core/spotify-lyrics";
 import { CAPTURE_BACKEND, OUTPUT_DIR } from "../../../src/core/paths";
@@ -120,7 +120,7 @@ export function createApiRoutes() {
           for (const track of page.tracks) cachePlaylistTrackMetadata(track);
           return jsonResponse(page);
         } catch (err: any) {
-          const status = /not found/i.test(err.message) ? 404 : 502;
+          const status = err instanceof SpotifyAlbumRequestError && err.status === 404 ? 404 : 502;
           return jsonResponse({ error: err.message }, { status });
         }
       },

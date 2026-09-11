@@ -4,6 +4,12 @@ export type SearchFilter = "all" | "track" | "artist" | "playlist";
 
 export type WorkspacePage = "search" | "queue" | "downloads" | "diagnostics";
 export type SearchTab = "track" | "album" | "playlist" | "artist";
+export type SearchDetail = { type: "album" | "playlist"; id: string };
+export interface WorkspaceLocation {
+  page: WorkspacePage;
+  searchTab?: SearchTab;
+  detail?: SearchDetail;
+}
 
 export interface SearchTabState {
   items: FrontendSearchResult[];
@@ -25,13 +31,43 @@ function emptySearchTabState(): SearchTabState {
   return { items: [], loaded: false, loading: false, nextOffset: 0 };
 }
 
+export function workspaceLocationFromHash(hash: string): WorkspaceLocation {
+  const raw = hash.replace(/^#/, "");
+  const [pageValue, query = ""] = raw.split("?", 2);
+  const page = WORKSPACE_PAGES.includes(pageValue as WorkspacePage)
+    ? pageValue as WorkspacePage
+    : "search";
+  if (page !== "search") return { page };
+
+  const params = new URLSearchParams(query);
+  const requestedTab = params.get("tab") as SearchTab | null;
+  const searchTab = requestedTab && SEARCH_TABS.includes(requestedTab) ? requestedTab : "track";
+  const albumId = params.get("album");
+  const playlistId = params.get("playlist");
+  const detail = albumId
+    ? { type: "album" as const, id: albumId }
+    : playlistId
+      ? { type: "playlist" as const, id: playlistId }
+      : undefined;
+  return { page, searchTab: detail?.type ?? searchTab, ...(detail ? { detail } : {}) };
+}
+
+export function hashForWorkspaceLocation(location: WorkspaceLocation): string {
+  if (location.page !== "search") return `#${location.page}`;
+  const params = new URLSearchParams();
+  const tab = location.detail?.type ?? location.searchTab ?? "track";
+  if (tab !== "track") params.set("tab", tab);
+  if (location.detail) params.set(location.detail.type, location.detail.id);
+  const query = params.toString();
+  return `#search${query ? `?${query}` : ""}`;
+}
+
 export function pageFromHash(hash: string): WorkspacePage {
-  const value = hash.replace(/^#/, "") as WorkspacePage;
-  return WORKSPACE_PAGES.includes(value) ? value : "search";
+  return workspaceLocationFromHash(hash).page;
 }
 
 export function hashForPage(page: WorkspacePage): string {
-  return `#${page}`;
+  return hashForWorkspaceLocation({ page });
 }
 
 export function createSearchSession(query = ""): SearchSession {
@@ -131,8 +167,9 @@ export function mergeAlbumPages(current: AlbumPage, incoming: AlbumPage): AlbumP
   const seen = new Set<string>();
   const tracks = [...current.tracks, ...incoming.tracks]
     .filter((track) => {
-      if (seen.has(track.id)) return false;
-      seen.add(track.id);
+      const key = `${track.sourceIndex}:${track.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     })
     .sort((a, b) => a.sourceIndex - b.sourceIndex);

@@ -10,7 +10,7 @@ const routesSource = readFileSync(join(import.meta.dir, "../webapp/src/server/ro
 
 test("webapp Spotify instances isolate temp, cache, profile, and runtime state", () => {
   expect(instanceSource).toContain('TMPDIR: tmpDir');
-  expect(instanceSource).toContain('`--cache-path=${this.profileDir}`');
+  expect(instanceSource).not.toContain('--cache-path=');
   expect(instanceSource).toContain('`--user-data-dir=${this.profileDir}`');
   expect(instanceSource).toContain('this.socketPath = join(RUNTIME_DIR');
   expect(instanceSource).toContain('this.savePath = join(RUNTIME_DIR');

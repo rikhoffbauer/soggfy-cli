@@ -7,7 +7,7 @@ import { getDaemonSpotifyInstance } from "../../../src/core/daemon-runtime";
 import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "../../../src/core/capture-control";
 import { captureMaxWaitMs, captureMonitorDecision, PlaybackProgressMonitor } from "../../../src/core/capture-monitor";
 import { migrateOfficialSpotifyAuthOnce } from "../../../src/core/auth-migration";
-import { CAPTURE_BACKEND, OUTPUT_DIR, PROFILES_DIR, WORKSPACE_DIR, IPC_SOCKET, SAVE_PATH } from "../../../src/core/paths";
+import { AUTH_STATE_DIR, CAPTURE_BACKEND, OUTPUT_DIR, PROFILES_DIR, WORKSPACE_DIR, IPC_SOCKET, SAVE_PATH } from "../../../src/core/paths";
 import type { DownloadJob, TrackMetadata } from "./jobs";
 import { copyAudioFallback, expectedOggBytes, findCapturedAudioPath, transcodeAudioToMp3, validateAudioFile, writeSidecar } from "./media";
 import { jobs, GLOBAL_METADATA } from "./runtime-state";
@@ -173,10 +173,14 @@ export class SpotifyInstance {
     try {
       const migration = migrateOfficialSpotifyAuthOnce();
       if (migration === "migrated") this.log("Migrated existing Spotify login state into Soggfy-owned auth state.");
+      else if (migration === "upgraded") this.log("Upgraded Soggfy Spotify login state with required WebKit session data.");
     } catch (error) {
       this.log(`Warning: could not migrate existing Spotify login state: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const loginState = cloneSpotifyLoginState(appSupportSpotify);
+    const homeDir = join(this.profileDir, "home");
+    const loginState = cloneSpotifyLoginState(appSupportSpotify, AUTH_STATE_DIR, {
+      webKitDest: join(homeDir, "Library/WebKit/com.spotify.client"),
+    });
     if (loginState.copiedSessionCache) {
       this.log("Cloned reusable Spotify session state.");
     } else {
@@ -200,7 +204,6 @@ export class SpotifyInstance {
     if (!existsSync(binaryPath)) throw new Error(`Patched Spotify binary missing: ${binaryPath}`);
     if (!existsSync(dylibPath)) throw new Error(`Payload dylib missing: ${dylibPath}`);
 
-    const homeDir = join(this.profileDir, "home");
     const tmpDir = join(this.profileDir, "tmp");
     mkdirSync(homeDir, { recursive: true, mode: 0o700 });
     mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
@@ -226,7 +229,6 @@ export class SpotifyInstance {
       "--disable-extensions",
       "--disable-background-networking",
       `--remote-debugging-port=${this.debugPort}`,
-      `--cache-path=${this.profileDir}`,
       `--user-data-dir=${this.profileDir}`,
     ];
 

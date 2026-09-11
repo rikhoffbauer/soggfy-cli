@@ -20,6 +20,8 @@ interface SearchPanelProps {
   detail?: React.ReactNode;
 }
 
+const SEARCH_RESULTS_PANEL_ID = "search-results-panel";
+
 const TABS: Array<{ value: SearchTab; label: string }> = [
   { value: "track", label: "Tracks" },
   { value: "album", label: "Albums" },
@@ -65,7 +67,9 @@ export function SearchPanel(props: SearchPanelProps) {
                 key={item.value}
                 type="button"
                 role="tab"
+                id={`search-tab-${item.value}`}
                 aria-selected={session.activeTab === item.value}
+                aria-controls={SEARCH_RESULTS_PANEL_ID}
                 onClick={() => onTabChange(item.value)}
                 className={`border-b-2 px-3 py-2 text-sm font-semibold transition focus-visible:outline-none ${session.activeTab === item.value ? "border-primary text-white" : "border-transparent text-white/42 hover:text-white/75"}`}
               >
@@ -76,7 +80,12 @@ export function SearchPanel(props: SearchPanelProps) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pt-5">
+      <div
+        id={SEARCH_RESULTS_PANEL_ID}
+        role="tabpanel"
+        aria-labelledby={`search-tab-${session.activeTab}`}
+        className="min-h-0 flex-1 overflow-y-auto pt-5"
+      >
         {detail ?? (session.query ? (
           <SearchResults
             tab={session.activeTab}

@@ -27,3 +27,17 @@ test("album route rejects invalid ids", async () => {
   if (!route) return;
   expect((await route(new Request("http://localhost/api/album?id=bad"))).status).toBe(400);
 });
+
+
+test("album route preserves an upstream HTTP 404", async () => {
+  process.env.SPOTIFY_ACCESS_TOKEN = "access"; process.env.SPOTIFY_CLIENT_TOKEN = "client"; invalidateSpotifyWebTokens();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("/oembed?")) return new Response("{}", { status: 404 });
+    return new Response("missing", { status: 404 });
+  }) as unknown as typeof fetch;
+  const route = createApiRoutes()["/api/album"]?.GET;
+  expect(route).toBeDefined();
+  if (!route) return;
+  const response = await route(new Request(`http://localhost/api/album?id=${albumId}`));
+  expect(response.status).toBe(404);
+});

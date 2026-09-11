@@ -20,7 +20,9 @@
 - Native capture, daemon ownership, auth, and output formats are out of scope.
 - Implement on `main`; preserve clean conventional commits per task.
 
----### Task 1: Type-specific Spotify search with albums and pagination
+---
+
+### Task 1: Type-specific Spotify search with albums and pagination
 
 **Files:**
 - Modify: `src/core/spotify-search.ts`
@@ -56,7 +58,9 @@
 - [ ] Write failing normalization/pagination tests using representative Pathfinder album payloads.
 - [ ] Write failing route tests for invalid IDs and successful album pages.
 - [ ] Confirm RED, implement the album module and route, then confirm GREEN.
-- [ ] Run typechecks and commit `feat: add Spotify album detail API`.### Task 3: Navigation and search-session state model
+- [ ] Run typechecks and commit `feat: add Spotify album detail API`.
+
+### Task 3: Navigation and search-session state model
 
 **Files:**
 - Modify: `webapp/src/components/soggfy/workspace-model.ts`
@@ -90,7 +94,9 @@
 - [ ] Confirm RED before component changes.
 - [ ] Implement full-width Search page and per-tab rendering; remove the generic mixed-result filter.
 - [ ] Wire `App` search-session caching and lazy requests without destroying state when navigating away.
-- [ ] Run component tests, web typecheck/build, then commit `feat: redesign search workspace`.### Task 5: Album and playlist in-app detail navigation
+- [ ] Run component tests, web typecheck/build, then commit `feat: redesign search workspace`.
+
+### Task 5: Album and playlist in-app detail navigation
 
 **Files:**
 - Create: `webapp/src/components/soggfy/AlbumPanel.tsx`
@@ -128,7 +134,9 @@
 - [ ] Implement desktop sidebar and compact mobile page navigation.
 - [ ] Split queue/download presentation into full-width page sections while preserving existing actions.
 - [ ] Make Diagnostics a dedicated page with log viewer using remaining height.
-- [ ] Run web tests/typecheck/build and commit `feat: add full-page web workspace navigation`.### Task 7: Responsive polish, live verification, and release gate
+- [ ] Run web tests/typecheck/build and commit `feat: add full-page web workspace navigation`.
+
+### Task 7: Responsive polish, live verification, and release gate
 
 **Files:**
 - Modify as needed: `webapp/src/App.tsx`, Soggfy page components, related tests/docs

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { acquireAuthStateLock } from "../src/core/auth-lock";
 import {
@@ -25,14 +25,36 @@ test("cloneSpotifyLoginState copies only session-critical state", () => {
   writeFileSync(join(source, "PersistentCache/Users/u/db/session"), "session");
   writeFileSync(join(source, "PersistentCache/user_settings"), "settings");
   writeFileSync(join(source, "PersistentCache/Update/huge"), "do-not-copy");
+  const sourceWebKit = join(root, "source-webkit");
+  const webKitDest = join(root, "home/Library/WebKit/com.spotify.client");
+  mkdirSync(join(sourceWebKit, "WebsiteData"), { recursive: true });
+  writeFileSync(join(sourceWebKit, "WebsiteData/session"), "webkit-session");
 
-  const result = cloneSpotifyLoginState(dest, source);
-  expect(result).toEqual({ copiedPrefs: true, copiedUsers: true, copiedSessionCache: true });
+  const result = cloneSpotifyLoginState(dest, source, { webKitSourceDir: sourceWebKit, webKitDest });
+  expect(result).toEqual({ copiedPrefs: true, copiedUsers: true, copiedSessionCache: true, copiedWebKit: true });
   expect(existsSync(join(dest, "prefs"))).toBe(true);
   expect(existsSync(join(dest, "Users/u/login"))).toBe(true);
   expect(existsSync(join(dest, "PersistentCache/Users/u/db/session"))).toBe(true);
   expect(existsSync(join(dest, "PersistentCache/user_settings"))).toBe(true);
   expect(existsSync(join(dest, "PersistentCache/Update"))).toBe(false);
+  expect(readFileSync(join(webKitDest, "WebsiteData/session"), "utf8")).toBe("webkit-session");
+});
+
+
+test("cloneSpotifyLoginState clears stale runtime WebKit state when the selected snapshot lacks it", () => {
+  const source = join(root, "source-without-webkit");
+  const dest = join(root, "runtime-support");
+  const webKitDest = join(root, "runtime-home/Library/WebKit/com.spotify.client");
+  mkdirSync(join(source, "Users/u"), { recursive: true });
+  writeFileSync(join(source, "prefs"), 'autologin.username="account-b"\n');
+  writeFileSync(join(source, "Users/u/login"), "account-b");
+  mkdirSync(join(webKitDest, "WebsiteData"), { recursive: true });
+  writeFileSync(join(webKitDest, "WebsiteData/session"), "stale-account-a-session");
+
+  const result = cloneSpotifyLoginState(dest, source, { webKitDest });
+
+  expect(result.copiedWebKit).toBe(false);
+  expect(existsSync(webKitDest)).toBe(false);
 });
 
 test("runtime login clones lock owned auth state without relocking explicit import sources", async () => {

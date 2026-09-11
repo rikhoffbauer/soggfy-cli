@@ -31,3 +31,10 @@ test("App requests typed search pages at 40 items and preserves session state", 
   expect(appSource).toContain("limit=40");
   expect(appSource).toContain("type=${tab}");
 });
+
+
+test("search tabs reference an explicit tabpanel", () => {
+  expect(searchSource).toContain('role="tabpanel"');
+  expect(searchSource).toContain("aria-controls={SEARCH_RESULTS_PANEL_ID}");
+  expect(searchSource).toContain("id={SEARCH_RESULTS_PANEL_ID}");
+});

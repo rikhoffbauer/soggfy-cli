@@ -12,7 +12,8 @@ interface TrackListRowProps {
 function stateLabel(job?: DownloadJob) {
   if (!job) return null;
   if (job.state === "completed") return "Downloaded";
-  if (job.state === "failed" || job.state === "cancelled") return job.state;
+  if (job.state === "failed") return "Failed";
+  if (job.state === "cancelled") return "Cancelled";
   if (job.state === "capturing" || job.state === "playing") return "Downloading";
   return "Queued";
 }

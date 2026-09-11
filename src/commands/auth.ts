@@ -10,6 +10,7 @@ import { markOfficialSpotifyAuthMigrationComplete } from "../core/auth-migration
 import { acquireAuthStateLock } from "../core/auth-lock";
 
 const OFFICIAL_SPOTIFY_SUPPORT = join(homedir(), "Library/Application Support/Spotify");
+const OFFICIAL_SPOTIFY_WEBKIT = join(homedir(), "Library/WebKit/com.spotify.client");
 const PREFS_FILE = join(AUTH_STATE_DIR, "prefs");
 
 function readPrefs(): string | null {
@@ -30,7 +31,10 @@ function captureOfficialLoginState(): void {
   try {
     rmSync(stage, { recursive: true, force: true });
     mkdirSync(stage, { recursive: true, mode: 0o700 });
-    const copied = cloneSpotifyLoginState(stage, OFFICIAL_SPOTIFY_SUPPORT);
+    const copied = cloneSpotifyLoginState(stage, OFFICIAL_SPOTIFY_SUPPORT, {
+      webKitSourceDir: OFFICIAL_SPOTIFY_WEBKIT,
+      webKitDest: join(stage, "WebKit/com.spotify.client"),
+    });
     if (!copied.copiedPrefs && !copied.copiedUsers && !copied.copiedSessionCache) {
       throw new Error("Spotify did not expose reusable login state after authentication");
     }

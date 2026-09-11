@@ -11,6 +11,7 @@ import {
   IPC_SOCKET,
   SAVE_PATH,
   CAPTURE_BACKEND,
+  AUTH_STATE_DIR,
 } from "./paths";
 
 export interface SpotifyInstanceOptions {
@@ -64,10 +65,13 @@ export class SpotifyInstance {
     try {
       const migration = migrateOfficialSpotifyAuthOnce();
       if (migration === "migrated") log.info("Migrated existing Spotify login state into Soggfy-owned auth state.");
+      else if (migration === "upgraded") log.info("Upgraded Soggfy Spotify login state with required WebKit session data.");
     } catch (error) {
       log.warn(`Could not migrate existing Spotify login state: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const loginState = cloneSpotifyLoginState(appSupportDest);
+    const loginState = cloneSpotifyLoginState(appSupportDest, AUTH_STATE_DIR, {
+      webKitDest: join(homeDir, "Library/WebKit/com.spotify.client"),
+    });
     if (!loginState.copiedPrefs && !loginState.copiedSessionCache) {
       log.warn("No reusable Spotify login state found; run 'soggfy auth login'.");
     }
@@ -104,7 +108,6 @@ export class SpotifyInstance {
       "--js-flags=--max-old-space-size=256",
       "--disable-extensions",
       "--disable-background-networking",
-      `--cache-path=${this.profileDir}`,
       `--user-data-dir=${this.profileDir}`,
       ...(sslKeyLogPath ? [`--ssl-key-log-file=${sslKeyLogPath}`] : []),
     ];

@@ -1,18 +1,18 @@
 # Current Architecture
 
-Status: active implementation as of 2026-09-10.
+Status: active implementation as of 2026-09-11.
 
 ## Truth model
 
 The production capture path is an **Ogg/Vorbis stream capture**, not a decoded-PCM capture. `SOGGFY_CAPTURE_BACKEND` defaults to `ogg`; the only other accepted production mode is `disabled`. Unknown backend values fail closed.
 
-Spotify compatibility is exact and registry-backed. Production launch accepts only arm64 versions recorded as `supported` in `compatibility/spotify-versions.json`; the observed min/max supported span is informational only. `DecodeHook.mm` independently checks the expected machine-code prologues before calling `DobbyHook`, and `get_capabilities` reports whether both decoder/Ogg hooks actually installed. Spotify 1.2.98.301 is currently supported; 1.2.99.317 is recorded as failed after both native prologue checks mismatched on 2026-09-08.
+Spotify compatibility is exact and registry-backed. Production launch accepts only arm64 versions recorded as `supported` in `compatibility/spotify-versions.json`; the observed min/max supported span is informational only. `DecodeHook.mm` selects exact per-version hook targets, independently checks the expected machine-code prologues before calling `DobbyHook`, and `get_capabilities` reports whether both decoder/Ogg hooks actually installed. Spotify 1.2.98.301 and 1.2.99.317 are currently supported.
 
 ## End-to-end pipeline
 
 1. Setup copies `/Applications/Spotify.app` to `~/.soggfy/workspace/PatchedSpotify.app`, builds/copies `libsoggfy.dylib`, signs the payload and completed app bundle, and verifies the signature.
-2. The daemon creates the private profile/temp/save directories and clones only the Spotify login state needed for authenticated playback. On first launch after the auth-isolation migration, an existing official Spotify login can be imported once into Soggfy-owned state; explicit logout suppresses future automatic imports. Non-daemon CLI fallback instances use the same auth source in PID-scoped runtime paths.
-3. The patched Spotify process starts with `DYLD_INSERT_LIBRARIES`, a unique IPC socket/save path, an isolated home/TMPDIR/profile/cache, `SOGGFY_CAPTURE_BACKEND=ogg`, and output muting enabled by default.
+2. The daemon creates the private profile/temp/save directories and clones only the Spotify login state needed for authenticated playback. The owned snapshot includes the minimal Application Support state plus Spotify’s WebKit session state required by 1.2.99. Existing snapshots may gain that WebKit state only when the owned and official Spotify usernames match; explicit logout still suppresses future automatic imports. Non-daemon CLI fallback instances use the same auth source in PID-scoped runtime paths.
+3. The patched Spotify process starts with `DYLD_INSERT_LIBRARIES`, a unique IPC socket/save path, an isolated home/TMPDIR/profile, `SOGGFY_CAPTURE_BACKEND=ogg`, and output muting enabled by default. Soggfy keeps an isolated Chromium `--user-data-dir` but does not override `--cache-path`, because an empty custom cache path invalidates Spotify 1.2.99 authentication.
 4. The main injected process starts IPC and publishes shared track-generation/capture-gate state. Helper processes consume the same shared state.
 5. `set_track` resets previous track state and starts a new generation. Native `play` verifies its local control listener and the bundled Spotify CLI signature, then executes one CLI playback command. `get_playing` must confirm the exact track, playing state and positive position. Lost command replies never cause replay.
 6. Ogg pages arriving before target confirmation are retained only in a bounded generation-scoped pre-roll. Once the requested URI is confirmed, the matching Vorbis BOS/header pages are promoted and the Ogg path atomically claims `.capture-owner`. Ads, non-target playback, resets, and overflow discard pre-roll. Only the elected process may append Ogg pages or enable accelerated decode mutation.
@@ -106,13 +106,13 @@ The 2026-09-10 playback repair and four-track evidence are recorded in [Playback
 
 Automated verification on 2026-09-08:
 
-- `bun test`: 135 passed, 0 failed.
+- `bun test`: 252 passed, 0 failed.
 - root TypeScript: passed.
 - native StateManager/CapturePolicy fixture: passed.
 - native dylib build: passed.
 - bundled CLI build: passed.
 - webapp TypeScript + production build: passed.
-- compatibility registry/runtime checks: exact support resolves to 1.2.98.301; installed Spotify 1.2.99.317 remains explicitly unsupported.
+- compatibility registry/runtime checks: exact support includes 1.2.98.301 and 1.2.99.317.
 
 Live verification on the same date:
 
@@ -120,7 +120,7 @@ Live verification on the same date:
 - The first Spotify AppleEvent returned `-1708`; the retry path later returned success and capture proceeded, validating the startup retry behavior.
 - The combined daemon/web runtime was live-smoke-tested on 2026-09-08: HTTP health and UI both returned 200 while process inspection showed exactly one daemon-owned patched Spotify root process and no web-owned `instance_1` worker.
 - `soggfy compat probe` passed every check against an isolated clone of the known-good 1.2.98.301 workspace, including real Ogg capture/media validation and zero visible windows.
-- The same unchanged patch was applied to an isolated clone of Spotify 1.2.99.317. IPC initialized, but both `DecodeAudioData` and `ogg_stream_pagein` prologue validation failed; the exact build is recorded as `failed` and production support remains 1.2.98.301 only.
+- Spotify 1.2.99.317 was re-analyzed on 2026-09-11 after its private functions moved. Exact version-specific hook targets were added, both prologues remained fail-closed, and four consecutive non-instrumented “8 Mile” compatibility captures passed all checks before support was recorded. The production daemon then completed multiple additional Eminem tracks through the Web UI API with independently validated full-duration MP3 output.
 
 ## Remaining intentional limitations
 

@@ -1,10 +1,10 @@
 # Known Failure Modes
 
-Current as of 2026-09-10.
+Current as of 2026-09-11.
 
 ## Spotify version mismatch
 
-Production support is an exact-version registry. Spotify **1.2.98.301 arm64** is currently supported; unrecorded builds and entries recorded as `failed` are treated as unsupported.
+Production support is an exact-version registry. Spotify **1.2.98.301** and **1.2.99.317 arm64** are currently supported; unrecorded builds and entries recorded as `failed` are treated as unsupported.
 
 Expected behavior:
 
@@ -14,7 +14,7 @@ Expected behavior:
 - native hook installation also verifies the expected prologues and fails closed if the binary does not match.
 - `soggfy compat probe` can test the current patch against an isolated candidate clone without weakening those production checks.
 
-On 2026-09-08, Spotify **1.2.99.317 arm64** was probed with the current implementation. IPC became ready, but both `DecodeAudioData` and `ogg_stream_pagein` reported prologue mismatches, so the registry records that exact build as `failed`.
+On 2026-09-08, Spotify **1.2.99.317 arm64** initially failed because both private hook functions had moved. On 2026-09-11, the new addresses were independently identified from unique function-body matches, added as exact version-specific targets, and revalidated through four consecutive full compatibility captures. The registry now records 1.2.99.317 as `supported`.
 
 Do not "fix" this by removing the checks or installing guessed offsets. Re-analyze the new Spotify binary, establish new signatures/offsets, rerun `soggfy compat probe`, and record support only after every probe check passes.
 

@@ -18,13 +18,13 @@ import { PlaylistPanel } from "./components/soggfy/PlaylistPanel";
 import { SearchPanel } from "./components/soggfy/SearchPanel";
 import {
   createSearchSession,
-  hashForPage,
+  hashForWorkspaceLocation,
   jobStateByTrack,
   mergeAlbumPages,
   mergePlaylistPages,
   mergeSearchTabPage,
-  pageFromHash,
   partitionJobs,
+  workspaceLocationFromHash,
   revisionResetAfterHealth,
   searchTabNeedsLoad,
   setActiveSearchTab,
@@ -57,7 +57,7 @@ function parseDirectSpotifyInput(value: string): DirectSpotifyInput {
 export function App() {
   const [query, setQuery] = useState("");
   const [activePage, setActivePage] = useState<WorkspacePage>(() =>
-    typeof window === "undefined" ? "search" : pageFromHash(window.location.hash),
+    typeof window === "undefined" ? "search" : workspaceLocationFromHash(window.location.hash).page,
   );
   const [snapshot, setSnapshot] = useState<JobsSnapshot>(EMPTY_SNAPSHOT);
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
@@ -73,6 +73,15 @@ export function App() {
   const [playerJobId, setPlayerJobId] = useState<string | null>(null);
   const latestSnapshotRevision = useRef(0);
   const snapshotGeneration = useRef(0);
+  const albumRequestGeneration = useRef(0);
+  const playlistRequestGeneration = useRef(0);
+  const searchRequestGeneration = useRef(0);
+  const appliedLocationHash = useRef<string | null>(null);
+  const searchSessionRef = useRef(searchSession);
+
+  useEffect(() => {
+    searchSessionRef.current = searchSession;
+  }, [searchSession]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,16 +126,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const syncPageFromLocation = () => setActivePage(pageFromHash(window.location.hash));
-    window.addEventListener("hashchange", syncPageFromLocation);
-    window.addEventListener("popstate", syncPageFromLocation);
-    return () => {
-      window.removeEventListener("hashchange", syncPageFromLocation);
-      window.removeEventListener("popstate", syncPageFromLocation);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 4200);
     return () => window.clearTimeout(timer);
@@ -153,25 +152,50 @@ export function App() {
     setNotice(count > 1 ? `Queued ${count} tracks.` : "Download queued.");
   };
 
-  const loadPlaylist = async (playlistId: string, offset = 0, replace = true) => {
+  const loadPlaylist = async (
+    playlistId: string,
+    offset = 0,
+    replace = true,
+    invalidateSearchGeneration = true,
+  ) => {
+    albumRequestGeneration.current += 1;
+    if (invalidateSearchGeneration) searchRequestGeneration.current += 1;
+    setAlbumLoading(false);
+    const requestGeneration = ++playlistRequestGeneration.current;
     setPlaylistLoading(true);
     setSearchError(null);
     try {
       const response = await fetch(`/api/playlist?id=${encodeURIComponent(playlistId)}&offset=${offset}&limit=100`);
+      if (requestGeneration !== playlistRequestGeneration.current) return;
       const data = await response.json();
+      if (requestGeneration !== playlistRequestGeneration.current) return;
       if (!response.ok) throw Object.assign(new Error(data.error || "Playlist lookup failed"), { status: response.status });
       setAlbumPage(null);
       setPlaylistPage((current) => replace || !current ? data : mergePlaylistPages(current, data));
+    } catch (error) {
+      if (requestGeneration !== playlistRequestGeneration.current) return;
+      throw error;
     } finally {
-      setPlaylistLoading(false);
+      if (requestGeneration === playlistRequestGeneration.current) setPlaylistLoading(false);
     }
   };
 
-  const loadAlbum = async (albumId: string, offset = 0, replace = true, albumHint?: SearchResult) => {
+  const loadAlbum = async (
+    albumId: string,
+    offset = 0,
+    replace = true,
+    albumHint?: SearchResult,
+    invalidateSearchGeneration = true,
+  ) => {
+    playlistRequestGeneration.current += 1;
+    if (invalidateSearchGeneration) searchRequestGeneration.current += 1;
+    setPlaylistLoading(false);
+    const requestGeneration = ++albumRequestGeneration.current;
     setAlbumLoading(true);
     setSearchError(null);
     try {
       const response = await fetch(`/api/album?id=${encodeURIComponent(albumId)}&offset=${offset}&limit=100`);
+      if (requestGeneration !== albumRequestGeneration.current) return;
       const data = await response.json() as AlbumPage & { error?: string };
       if (!response.ok) throw new Error(data.error || "Album lookup failed");
       if (albumHint?.type === "album" && albumHint.id === albumId) {
@@ -182,10 +206,14 @@ export function App() {
           imageUrl: albumHint.imageUrl || data.album.imageUrl,
         };
       }
+      if (requestGeneration !== albumRequestGeneration.current) return;
       setPlaylistPage(null);
       setAlbumPage((current) => replace || !current ? data : mergeAlbumPages(current, data));
+    } catch (error) {
+      if (requestGeneration !== albumRequestGeneration.current) return;
+      throw error;
     } finally {
-      setAlbumLoading(false);
+      if (requestGeneration === albumRequestGeneration.current) setAlbumLoading(false);
     }
   };
 
@@ -204,9 +232,11 @@ export function App() {
     }
   };
 
-  const loadTrackResult = async (trackId: string, sourceQuery: string) => {
+  const loadTrackResult = async (trackId: string, sourceQuery: string, requestGeneration?: number) => {
     const response = await fetch(`/api/track?id=${encodeURIComponent(trackId)}`);
+    if (requestGeneration !== undefined && requestGeneration !== searchRequestGeneration.current) return;
     const data = await response.json() as SearchResult & { error?: string };
+    if (requestGeneration !== undefined && requestGeneration !== searchRequestGeneration.current) return;
     if (!response.ok) throw new Error(data.error || "Track lookup failed");
     setPlaylistPage(null);
     setAlbumPage(null);
@@ -214,58 +244,84 @@ export function App() {
   };
 
   const submitSearch = async (value: string) => {
+    const requestGeneration = ++searchRequestGeneration.current;
+    albumRequestGeneration.current += 1;
+    playlistRequestGeneration.current += 1;
+    setAlbumLoading(false);
+    setPlaylistLoading(false);
     const submitted = value.trim();
     setSearchError(null);
     setNotice(null);
     try {
       const direct = parseDirectSpotifyInput(submitted);
       if (direct?.type === "playlist") {
-        await loadPlaylist(direct.id, 0, true);
+        pushWorkspaceLocation({ page: "search", searchTab: "playlist", detail: { type: "playlist", id: direct.id } });
+        await loadPlaylist(direct.id, 0, true, false);
         return;
       }
       if (direct?.type === "track") {
-        await loadTrackResult(direct.id, submitted);
+        pushWorkspaceLocation({ page: "search", searchTab: "track" });
+        await loadTrackResult(direct.id, submitted, requestGeneration);
         return;
       }
       if (direct?.type === "album") {
-        await loadAlbum(direct.id, 0, true);
+        pushWorkspaceLocation({ page: "search", searchTab: "album", detail: { type: "album", id: direct.id } });
+        await loadAlbum(direct.id, 0, true, undefined, false);
         return;
       }
       if (direct?.type === "bare") {
         const playlistResponse = await fetch(`/api/playlist?id=${encodeURIComponent(direct.id)}&offset=0&limit=100`);
+        if (requestGeneration !== searchRequestGeneration.current) return;
         if (playlistResponse.ok) {
+          const playlistData = await playlistResponse.json();
+          if (requestGeneration !== searchRequestGeneration.current) return;
+          pushWorkspaceLocation({ page: "search", searchTab: "playlist", detail: { type: "playlist", id: direct.id } });
           setAlbumPage(null);
-          setPlaylistPage(await playlistResponse.json());
+          setPlaylistPage(playlistData);
           return;
         }
         if (playlistResponse.status !== 404) {
           const data = await playlistResponse.json().catch(() => ({}));
+          if (requestGeneration !== searchRequestGeneration.current) return;
           throw new Error(data.error || "Playlist lookup failed");
         }
         const albumResponse = await fetch(`/api/album?id=${encodeURIComponent(direct.id)}&offset=0&limit=100`);
+        if (requestGeneration !== searchRequestGeneration.current) return;
         if (albumResponse.ok) {
+          const albumData = await albumResponse.json();
+          if (requestGeneration !== searchRequestGeneration.current) return;
+          pushWorkspaceLocation({ page: "search", searchTab: "album", detail: { type: "album", id: direct.id } });
           setPlaylistPage(null);
-          setAlbumPage(await albumResponse.json());
+          setAlbumPage(albumData);
           return;
         }
-        await loadTrackResult(direct.id, submitted);
+        pushWorkspaceLocation({ page: "search", searchTab: "track" });
+        await loadTrackResult(direct.id, submitted, requestGeneration);
         return;
       }
 
+      pushWorkspaceLocation({ page: "search", searchTab: "track" });
       setPlaylistPage(null);
       setAlbumPage(null);
       setSearchSession(createSearchSession(submitted));
       await requestSearchPage(submitted, "track", 0, false);
     } catch (error) {
+      if (requestGeneration !== searchRequestGeneration.current) return;
       setSearchError(error instanceof Error ? error.message : "Spotify search failed");
     }
   };
 
   const changeSearchTab = (tab: SearchTab) => {
+    searchRequestGeneration.current += 1;
+    albumRequestGeneration.current += 1;
+    playlistRequestGeneration.current += 1;
+    setAlbumLoading(false);
+    setPlaylistLoading(false);
     setPlaylistPage(null);
     setAlbumPage(null);
     const current = searchSession;
     setSearchSession((session) => setActiveSearchTab(session, tab));
+    pushWorkspaceLocation({ page: "search", searchTab: tab });
     if (current.query && searchTabNeedsLoad(current, tab)) void requestSearchPage(current.query, tab, 0, false);
   };
 
@@ -360,9 +416,59 @@ export function App() {
   };
 
   const closeSearchDetail = () => {
+    searchRequestGeneration.current += 1;
+    albumRequestGeneration.current += 1;
+    playlistRequestGeneration.current += 1;
+    setAlbumLoading(false);
+    setPlaylistLoading(false);
     setAlbumPage(null);
     setPlaylistPage(null);
+    pushWorkspaceLocation({ page: "search", searchTab: searchSession.activeTab });
   };
+
+  const pushWorkspaceLocation = (location: Parameters<typeof hashForWorkspaceLocation>[0]) => {
+    const hash = hashForWorkspaceLocation(location);
+    appliedLocationHash.current = hash;
+    if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+  };
+
+  useEffect(() => {
+    const syncWorkspaceFromLocation = () => {
+      const hash = window.location.hash || "#search";
+      if (appliedLocationHash.current === hash) return;
+      appliedLocationHash.current = hash;
+      searchRequestGeneration.current += 1;
+      const location = workspaceLocationFromHash(hash);
+      setActivePage(location.page);
+      if (location.page !== "search") return;
+
+      const tab = location.searchTab ?? "track";
+      const currentSession = searchSessionRef.current;
+      setSearchSession((session) => setActiveSearchTab(session, tab));
+      if (location.detail?.type === "album") {
+        void loadAlbum(location.detail.id, 0, true).catch((error) => setSearchError(error.message));
+      } else if (location.detail?.type === "playlist") {
+        void loadPlaylist(location.detail.id, 0, true).catch((error) => setSearchError(error.message));
+      } else {
+        albumRequestGeneration.current += 1;
+        playlistRequestGeneration.current += 1;
+        setAlbumLoading(false);
+        setPlaylistLoading(false);
+        setAlbumPage(null);
+        setPlaylistPage(null);
+        if (currentSession.query && searchTabNeedsLoad(currentSession, tab)) {
+          void requestSearchPage(currentSession.query, tab, 0, false);
+        }
+      }
+    };
+    syncWorkspaceFromLocation();
+    window.addEventListener("hashchange", syncWorkspaceFromLocation);
+    window.addEventListener("popstate", syncWorkspaceFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncWorkspaceFromLocation);
+      window.removeEventListener("popstate", syncWorkspaceFromLocation);
+    };
+  }, []);
 
   const runJobAction = async (jobId: string, action: "cancel" | "retry") => {
     setSearchError(null);
@@ -381,9 +487,17 @@ export function App() {
   };
 
   const navigate = (page: WorkspacePage) => {
+    searchRequestGeneration.current += 1;
     setActivePage(page);
-    const hash = hashForPage(page);
-    if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+    pushWorkspaceLocation(page === "search"
+      ? {
+          page,
+          searchTab: searchSession.activeTab,
+          ...(albumPage ? { detail: { type: "album" as const, id: albumPage.album.id } }
+            : playlistPage ? { detail: { type: "playlist" as const, id: playlistPage.playlist.id } }
+              : {}),
+        }
+      : { page });
   };
 
   const ready = Boolean(health?.started && (health.readyInstances ?? 0) > 0);
@@ -399,8 +513,14 @@ export function App() {
       onLoadMore={loadMoreSearch}
       onPlayTrack={playTrack}
       onQueueTrack={queueTrack}
-      onOpenAlbum={(albumHint) => void loadAlbum(albumHint.id, 0, true, albumHint).catch((error) => setSearchError(error.message))}
-      onOpenPlaylist={(id) => void loadPlaylist(id, 0, true).catch((error) => setSearchError(error.message))}
+      onOpenAlbum={(albumHint) => {
+        pushWorkspaceLocation({ page: "search", searchTab: "album", detail: { type: "album", id: albumHint.id } });
+        void loadAlbum(albumHint.id, 0, true, albumHint).catch((error) => setSearchError(error.message));
+      }}
+      onOpenPlaylist={(id) => {
+        pushWorkspaceLocation({ page: "search", searchTab: "playlist", detail: { type: "playlist", id } });
+        void loadPlaylist(id, 0, true).catch((error) => setSearchError(error.message));
+      }}
       detail={albumPage ? (
         <AlbumPanel
           page={albumPage}

@@ -15,6 +15,12 @@ export interface LoginStateCloneResult {
   copiedPrefs: boolean;
   copiedUsers: boolean;
   copiedSessionCache: boolean;
+  copiedWebKit: boolean;
+}
+
+export interface LoginStateCloneOptions {
+  webKitSourceDir?: string;
+  webKitDest?: string;
 }
 
 export const SUPPORTED_SPOTIFY_VERSION = latestSupportedSpotifyVersion() ?? "0.0.0";
@@ -57,25 +63,38 @@ function cloneDirectoryCow(source: string, destination: string): void {
   }
 }
 
+export function cloneSpotifyWebKitState(sourceDir: string, destinationDir: string): boolean {
+  if (!existsSync(sourceDir)) return false;
+  ensurePrivateDir(join(destinationDir, ".."));
+  cloneDirectoryCow(sourceDir, destinationDir);
+  return true;
+}
+
 export function cloneSpotifyLoginState(
   appSupportDest: string,
   sourceDir = AUTH_STATE_DIR,
+  options: LoginStateCloneOptions = {},
 ): LoginStateCloneResult {
   // Runtime snapshots must not race logout/import. Explicit official sources
   // are used by auth operations that already own the destination's lock.
   const lock = sourceDir === AUTH_STATE_DIR ? acquireAuthStateLock() : undefined;
   try {
-    return copySpotifyLoginState(appSupportDest, sourceDir);
+    return copySpotifyLoginState(appSupportDest, sourceDir, options);
   } finally {
     lock?.release();
   }
 }
 
-function copySpotifyLoginState(appSupportDest: string, sourceDir: string): LoginStateCloneResult {
+function copySpotifyLoginState(
+  appSupportDest: string,
+  sourceDir: string,
+  options: LoginStateCloneOptions,
+): LoginStateCloneResult {
   ensurePrivateDir(appSupportDest);
   let copiedPrefs = false;
   let copiedUsers = false;
   let copiedSessionCache = false;
+  let copiedWebKit = false;
 
   const prefsPath = join(sourceDir, "prefs");
   if (existsSync(prefsPath)) {
@@ -104,7 +123,17 @@ function copySpotifyLoginState(appSupportDest: string, sourceDir: string): Login
     }
   }
 
-  return { copiedPrefs, copiedUsers, copiedSessionCache };
+  const webKitSourceDir = options.webKitSourceDir
+    ?? join(sourceDir, "WebKit/com.spotify.client");
+  if (options.webKitDest) {
+    if (existsSync(webKitSourceDir)) {
+      copiedWebKit = cloneSpotifyWebKitState(webKitSourceDir, options.webKitDest);
+    } else {
+      rmSync(options.webKitDest, { recursive: true, force: true });
+    }
+  }
+
+  return { copiedPrefs, copiedUsers, copiedSessionCache, copiedWebKit };
 }
 
 export function descendantPidsFromProcessTable(rootPid: number, table: string): number[] {
