@@ -8,7 +8,9 @@ test("Ogg hook follows libogg success semantics and gates capture on complete ho
   const hook = source("soggfy-macos/Payload/DecodeHook.mm");
   expect(hook).toContain("ret != 0");
   expect(hook).toContain("!g_decoder_hooks_ready.load()");
-  const partialInstall = hook.slice(hook.indexOf("g_decoder_hooks_ready.store"));
+  const readinessStore = hook.indexOf("g_decoder_hooks_ready.store");
+  expect(readinessStore).toBeGreaterThan(-1);
+  const partialInstall = hook.slice(readinessStore);
   expect(partialInstall).not.toContain("orig_DecodeAudioData = nullptr;");
   expect(partialInstall).not.toContain("orig_ogg_stream_pagein = nullptr;");
   expect(hook).toContain("g_decoder_hooks_ready.load()");
