@@ -35,7 +35,7 @@ await withBuildPublishLock(publishLockDir, async () => {
     const serverEntry = path.join(stagingDir, "index.js");
     await rename(serverEntry, path.join(stagingDir, "server.js"));
 
-    await publishRuntimeDirectory(stagingDir, outdir);
+    await publishRuntimeDirectory(stagingDir, outdir, nonce);
     console.log(`Bundled web runtime: ${path.join(outdir, "server.js")}`);
   } finally {
     await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);

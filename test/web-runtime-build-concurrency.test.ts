@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withBuildPublishLock } from "../webapp/build-lock";
@@ -71,20 +71,66 @@ test("build lock removes only its newly created directory when owner metadata ca
   expect(rethrow).toBeGreaterThan(cleanup);
 });
 
-test("runtime publication keeps the active server when a dependency cannot be published", async () => {
+test("runtime publication atomically switches server.js to a complete immutable version", async () => {
   const root = mkdtempSync(join(tmpdir(), "soggfy-web-publish-"));
   const staging = join(root, "staging");
   const outdir = join(root, "out");
   mkdirSync(staging);
   mkdirSync(outdir);
   writeFileSync(join(outdir, "server.js"), "old-server");
+  writeFileSync(join(outdir, "old-chunk.js"), "old-chunk");
   writeFileSync(join(staging, "server.js"), "new-server");
-  writeFileSync(join(staging, "chunk.js"), "new-chunk");
-  mkdirSync(join(outdir, "chunk.js"));
+  writeFileSync(join(staging, "new-chunk.js"), "new-chunk");
   try {
-    await expect(publishRuntimeDirectory(staging, outdir)).rejects.toThrow();
-    expect(readFileSync(join(outdir, "server.js"), "utf8")).toBe("old-server");
+    await publishRuntimeDirectory(staging, outdir, "build-v2");
+    expect(readlinkSync(join(outdir, "server.js"))).toBe("versions/build-v2/server.js");
+    expect(readFileSync(realpathSync(join(outdir, "server.js")), "utf8")).toBe("new-server");
+    expect(readFileSync(join(outdir, "versions/build-v2/new-chunk.js"), "utf8")).toBe("new-chunk");
+    expect(readFileSync(join(outdir, "old-chunk.js"), "utf8")).toBe("old-chunk");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed immutable-version publication leaves the existing server pointer unchanged", async () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-web-publish-fail-"));
+  const staging = join(root, "staging");
+  const outdir = join(root, "out");
+  mkdirSync(staging);
+  mkdirSync(join(outdir, "versions/build-v2"), { recursive: true });
+  writeFileSync(join(outdir, "server.js"), "old-server");
+  writeFileSync(join(outdir, "versions/build-v2/existing"), "occupied");
+  writeFileSync(join(staging, "server.js"), "new-server");
+  writeFileSync(join(staging, "new-chunk.js"), "new-chunk");
+  try {
+    await expect(publishRuntimeDirectory(staging, outdir, "build-v2")).rejects.toThrow();
+    expect(readFileSync(join(outdir, "server.js"), "utf8")).toBe("old-server");
+    expect(readFileSync(join(outdir, "versions/build-v2/existing"), "utf8")).toBe("occupied");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("concurrent runtime publications use collision-resistant temporary pointers", async () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-web-publish-concurrent-"));
+  const outdir = join(root, "out");
+  mkdirSync(outdir);
+  writeFileSync(join(outdir, "server.js"), "old-server");
+  const originalNow = Date.now;
+  Date.now = () => 1234567890;
+  try {
+    const publish = async (version: string) => {
+      const staging = join(root, `staging-${version}`);
+      mkdirSync(staging);
+      writeFileSync(join(staging, "server.js"), version);
+      await publishRuntimeDirectory(staging, outdir, version);
+    };
+    await Promise.all([publish("build-a"), publish("build-b")]);
+    expect(readFileSync(join(outdir, "versions/build-a/server.js"), "utf8")).toBe("build-a");
+    expect(readFileSync(join(outdir, "versions/build-b/server.js"), "utf8")).toBe("build-b");
+    expect(["build-a", "build-b"]).toContain(readFileSync(realpathSync(join(outdir, "server.js")), "utf8"));
+  } finally {
+    Date.now = originalNow;
     rmSync(root, { recursive: true, force: true });
   }
 });

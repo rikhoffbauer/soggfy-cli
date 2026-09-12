@@ -101,6 +101,7 @@ test("Spotify child environment strips TLS key logging as well as API credential
 test("runtime repository root supports source and bundled server layouts", () => {
   expect(resolveRepoRoot("/repo/webapp/src/server")).toBe(resolve("/repo"));
   expect(resolveRepoRoot("/repo/dist/webapp")).toBe(resolve("/repo"));
+  expect(resolveRepoRoot("/repo/dist/webapp/versions/build-123")).toBe(resolve("/repo"));
 });
 
 test("cover downloads are bounded and growing streams are pull-driven and cancellable", () => {

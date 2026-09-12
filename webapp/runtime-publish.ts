@@ -1,29 +1,32 @@
-import { mkdir, readdir, rename } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdir, rename, rm, symlink } from "node:fs/promises";
+import { join } from "node:path";
 
-async function collectFiles(root: string, relativeDir = ""): Promise<string[]> {
-  const entries = await readdir(join(root, relativeDir), { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const relativePath = join(relativeDir, entry.name);
-    if (entry.isDirectory()) files.push(...await collectFiles(root, relativePath));
-    else if (entry.isFile()) files.push(relativePath);
+export async function publishRuntimeDirectory(
+  stagingDir: string,
+  outdir: string,
+  versionName: string,
+): Promise<void> {
+  if (!/^[a-zA-Z0-9._-]+$/.test(versionName)) {
+    throw new Error(`Invalid web runtime version name: ${versionName}`);
   }
-  return files;
-}
 
-export async function publishRuntimeDirectory(stagingDir: string, outdir: string): Promise<void> {
-  await mkdir(outdir, { recursive: true });
-  const files = await collectFiles(stagingDir);
-  files.sort((left, right) => {
-    const leftServer = left === "server.js" ? 1 : 0;
-    const rightServer = right === "server.js" ? 1 : 0;
-    return leftServer - rightServer || left.localeCompare(right);
-  });
+  const versionsDir = join(outdir, "versions");
+  const versionDir = join(versionsDir, versionName);
+  await mkdir(versionsDir, { recursive: true });
+  await rename(stagingDir, versionDir);
 
-  for (const relativePath of files) {
-    const destination = join(outdir, relativePath);
-    await mkdir(dirname(destination), { recursive: true });
-    await rename(join(stagingDir, relativePath), destination);
+  const serverPath = join(outdir, "server.js");
+  const pointerTemp = join(outdir, `.server-${randomUUID()}`);
+  let published = false;
+  try {
+    await symlink(join("versions", versionName, "server.js"), pointerTemp);
+    await rename(pointerTemp, serverPath);
+    published = true;
+  } finally {
+    await rm(pointerTemp, { force: true }).catch(() => undefined);
+    if (!published) {
+      await rm(versionDir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }

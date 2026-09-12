@@ -6,8 +6,10 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 export function resolveRepoRoot(serverDir = SERVER_DIR): string {
   const sourceMarker = `${sep}webapp${sep}src${sep}server`;
   const bundledMarker = `${sep}dist${sep}webapp`;
-  if (serverDir.includes(sourceMarker)) return resolve(serverDir, "../../..");
-  if (serverDir.includes(bundledMarker)) return resolve(serverDir, "../..");
+  for (const marker of [sourceMarker, bundledMarker]) {
+    const markerIndex = serverDir.indexOf(marker);
+    if (markerIndex >= 0) return resolve(serverDir.slice(0, markerIndex) || sep);
+  }
   return resolve(serverDir, "../../..");
 }
 export const REPO_ROOT = resolveRepoRoot();
