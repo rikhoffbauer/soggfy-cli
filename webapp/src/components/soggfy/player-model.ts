@@ -1,10 +1,15 @@
 import type { DownloadJob } from "./models";
 
 export function playerStatus(job: DownloadJob, playing: boolean, buffering: boolean): string {
-  if (buffering && job.state !== "completed") return "Buffering";
   if (job.state === "completed") return "Downloaded";
   if (job.state === "failed") return "Playback failed";
   if (job.state === "cancelled") return "Cancelled";
+  if (buffering) return "Buffering";
+  if (job.state === "queued") return "Queued";
+  if (job.state === "assigned") return "Assigned";
+  if (job.state === "starting") return "Starting";
+  if (job.state === "finalizing") return "Finalizing";
+  if (job.state === "transcoding") return "Transcoding";
   return playing ? "Playing · downloading" : "Paused · downloading";
 }
 

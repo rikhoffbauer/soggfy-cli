@@ -15,6 +15,7 @@ function stateLabel(job?: DownloadJob) {
   if (job.state === "failed") return "Failed";
   if (job.state === "cancelled") return "Cancelled";
   if (job.state === "capturing" || job.state === "playing") return "Downloading";
+  if (job.state === "transcoding" || job.state === "finalizing") return "Processing";
   return "Queued";
 }
 

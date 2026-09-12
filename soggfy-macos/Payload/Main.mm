@@ -29,6 +29,7 @@
 #include <objc/runtime.h>
 #include <string>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <thread>
@@ -244,6 +245,10 @@ static uint64_t now_ms() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(steady_clock::now().time_since_epoch())
       .count();
+}
+
+void MarkAudioActivity() {
+  g_last_audio_time_ms.store(now_ms());
 }
 
 
@@ -547,6 +552,12 @@ void StartIPCServer() {
     if (client_fd < 0) {
       printf("[Soggfy-IPC] accept failed: %s\n", strerror(errno));
       continue;
+    }
+
+    const struct timeval receive_timeout = {2, 0};
+    if (setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
+                   sizeof(receive_timeout)) != 0) {
+      printf("[Soggfy-WARN] IPC receive timeout setup failed: %s\n", strerror(errno));
     }
 
     char buffer[4096] = {0};

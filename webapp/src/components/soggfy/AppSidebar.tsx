@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   IconActivityHeartbeat,
   IconBook2,
@@ -19,7 +20,7 @@ interface AppSidebarProps {
 }
 
 const DOCS_BASE = "https://rikhoffbauer.github.io/soggfy-cli/";
-const PRIMARY: Array<{ page: WorkspacePage; label: string; icon: React.ReactNode; count?: "queue" | "library" }> = [
+const PRIMARY: Array<{ page: WorkspacePage; label: string; icon: ReactNode; count?: "queue" | "library" }> = [
   { page: "search", label: "Search", icon: <IconSearch /> },
   { page: "queue", label: "Queue", icon: <IconDownload />, count: "queue" },
   { page: "downloads", label: "Downloads", icon: <IconHistory />, count: "library" },
@@ -62,7 +63,7 @@ export function AppSidebar({ activePage, onNavigate, queueCount, libraryCount, h
   );
 }
 
-function SidebarButton({ active, icon, label, count, onClick }: { active: boolean; icon: React.ReactNode; label: string; count?: number; onClick: () => void }) {
+function SidebarButton({ active, icon, label, count, onClick }: { active: boolean; icon: ReactNode; label: string; count?: number; onClick: () => void }) {
   return (
     <button type="button" aria-current={active ? "page" : undefined} onClick={onClick} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${active ? "bg-white/[0.075] text-white" : "text-white/52 hover:bg-white/[0.05] hover:text-white"}`}>
       <span className={`[&>svg]:size-[18px] [&>svg]:stroke-[1.7] ${active ? "text-primary" : "text-white/42 group-hover:text-primary"}`}>{icon}</span><span>{label}</span>
@@ -71,6 +72,6 @@ function SidebarButton({ active, icon, label, count, onClick }: { active: boolea
   );
 }
 
-function ExternalLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
+function ExternalLink({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
   return <a href={href} target="_blank" rel="noreferrer" className="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-white/52 transition hover:bg-white/[0.05] hover:text-white"><span className="[&>svg]:size-[18px] [&>svg]:stroke-[1.7] text-white/42 group-hover:text-primary">{icon}</span><span>{label}</span></a>;
 }

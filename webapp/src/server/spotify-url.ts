@@ -1,4 +1,5 @@
 export function parseTrackId(input: string): string | null {
+  input = input.trim();
   const urlRegex = /open\.spotify\.com\/track\/([a-zA-Z0-9]{22})/;
   const uriRegex = /spotify:track:([a-zA-Z0-9]{22})/;
   const idRegex = /^([a-zA-Z0-9]{22})$/;

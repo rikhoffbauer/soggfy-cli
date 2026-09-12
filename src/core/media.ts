@@ -271,5 +271,6 @@ export function displayFileName(
   const stem = metadata?.title && metadata?.artist
     ? `${metadata.artist} - ${metadata.title}`
     : metadata?.title || trackId;
-  return `${sanitizeFileName(stem)}.${extension || basename(stem).split(".").pop() || "bin"}`;
+  const suffix = extension?.replace(/^\./, "") || "bin";
+  return `${sanitizeFileName(stem)}.${suffix}`;
 }

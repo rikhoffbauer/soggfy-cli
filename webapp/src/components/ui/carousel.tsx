@@ -135,15 +135,28 @@ function Carousel({
 
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "ArrowLeft") {
+      const target = event.target as HTMLElement
+      if (
+        target.isContentEditable ||
+        target.closest(
+          "input, select, textarea, [contenteditable]:not([contenteditable='false']), [role='slider']"
+        )
+      ) {
+        return
+      }
+
+      const previousKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft"
+      const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight"
+
+      if (event.key === previousKey) {
         event.preventDefault()
         scrollPrev()
-      } else if (event.key === "ArrowRight") {
+      } else if (event.key === nextKey) {
         event.preventDefault()
         scrollNext()
       }
     },
-    [scrollPrev, scrollNext]
+    [orientation, scrollPrev, scrollNext]
   )
 
   React.useEffect(() => {

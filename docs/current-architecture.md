@@ -107,7 +107,7 @@ The 2026-09-10 playback repair and four-track evidence are recorded in [Playback
 
 Automated verification on 2026-09-08:
 
-- `bun test`: 256 passed, 0 failed.
+- `bun test`: 263 passed, 0 failed.
 - root TypeScript: passed.
 - native StateManager/CapturePolicy fixture: passed.
 - native dylib build: passed.

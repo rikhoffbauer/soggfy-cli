@@ -51,8 +51,8 @@ export function PlaylistPanel({ page, jobsByTrack, loading, queueAllLoading, onB
         {rows.map((row) => row.kind === "track" ? (
           <TrackListRow key={`${row.index}:${row.track.id}`} track={row.track} job={jobsByTrack.get(row.track.id)} onPlay={onPlay} onQueue={onQueue} />
         ) : (
-          <div key={`${row.index}:${row.issue.reason}`} className="grid min-h-14 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-white/[0.05] px-3 text-xs text-white/28">
-            <div className="text-right tabular-nums">{row.index + 1}</div><div>Unavailable playlist item</div><span>Unavailable</span>
+          <div key={`${row.index}:${row.issue.reason}`} className="grid min-h-14 grid-cols-[2rem_2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-white/[0.05] px-2 text-xs text-white/28 sm:px-3">
+            <div className="text-right tabular-nums">{row.index + 1}</div><div aria-hidden="true" /><div>Unavailable playlist item</div><span>Unavailable</span>
           </div>
         ))}
       </div>

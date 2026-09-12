@@ -35,7 +35,7 @@ export function listHelpTopics(): string[] {
 export function getHelpTopic(topic: string): string | null {
   const lower = topic.toLowerCase();
   const normalized = lower === "stream" ? "download" : lower;
-  return TOPICS[normalized] ?? null;
+  return Object.hasOwn(TOPICS, normalized) ? TOPICS[normalized]! : null;
 }
 
 function stripFrontmatter(markdown: string): string {

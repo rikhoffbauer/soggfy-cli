@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${TMPDIR:-/tmp}/soggfy-hook-targets-fixture"
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/soggfy-hook-targets-fixture.XXXXXX")"
+trap 'rm -rf "$tmpdir"' EXIT
+OUT="$tmpdir/hook_targets_fixture"
 
 xcrun --sdk macosx clang++ \
   -std=c++17 \

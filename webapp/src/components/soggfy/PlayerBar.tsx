@@ -50,6 +50,7 @@ export function PlayerBar({ job, onClose }: PlayerBarProps) {
     setDuration(job.durationMs ? job.durationMs / 1000 : 0);
     audio.src = streamUrl(job);
     audio.currentTime = 0;
+    audio.volume = volume;
     audio.load();
     void audio.play().catch(() => setPlaying(false));
   }, [job?.id]);
@@ -72,6 +73,7 @@ export function PlayerBar({ job, onClose }: PlayerBarProps) {
     };
     audio.addEventListener("loadedmetadata", handleLoadedMetadata, { once: true });
     audio.src = streamUrl(job);
+    audio.volume = volume;
     audio.load();
     return () => audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
   }, [job?.state, job?.id]);

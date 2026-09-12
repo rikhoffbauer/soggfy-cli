@@ -3,6 +3,8 @@ import {
   findDaemonOwnerFromSnapshots,
   findLegacyDaemonOwnerFromSnapshots,
   findOrphanSpotifyOwnerFromSnapshots,
+  inspectOrphanSpotifyOwner,
+  inspectOrphanSpotifyOwnerFromSnapshots,
   retireLegacyDaemonOwner,
   retireOrphanSpotifyOwner,
 } from "../src/core/daemon-owner";
@@ -102,6 +104,19 @@ test("identifies only an orphaned Soggfy Spotify root for the exact profile", ()
   expect(findOrphanSpotifyOwnerFromSnapshots(binary, "/tmp/other-profile", ps)).toBeNull();
 });
 
+
+
+test("classifies an exact orphan as unverifiable when its kernel identity cannot be read", () => {
+  const binary = "/Users/user/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify";
+  const profile = "/Users/user/.soggfy/workspace/profiles/cli_instance";
+  const ps = `8061 1 ${binary} --disable-gpu --user-data-dir=${profile}`;
+
+  expect(inspectOrphanSpotifyOwnerFromSnapshots(binary, profile, ps, () => null)).toEqual({
+    kind: "unverifiable",
+    spotifyPid: 8061,
+  });
+});
+
 test("orphan Spotify retirement refuses PID reuse before signaling", async () => {
   const binary = "/Users/user/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify";
   const profile = "/Users/user/.soggfy/workspace/profiles/cli_instance";
@@ -125,4 +140,11 @@ test("orphan Spotify retirement refuses PID reuse before signaling", async () =>
     terminate: async () => { terminated = true; },
   })).rejects.toThrow("identity changed");
   expect(terminated).toBe(false);
+});
+
+
+test("orphan Spotify inspection preserves an unavailable process-table state", () => {
+  const binary = "/Users/user/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify";
+  const profile = "/Users/user/.soggfy/workspace/profiles/cli_instance";
+  expect(inspectOrphanSpotifyOwner(binary, profile, () => null)).toEqual({ kind: "unavailable" });
 });

@@ -78,3 +78,20 @@ test("recorder writes replayable JSONL", () => {
   expect(readFileSync(recorder.path, "utf8").trim().split("\n")).toHaveLength(3);
   expect(replayCaptureTraceFile(recorder.path).maximumBytes).toBe(4096);
 });
+
+
+test("recorder persists invariant violations as replay-safe error evidence", () => {
+  const directory = mkdtempSync(join(tmpdir(), "soggfy-trace-invariant-"));
+  const recorder = new CaptureTraceRecorder("target", directory);
+  recorder.command("play spotify:track:target");
+  recorder.record({
+    type: "playback",
+    raw: JSON.stringify({ uri: "spotify:track:target", state: "playing", position: 1 }),
+  });
+  recorder.command("play spotify:track:target");
+
+  const lines = readFileSync(recorder.path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  expect(lines).toHaveLength(3);
+  expect(lines[2]).toMatchObject({ type: "error", sequence: 3 });
+  expect(replayCaptureTraceFile(recorder.path)).toMatchObject({ commands: 1, records: 3 });
+});

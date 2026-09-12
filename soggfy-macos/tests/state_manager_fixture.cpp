@@ -7,8 +7,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <libproc.h>
 #include <string>
 #include <vector>
+#include <sys/proc_info.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -26,8 +28,20 @@ static bool expect_tag(std::ifstream& in, const char* tag) {
     return std::string(buf, 4) == std::string(tag, 4);
 }
 
+static std::string current_birth_id() {
+    proc_bsdinfo info{};
+    const int bytes = proc_pidinfo(
+        getpid(), PROC_PIDTBSDINFO, 0, &info, sizeof(info));
+    if (bytes != sizeof(info) || info.pbi_start_tvsec == 0 ||
+        info.pbi_start_tvusec >= 1000000) return {};
+    std::string micros = std::to_string(info.pbi_start_tvusec);
+    micros.insert(0, 6 - micros.size(), '0');
+    return std::to_string(info.pbi_start_tvsec) + ":" + micros;
+}
+
 int main() {
-    const fs::path base = fs::temp_directory_path() / "soggfy-state-manager-fixture";
+    const fs::path base = fs::temp_directory_path() /
+        ("soggfy-state-manager-fixture-" + std::to_string(getpid()));
     fs::remove_all(base);
     fs::create_directories(base);
     setenv("SOGGFY_SAVE_PATH", base.string().c_str(), 1);
@@ -68,7 +82,36 @@ int main() {
     int childStatus = 0;
     if (child < 0 || waitpid(child, &childStatus, 0) != child || !WIFEXITED(childStatus) ||
         WEXITSTATUS(childStatus) != 0) return 15;
+
+    const fs::path ownerPath = base / ".capture-owner";
+    const std::string unrelatedTrack = "unrelated-track";
+    manager.ResetPlayback(unrelatedTrack);
+    if (!manager.OwnsWriter(ownerTrack, "ogg")) return 19;
+    std::ifstream ownerIn(ownerPath);
+    int preservedOwnerPid = 0;
+    std::string preservedOwnerBirthId;
+    std::string preservedOwnerTrack;
+    std::string preservedOwnerSource;
+    ownerIn >> preservedOwnerPid >> preservedOwnerBirthId >> preservedOwnerTrack >> preservedOwnerSource;
+    if (preservedOwnerPid != static_cast<int>(getpid()) ||
+        preservedOwnerBirthId != current_birth_id() ||
+        preservedOwnerTrack != ownerTrack || preservedOwnerSource != "ogg") return 20;
+
     manager.ResetPlayback(ownerTrack);
+
+    const std::string birthId = current_birth_id();
+    if (birthId.empty()) return 21;
+    {
+        std::ofstream ownerOut(ownerPath, std::ios::trunc);
+        ownerOut << getpid() << " " << birthId << " live-birth-track ogg\n";
+    }
+    if (manager.TryClaimWriter("birth-other-track", "ogg")) return 22;
+    {
+        std::ofstream ownerOut(ownerPath, std::ios::trunc);
+        ownerOut << getpid() << " 0:000000 stale-birth-track ogg\n";
+    }
+    if (!manager.TryClaimWriter("birth-reuse-track", "ogg")) return 23;
+    manager.ResetPlayback("birth-reuse-track");
 
     const std::string restartedOggTrack = "restarted-ogg-track";
     manager.ResetPlayback(restartedOggTrack);
@@ -78,6 +121,7 @@ int main() {
     if (!manager.OwnsWriter(restartedOggTrack, "ogg")) return 18;
     manager.ReceiveOggData(restartedOggTrack, "replacement-stream", 18);
     manager.FinishPlayback(restartedOggTrack);
+    if (manager.TryClaimWriter(restartedOggTrack, "ogg")) return 24;
     const fs::path restartedOgg = base / (restartedOggTrack + ".ogg");
     std::ifstream restartedIn(restartedOgg, std::ios::binary);
     const std::string restartedContents(

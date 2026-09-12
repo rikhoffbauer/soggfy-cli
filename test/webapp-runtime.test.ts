@@ -53,6 +53,18 @@ test("webapp download jobs never blindly replay a successfully requested track",
   expect(downloadJob).not.toContain("re-requested target track playback");
 });
 
+test("webapp capture coordinator records replay evidence and trusts byte progress", () => {
+  const start = instanceSource.indexOf("  async downloadJob(job: DownloadJob)");
+  const end = instanceSource.indexOf("  private refreshCapturedBytes", start);
+  const downloadJob = instanceSource.slice(start, end);
+  expect(downloadJob).toContain("new BestEffortCaptureTraceRecorder(trackId");
+  expect(downloadJob).toContain('type: "playback"');
+  expect(downloadJob).toContain('type: "status"');
+  expect(downloadJob).toContain('type: "bytes"');
+  expect(downloadJob).toContain("playback.observeCaptureBytes(bytes)");
+  expect(downloadJob).toContain('phase: "failed"');
+});
+
 
 test("standalone web Spotify instances reset transient save state before cloning login state", () => {
   const daemonAttach = instanceSource.indexOf("if (USE_DAEMON_INSTANCE && this.id === 1)");
@@ -63,4 +75,13 @@ test("standalone web Spotify instances reset transient save state before cloning
   expect(reset).toBeGreaterThan(daemonReturn);
   expect(clone).toBeGreaterThan(reset);
   expect(spawn).toBeGreaterThan(clone);
+});
+
+
+test("webapp capture tracing is best-effort and cannot block IPC", () => {
+  const start = instanceSource.indexOf("  async downloadJob(job: DownloadJob)");
+  const end = instanceSource.indexOf("  private refreshCapturedBytes", start);
+  const downloadJob = instanceSource.slice(start, end);
+  expect(downloadJob).toContain("BestEffortCaptureTraceRecorder");
+  expect(downloadJob).not.toContain("new CaptureTraceRecorder(trackId)");
 });

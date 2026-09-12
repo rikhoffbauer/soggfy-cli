@@ -112,7 +112,12 @@ export async function captureTrack(
     await Bun.sleep(250);
     const newStatus = await tracedSend(`get_status ${trackId}`, { retries: 2, timeoutMs: 1500 }).catch(() => "ipc_lost");
     if (newStatus === "ipc_lost") {
-      if (++ipcLossTicks >= 12) throw new Error("IPC lost during capture");
+      if (++ipcLossTicks >= 12) {
+        trace.record({ type: "error", message: "IPC lost during capture" });
+        await tracedSend(`cancel_track ${trackId}`).catch(() => {});
+        await tracedSend("pause").catch(() => {});
+        throw new Error(`IPC lost during capture; trace: ${trace.path}`);
+      }
     } else {
       ipcLossTicks = 0;
       status = newStatus;
@@ -132,7 +137,8 @@ export async function captureTrack(
 
     const currentPath = existsSync(oggPath) ? oggPath : wavPath;
     const isOgg = currentPath.endsWith(".ogg");
-    const bytes = existsSync(currentPath) ? statSync(currentPath).size : 0;
+    let bytes = 0;
+    try { bytes = statSync(currentPath).size; } catch {}
     trace.record({ type: "bytes", path: currentPath, bytes });
     playback.observeCaptureBytes(bytes);
 

@@ -2,6 +2,31 @@ import NodeID3 from "node-id3";
 import type { TrackMetadata } from "./jobs";
 
 export type TagLogger = (message: string) => void;
+const MAX_COVER_BYTES = 8 * 1024 * 1024;
+
+async function readBoundedBody(response: Response, maxBytes = MAX_COVER_BYTES): Promise<Buffer> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`cover image exceeds ${maxBytes} byte limit`);
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel("cover image too large").catch(() => undefined);
+      throw new Error(`cover image exceeds ${maxBytes} byte limit`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total);
+}
 
 export async function writeTrackTags(
   mp3Path: string,
@@ -18,7 +43,7 @@ export async function writeTrackTags(
       const response = await fetchImpl(meta.coverUrl, { signal: AbortSignal.timeout(10_000) });
       if (response.ok) {
         coverMime = response.headers.get("content-type")?.split(";", 1)[0] || coverMime;
-        coverBuffer = Buffer.from(await response.arrayBuffer());
+        coverBuffer = await readBoundedBody(response);
       } else {
         log(`Warning: cover fetch returned ${response.status}`);
       }

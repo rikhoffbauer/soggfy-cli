@@ -314,9 +314,10 @@ function daemonLogs(): void {
 async function isWebServerHealthy(origin = getHttpOrigin()): Promise<boolean> {
   try {
     const token = process.env.SOGGFY_API_TOKEN?.trim();
-    const response = await fetch(`${origin}/api/health`, token ? {
-      headers: { authorization: `Bearer ${token}` },
-    } : undefined);
+    const response = await fetch(`${origin}/api/health`, {
+      signal: AbortSignal.timeout(2_000),
+      ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+    });
     if (!response.ok) return false;
     const body = await response.json() as { ok?: boolean; started?: boolean };
     return body.ok === true && body.started === true;

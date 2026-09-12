@@ -59,15 +59,18 @@ function suppliedTokenIsValid(req: Request, security: ApiSecurity): boolean {
   return Boolean(supplied && security.token && secureEqual(supplied, security.token));
 }
 
-export function authorizeApiRequest(req: Request, security: ApiSecurity): boolean {
-  if (!security.required) return true;
-  if (!security.token) return false;
-  if (suppliedTokenIsValid(req, security)) return true;
+function validSession(req: Request, security: ApiSecurity): boolean {
   pruneSessions(security);
   const session = cookieValue(req, SESSION_COOKIE);
   if (!session) return false;
   const expiresAt = security.sessions.get(sessionDigest(session));
   return typeof expiresAt === "number" && expiresAt > Date.now();
+}
+
+export function authorizeApiRequest(req: Request, security: ApiSecurity): boolean {
+  if (!security.required) return true;
+  if (!security.token) return false;
+  return suppliedTokenIsValid(req, security) || validSession(req, security);
 }
 
 function withSessionCookie(response: Response, security: ApiSecurity, req: Request): Response {
@@ -95,7 +98,7 @@ export function protectApiRoutes(routes: Record<string, any>, security: ApiSecur
           return Response.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
         }
         const response = await handler(req, ...args);
-        return suppliedTokenIsValid(req, security) ? withSessionCookie(response, security, req) : response;
+        return suppliedTokenIsValid(req, security) && !validSession(req, security) ? withSessionCookie(response, security, req) : response;
       };
     }
     protectedRoutes[path] = wrapped;

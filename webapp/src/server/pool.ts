@@ -170,13 +170,20 @@ export class SpotifyPoolManager {
   }
 
   private startWatchdog() {
+    let running = false;
     setInterval(async () => {
-      for (const inst of this.instances) {
-        if (!inst.isReady || inst.isBusy) continue;
-        const ok = await inst.ping();
-        if (!ok) await inst.recycle("watchdog ping failed").catch((err) => inst.log(`watchdog recycle failed: ${err.message}`));
+      if (running) return;
+      running = true;
+      try {
+        for (const inst of this.instances) {
+          if (!inst.isReady || inst.isBusy) continue;
+          const ok = await inst.ping();
+          if (!ok) await inst.recycle("watchdog ping failed").catch((err) => inst.log(`watchdog recycle failed: ${err.message}`));
+        }
+        this.dispatch();
+      } finally {
+        running = false;
       }
-      this.dispatch();
     }, 15_000).unref?.();
   }
 

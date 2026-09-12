@@ -267,6 +267,7 @@ export class JobRegistry {
           outputFormat: format as "mp3" | "ogg" | "wav", metadata: payload.metadata,
           validation: payload.validation, logs: [`[persisted] restored from ${sidecarPath}`],
         };
+        if (this.jobs.has(id)) continue;
         this.jobs.set(id, job);
         this.byTrack.set(job.trackId, id);
         loaded += 1;
@@ -294,6 +295,7 @@ export class JobRegistry {
     for (const job of this.all()) {
       const metadata = { ...(extraMetadata[job.trackId] || {}), ...(job.metadata || {}) };
       out[job.trackId] = {
+        ...metadata,
         id: job.trackId,
         trackId: job.trackId,
         status: job.legacyStatus,
@@ -306,7 +308,6 @@ export class JobRegistry {
         outputFormat: job.outputFormat,
         sizeBytes: job.sizeBytes,
         error: job.error,
-        ...metadata,
       };
     }
     return out;

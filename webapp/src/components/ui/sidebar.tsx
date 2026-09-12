@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
@@ -439,14 +438,15 @@ function SidebarProvider({
 function Sidebar({
   side = "left",
   variant = "sidebar",
-  collapsible = "offExamples",
+  collapsible = "offcanvas",
   className,
+  style,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
   side?: "left" | "right"
   variant?: "sidebar" | "floating" | "inset"
-  collapsible?: "offExamples" | "icon" | "none"
+  collapsible?: "offcanvas" | "icon" | "none"
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
@@ -459,6 +459,7 @@ function Sidebar({
           className
         )}
         {...props}
+        style={style}
       >
         {children}
       </div>
@@ -467,15 +468,20 @@ function Sidebar({
 
   if (isMobile) {
     return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
+      <Sheet open={openMobile} onOpenChange={setOpenMobile}>
         <SheetContent
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          className={cn(
+            "bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden",
+            className
+          )}
+          {...props}
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+              ...style,
             } as React.CSSProperties
           }
           side={side}
@@ -504,7 +510,7 @@ function Sidebar({
         data-slot="sidebar-gap"
         className={cn(
           "transition-[width] duration-200 ease-linear relative w-(--sidebar-width) bg-transparent",
-          "group-data-[collapsible=offExamples]:w-0",
+          "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
             ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
@@ -516,8 +522,8 @@ function Sidebar({
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
           side === "left"
-            ? "left-0 group-data-[collapsible=offExamples]:-left-(--sidebar-width)"
-            : "right-0 group-data-[collapsible=offExamples]:-right-(--sidebar-width)",
+            ? "left-0 group-data-[collapsible=offcanvas]:-left-(--sidebar-width)"
+            : "right-0 group-data-[collapsible=offcanvas]:-right-(--sidebar-width)",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -525,6 +531,7 @@ function Sidebar({
           className
         )}
         {...props}
+        style={style}
       >
         <div
           data-sidebar="sidebar"
@@ -584,11 +591,11 @@ function SidebarTrigger({
       variant="ghost"
       size="icon-sm"
       className={cn(className)}
+      {...props}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
       }}
-      {...props}
     >
       <IconLayoutSidebar
       />
@@ -644,9 +651,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         "hover:after:bg-sidebar-border absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] sm:flex",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
-        "hover:group-data-[collapsible=offExamples]:bg-sidebar group-data-[collapsible=offExamples]:translate-x-0 group-data-[collapsible=offExamples]:after:left-full",
-        "[[data-side=left][data-collapsible=offExamples]_&]:-right-2",
-        "[[data-side=right][data-collapsible=offExamples]_&]:-left-2",
+        "hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full",
+        "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
+        "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
         className
       )}
       {...props}
@@ -1288,7 +1295,7 @@ function SidebarMenuButton({
       },
       props
     ),
-    render: !tooltip ? render : TooltipTrigger,
+    render: !tooltip ? render : <TooltipTrigger render={render} />,
     state: {
       slot: "sidebar-menu-button",
       sidebar: "menu-button",
@@ -1685,7 +1692,7 @@ function SidebarMenuSubButton({
  *     </SidebarProvider>
  * ```
  */
-export type SIDEBAR_COOKIE_NAMEProps = React.ComponentProps<typeof SIDEBAR_COOKIE_NAME>
+export type SIDEBAR_COOKIE_NAMEProps = typeof SIDEBAR_COOKIE_NAME
 
 /**
  * Props for SIDEBAR_COOKIE_MAX_AGE.
@@ -1719,7 +1726,7 @@ export type SIDEBAR_COOKIE_NAMEProps = React.ComponentProps<typeof SIDEBAR_COOKI
  *     </SidebarProvider>
  * ```
  */
-export type SIDEBAR_COOKIE_MAX_AGEProps = React.ComponentProps<typeof SIDEBAR_COOKIE_MAX_AGE>
+export type SIDEBAR_COOKIE_MAX_AGEProps = typeof SIDEBAR_COOKIE_MAX_AGE
 
 /**
  * Props for SIDEBAR_WIDTH.
@@ -1753,7 +1760,7 @@ export type SIDEBAR_COOKIE_MAX_AGEProps = React.ComponentProps<typeof SIDEBAR_CO
  *     </SidebarProvider>
  * ```
  */
-export type SIDEBAR_WIDTHProps = React.ComponentProps<typeof SIDEBAR_WIDTH>
+export type SIDEBAR_WIDTHProps = typeof SIDEBAR_WIDTH
 
 /**
  * Props for SIDEBAR_WIDTH_MOBILE.
@@ -1787,7 +1794,7 @@ export type SIDEBAR_WIDTHProps = React.ComponentProps<typeof SIDEBAR_WIDTH>
  *     </SidebarProvider>
  * ```
  */
-export type SIDEBAR_WIDTH_MOBILEProps = React.ComponentProps<typeof SIDEBAR_WIDTH_MOBILE>
+export type SIDEBAR_WIDTH_MOBILEProps = typeof SIDEBAR_WIDTH_MOBILE
 
 /**
  * Props for SIDEBAR_WIDTH_ICON.
@@ -1821,7 +1828,7 @@ export type SIDEBAR_WIDTH_MOBILEProps = React.ComponentProps<typeof SIDEBAR_WIDT
  *     </SidebarProvider>
  * ```
  */
-export type SIDEBAR_WIDTH_ICONProps = React.ComponentProps<typeof SIDEBAR_WIDTH_ICON>
+export type SIDEBAR_WIDTH_ICONProps = typeof SIDEBAR_WIDTH_ICON
 
 /**
  * Props for SIDEBAR_KEYBOARD_SHORTCUT.
@@ -1855,7 +1862,7 @@ export type SIDEBAR_WIDTH_ICONProps = React.ComponentProps<typeof SIDEBAR_WIDTH_
  *     </SidebarProvider>
  * ```
  */
-export type SIDEBAR_KEYBOARD_SHORTCUTProps = React.ComponentProps<typeof SIDEBAR_KEYBOARD_SHORTCUT>
+export type SIDEBAR_KEYBOARD_SHORTCUTProps = typeof SIDEBAR_KEYBOARD_SHORTCUT
 
 /**
  * Props for SidebarProvider.

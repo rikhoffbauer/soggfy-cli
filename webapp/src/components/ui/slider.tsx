@@ -19,8 +19,11 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  getAriaLabel,
   ...props
-}: SliderPrimitive.Root.Props) {
+}: SliderPrimitive.Root.Props & {
+  getAriaLabel?: (index: number) => string
+}) {
   const _values = React.useMemo(
     () =>
       Array.isArray(value)
@@ -30,10 +33,16 @@ function Slider({
           : [min, max],
     [value, defaultValue, min, max]
   )
+  const thumbAriaLabel = React.useCallback(
+    (index: number) =>
+      getAriaLabel?.(index) ??
+      (_values.length === 1 ? "Value" : `Value ${index + 1}`),
+    [getAriaLabel, _values.length]
+  )
 
   return (
     <SliderPrimitive.Root
-      className="data-horizontal:w-full data-vertical:h-full"
+      className={cn("data-horizontal:w-full data-vertical:h-full", className)}
       data-slot="slider"
       defaultValue={defaultValue}
       value={value}
@@ -43,10 +52,7 @@ function Slider({
       {...props}
     >
       <SliderPrimitive.Control
-        className={cn(
-          "data-vertical:min-h-40 relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:w-auto data-vertical:flex-col",
-          className
-        )}
+        className="data-vertical:min-h-40 relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:w-auto data-vertical:flex-col"
       >
         <SliderPrimitive.Track
           data-slot="slider-track"
@@ -61,6 +67,8 @@ function Slider({
           <SliderPrimitive.Thumb
             data-slot="slider-thumb"
             key={index}
+            index={index}
+            getAriaLabel={thumbAriaLabel}
             className="border-ring ring-ring/50 relative size-3 rounded-full border bg-white transition-[color,box-shadow] after:absolute after:-inset-2 hover:ring-[3px] focus-visible:ring-[3px] focus-visible:outline-hidden active:ring-[3px] block shrink-0 select-none disabled:pointer-events-none disabled:opacity-50"
           />
         ))}

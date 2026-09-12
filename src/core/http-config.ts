@@ -14,7 +14,7 @@ export interface HttpConfig {
 export function getHttpConfig(env: NodeJS.ProcessEnv = process.env): HttpConfig {
   const host = env.SOGGFY_HOST || DEFAULT_HTTP_HOST;
   const rawPort = env.SOGGFY_PORT;
-  const port = rawPort ? Number.parseInt(rawPort, 10) : DEFAULT_HTTP_PORT;
+  const port = rawPort ? Number(rawPort.trim()) : DEFAULT_HTTP_PORT;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`Invalid SOGGFY_PORT: ${rawPort}`);
   }

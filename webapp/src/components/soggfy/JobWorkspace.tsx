@@ -8,7 +8,9 @@ import {
   IconRefresh,
   IconX,
 } from "@tabler/icons-react";
-import { Button } from "@/components/ui/button";
+import type { ReactNode } from "react";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { DownloadJob } from "./models";
 
 interface QueuePageProps {
@@ -42,7 +44,7 @@ export function DownloadsPage({ library, onAction, onPlay }: DownloadsPageProps)
       <div className="flex shrink-0 items-end justify-between gap-4">
         <PageHeader title="Downloads" subtitle={`${library.length} recent ${library.length === 1 ? "item" : "items"}`} />
         {completed.length > 1 ? (
-          <a href="/api/download-all" className="shrink-0"><Button size="sm" variant="secondary"><IconDownload className="size-4" /> ZIP all</Button></a>
+          <a href="/api/download-all" className={cn(buttonVariants({ size: "sm", variant: "secondary" }), "shrink-0")}><IconDownload className="size-4" /> ZIP all</a>
         ) : null}
       </div>
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto border-y border-white/[0.06]">
@@ -109,11 +111,11 @@ function Artwork({ job }: { job: DownloadJob }) {
   return <div className="grid size-11 place-items-center overflow-hidden rounded bg-white/[0.06] text-white/22">{cover ? <img src={cover} alt="" className="size-full object-cover" loading="lazy" /> : <IconMusic className="size-5" />}</div>;
 }
 
-function IconButton({ label, onClick, children, danger = false }: { label: string; onClick: () => void; children: React.ReactNode; danger?: boolean }) {
+function IconButton({ label, onClick, children, danger = false }: { label: string; onClick: () => void; children: ReactNode; danger?: boolean }) {
   return <button type="button" aria-label={label} title={label} onClick={onClick} className={`rounded-md p-2 transition focus-visible:outline-none focus-visible:ring-2 ${danger ? "text-white/25 hover:bg-red-500/10 hover:text-red-300 focus-visible:ring-red-400/40" : "text-white/38 hover:bg-white/8 hover:text-white focus-visible:ring-primary/40"}`}>{children}</button>;
 }
 
-function EmptyState({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
   return <div className="grid min-h-72 place-items-center px-5 py-8 text-center"><div><div className="mx-auto grid size-10 place-items-center rounded-full bg-white/[0.045] text-white/20 [&>svg]:size-5">{icon}</div><div className="mt-3 text-sm font-medium text-white/50">{title}</div><p className="mx-auto mt-1 max-w-72 text-xs leading-relaxed text-white/27">{body}</p></div></div>;
 }
 

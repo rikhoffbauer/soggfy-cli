@@ -224,16 +224,46 @@ export function createApiRoutes() {
     "/api/download-all": {
       GET: () => {
         const archive = new ZipArchive({ zlib: { level: 9 } });
-        const stream = new ReadableStream({
+        let cancelled = false;
+        let closed = false;
+        const stream = new ReadableStream<Uint8Array>({
           start(controller) {
-            archive.on("data", (chunk: Buffer) => controller.enqueue(chunk));
-            archive.on("end", () => controller.close());
-            archive.on("error", (err: Error) => controller.error(err));
+            archive.on("data", (chunk: Buffer) => {
+              if (cancelled || closed) return;
+              try {
+                controller.enqueue(chunk);
+                if ((controller.desiredSize ?? 1) <= 0) archive.pause();
+              } catch {
+                cancelled = true;
+                archive.abort();
+              }
+            });
+            archive.on("end", () => {
+              if (cancelled || closed) return;
+              closed = true;
+              controller.close();
+            });
+            archive.on("error", (err: Error) => {
+              if (cancelled || closed) return;
+              closed = true;
+              controller.error(err);
+            });
             for (const job of jobs.all().filter((j) => j.state === "completed" && j.savedPath && existsSync(j.savedPath))) {
               const ext = job.outputFormat || extname(job.savedPath!).slice(1).toLowerCase() || "bin";
               archive.file(job.savedPath!, { name: displayFileName(job.trackId, job.metadata, ext) });
             }
-            archive.finalize();
+            void archive.finalize().catch((err: Error) => {
+              if (cancelled || closed) return;
+              closed = true;
+              controller.error(err);
+            });
+          },
+          pull() {
+            if (!cancelled && !closed) archive.resume();
+          },
+          cancel() {
+            cancelled = true;
+            archive.abort();
           },
         });
         return new Response(stream, {

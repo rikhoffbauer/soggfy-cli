@@ -44,6 +44,13 @@ std::atomic<bool> g_decoder_hooks_ready{false};
 static std::mutex g_ogg_preroll_mutex;
 static OggPreRollBuffer g_ogg_preroll;
 static OggStreamSelection g_ogg_stream_selection;
+static std::atomic<uint64_t> g_last_gated_sync_ms{0};
+static std::mutex g_gated_sync_mutex;
+
+static uint64_t SteadyNowMs() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 void ResetOggCaptureState(const std::string& trackId) {
     std::lock_guard<std::mutex> lock(g_ogg_preroll_mutex);
@@ -60,12 +67,13 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
     if (!orig_ogg_stream_pagein) return 0;
 
     int ret = orig_ogg_stream_pagein(os, og);
-    if (ret != 1 || !og) return ret;
+    if (ret != 0 || !og || !g_decoder_hooks_ready.load()) return ret;
 
     unsigned char* hdr = og->header;
     long hlen = og->header_len;
     unsigned char* bdy = og->body;
     long blen = og->body_len;
+    if (blen < 0 || blen >= 1048576 || (blen > 0 && bdy == nullptr)) return ret;
 
     if (hdr != nullptr && hlen >= 27 && hdr[0] == 'O' && hdr[1] == 'g' && hdr[2] == 'g' && hdr[3] == 'S') {
         uint8_t flags = hdr[5];
@@ -74,10 +82,23 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
         uint32_t serial = 0;
         memcpy(&serial, hdr + 14, sizeof(serial));
 
-        // Helper-process polling is intentionally coarse. Refresh synchronously
-        // at a stream boundary (and while gated) so the first BOS cannot race
-        // ahead of a newly published set_track/capture-gate generation.
-        if (is_bos || g_capture_gated.load()) SyncSharedCaptureStateNow();
+        // Helper-process polling is intentionally coarse. Always refresh at a
+        // stream boundary, but rate-limit gated page refreshes to avoid doing
+        // filesystem synchronization on every Ogg page.
+        if (is_bos) {
+            SyncSharedCaptureStateNow();
+        } else {
+            const uint64_t now = SteadyNowMs();
+            const uint64_t previous = g_last_gated_sync_ms.load();
+            if (now - previous >= 200) {
+                std::lock_guard<std::mutex> sync_lock(g_gated_sync_mutex);
+                const uint64_t refreshed_now = SteadyNowMs();
+                if (refreshed_now - g_last_gated_sync_ms.load() >= 200) {
+                    SyncSharedCaptureStateNow();
+                    g_last_gated_sync_ms.store(refreshed_now);
+                }
+            }
+        }
 
         std::string track_id;
         {
@@ -100,7 +121,7 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
                     buffered = g_ogg_preroll.BufferPage(
                         track_id, serial, is_vorbis_bos,
                         hdr, (size_t)hlen,
-                        bdy, (bdy != nullptr && blen > 0 && blen < 1048576) ? (size_t)blen : 0);
+                        bdy, (size_t)blen);
                 }
                 if (is_vorbis_bos && buffered) {
                     printf("[Soggfy-OGG] Buffered gated Vorbis BOS for %s (serial 0x%x)\n",
@@ -133,6 +154,7 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
                         track_id,
                         reinterpret_cast<const char*>(pending->bytes.data()),
                         pending->bytes.size());
+                    MarkAudioActivity();
                     printf("[Soggfy-OGG] Promoted %zu pre-roll bytes for %s (serial 0x%x)\n",
                            pending->bytes.size(), track_id.c_str(), serial);
                     fflush(stdout);
@@ -169,9 +191,9 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
                 }
 
                 state.ReceiveOggData(track_id, (const char*)hdr, (size_t)hlen);
-                if (bdy != nullptr && blen > 0 && blen < 1048576) {
-                    state.ReceiveOggData(track_id, (const char*)bdy, (size_t)blen);
-                }
+                MarkAudioActivity();
+                state.ReceiveOggData(track_id, (const char*)bdy, (size_t)blen);
+                MarkAudioActivity();
 
                 if (is_eos) {
                     printf("[Soggfy-OGG] Stream EOS reached for %s (serial 0x%x, %.1fs audio). Finalizing!\n",
@@ -195,6 +217,7 @@ static int my_DecodeAudioData(void* x0, float* x1, size_t* x2, const char* x3, s
 
 
     int ret = orig_DecodeAudioData(x0, x1, x2, x3, x4, x5);
+    if (!g_decoder_hooks_ready.load()) return ret;
 
     size_t samplesDecoded = (x2 != nullptr) ? *x2 : 0;
 
@@ -304,7 +327,5 @@ void InstallDecoderHook() {
     g_decoder_hooks_ready.store(decodeOk && oggOk);
     if (!decodeOk || !oggOk) {
         printf("[Soggfy-ERROR] Ogg backend disabled for this Spotify build.\n");
-        orig_DecodeAudioData = nullptr;
-        orig_ogg_stream_pagein = nullptr;
     }
 }

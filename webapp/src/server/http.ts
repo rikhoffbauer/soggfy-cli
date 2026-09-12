@@ -19,6 +19,7 @@ export function notFound(message = "Not Found") {
 function contentTypeFor(path: string): string {
   if (path.endsWith(".mp3")) return "audio/mpeg";
   if (path.endsWith(".wav")) return "audio/wav";
+  if (path.endsWith(".ogg")) return "audio/ogg";
   if (path.endsWith(".json")) return "application/json";
   if (path.endsWith(".zip")) return "application/zip";
   return "application/octet-stream";

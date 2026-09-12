@@ -1,28 +1,43 @@
 import tailwind from "bun-plugin-tailwind";
-import { rename, rm } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import { withBuildPublishLock } from "./build-lock";
+import { publishRuntimeDirectory } from "./runtime-publish";
 
-const outdir = path.resolve(import.meta.dir, "../dist/webapp");
-await rm(outdir, { recursive: true, force: true });
+const distDir = path.resolve(import.meta.dir, "../dist");
+const outdir = path.join(distDir, "webapp");
+const nonce = `${process.pid}-${Date.now()}`;
+const stagingDir = path.join(distDir, `.webapp-build-${nonce}`);
 
-const result = await Bun.build({
-  entrypoints: [path.join(import.meta.dir, "src/index.ts")],
-  outdir,
-  plugins: [tailwind],
-  minify: true,
-  target: "bun",
-  sourcemap: "linked",
-  define: {
-    "process.env.NODE_ENV": JSON.stringify("production"),
-  },
+await mkdir(distDir, { recursive: true });
+const publishLockDir = path.join(distDir, ".webapp-publish.lock");
+
+await withBuildPublishLock(publishLockDir, async () => {
+  await rm(stagingDir, { recursive: true, force: true });
+  try {
+    const result = await Bun.build({
+      entrypoints: [path.join(import.meta.dir, "src/index.ts")],
+      outdir: stagingDir,
+      plugins: [tailwind],
+      minify: true,
+      target: "bun",
+      sourcemap: "linked",
+      define: {
+        "process.env.NODE_ENV": JSON.stringify("production"),
+      },
+    });
+
+    if (!result.success) {
+      for (const log of result.logs) console.error(log);
+      throw new Error("Failed to build bundled web runtime");
+    }
+
+    const serverEntry = path.join(stagingDir, "index.js");
+    await rename(serverEntry, path.join(stagingDir, "server.js"));
+
+    await publishRuntimeDirectory(stagingDir, outdir);
+    console.log(`Bundled web runtime: ${path.join(outdir, "server.js")}`);
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 });
-
-if (!result.success) {
-  for (const log of result.logs) console.error(log);
-  throw new Error("Failed to build bundled web runtime");
-}
-
-const serverEntry = path.join(outdir, "index.js");
-const packagedEntry = path.join(outdir, "server.js");
-await rename(serverEntry, packagedEntry);
-console.log(`Bundled web runtime: ${packagedEntry}`);

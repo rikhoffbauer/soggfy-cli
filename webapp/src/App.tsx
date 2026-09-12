@@ -198,6 +198,7 @@ export function App() {
       if (requestGeneration !== albumRequestGeneration.current) return;
       const data = await response.json() as AlbumPage & { error?: string };
       if (!response.ok) throw new Error(data.error || "Album lookup failed");
+      if (!data.album) throw new Error("Album lookup returned no album");
       if (albumHint?.type === "album" && albumHint.id === albumId) {
         data.album = {
           ...data.album,

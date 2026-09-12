@@ -1,10 +1,16 @@
-import { dirname, join } from "path";
+import { dirname, join, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { LOG_DIR, PROFILES_DIR, SAVE_PATH, SOGGFY_HOME } from "../../../src/core/paths";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
-const WEBAPP_DIR = join(SERVER_DIR, "..");
-export const REPO_ROOT = join(WEBAPP_DIR, "..");
+export function resolveRepoRoot(serverDir = SERVER_DIR): string {
+  const sourceMarker = `${sep}webapp${sep}src${sep}server`;
+  const bundledMarker = `${sep}dist${sep}webapp`;
+  if (serverDir.includes(sourceMarker)) return resolve(serverDir, "../../..");
+  if (serverDir.includes(bundledMarker)) return resolve(serverDir, "../..");
+  return resolve(serverDir, "../../..");
+}
+export const REPO_ROOT = resolveRepoRoot();
 
 export function intFromEnv(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);

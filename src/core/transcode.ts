@@ -1,5 +1,5 @@
 import { spawnSync } from "child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { dirname, extname } from "path";
 import { log } from "./log";
 import { validateAudioFile, validateWavFile } from "./media";
@@ -12,6 +12,44 @@ const FORMAT_ARGS: Record<Exclude<OutputFormat, "raw">, string[]> = {
   flac: ["-compression_level", "5", "-f", "flac"],
   ogg: ["-c:a", "vorbis", "-strict", "-2", "-f", "ogg"],
 };
+
+export async function readBoundedStreamText(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes = 64 * 1024,
+): Promise<string> {
+  if (!Number.isInteger(maxBytes) || maxBytes < 0) {
+    throw new RangeError("maxBytes must be a non-negative integer");
+  }
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let retained = 0;
+  let truncated = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      const remaining = Math.max(0, maxBytes - retained);
+      if (remaining > 0) {
+        const kept = value.subarray(0, Math.min(remaining, value.byteLength));
+        chunks.push(kept.slice());
+        retained += kept.byteLength;
+      }
+      if (value.byteLength > remaining) truncated = true;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(retained);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(bytes).trim();
+  return truncated ? `${text}${text ? "\n" : ""}[stderr truncated]` : text;
+}
 
 function extension(path: string): string {
   return extname(path).toLowerCase().replace(".", "");
@@ -36,7 +74,7 @@ export function transcode(inputPath: string, outputPath: string, format: OutputF
   if (format === "raw") {
     if (!canExposeRawPcm(inputPath)) return false;
     const data = readFileSync(inputPath);
-    Bun.write(outputPath, data.subarray(44));
+    writeFileSync(outputPath, data.subarray(44));
     return existsSync(outputPath) && statSync(outputPath).size > 0;
   }
 
@@ -89,15 +127,20 @@ export async function streamToWriter(
   ], { stdout: "pipe", stderr: "pipe" });
 
   const w = writer.getWriter();
+  const stderrText = readBoundedStreamText(proc.stderr as ReadableStream<Uint8Array>);
   try {
     for await (const chunk of proc.stdout) await w.write(chunk);
-  } finally {
     await w.close();
+  } catch (error) {
+    proc.kill();
+    await w.abort(error).catch(() => undefined);
+    await proc.exited.catch(() => undefined);
+    throw error;
   }
 
   const exitCode = await proc.exited;
+  const stderr = await stderrText;
   if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
     throw new Error(`ffmpeg exited with code ${exitCode}: ${stderr}`);
   }
 }

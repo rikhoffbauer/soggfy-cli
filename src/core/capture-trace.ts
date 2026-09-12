@@ -50,6 +50,7 @@ export class CaptureTraceState {
   phase: CapturePhase = "prepare";
   confirmed = false;
   maximumBytes = 0;
+  private readonly maximumBytesByPath = new Map<string, number>();
   commands = 0;
   statuses = 0;
 
@@ -75,13 +76,13 @@ export class CaptureTraceState {
   }
 
   private applyCommand(record: CaptureTraceRecord & { type: "command" }): void {
-    this.commands++;
     if (this.confirmed && record.command.startsWith("play ")) {
       throw new CaptureTraceInvariantError(
         "play command repeated after target confirmation",
         record.sequence,
       );
     }
+    this.commands++;
   }
 
   private applyPlayback(record: CaptureTraceRecord & { type: "playback" }): void {
@@ -104,13 +105,15 @@ export class CaptureTraceState {
   }
 
   private applyBytes(record: CaptureTraceRecord & { type: "bytes" }): void {
-    if (record.bytes < this.maximumBytes) {
+    const previous = this.maximumBytesByPath.get(record.path) ?? 0;
+    if (record.bytes < previous) {
       throw new CaptureTraceInvariantError(
-        `captured bytes decreased from ${this.maximumBytes} to ${record.bytes}`,
+        `captured bytes decreased from ${previous} to ${record.bytes} for ${record.path}`,
         record.sequence,
       );
     }
-    this.maximumBytes = record.bytes;
+    this.maximumBytesByPath.set(record.path, record.bytes);
+    this.maximumBytes = Math.max(this.maximumBytes, record.bytes);
   }
 }
 
@@ -185,15 +188,34 @@ export class CaptureTraceRecorder {
   }
 
   record(event: CaptureTraceEvent): void {
+    const sequence = this.sequence + 1;
     const record = {
       version: 1 as const,
-      sequence: ++this.sequence,
+      sequence,
       atMs: Date.now() - this.startedAt,
       trackId: this.trackId,
       ...event,
     } as CaptureTraceRecord;
-    this.state.apply(record);
+
+    try {
+      this.state.apply(record);
+    } catch (error) {
+      if (!(error instanceof CaptureTraceInvariantError)) throw error;
+      const evidence: CaptureTraceRecord = {
+        version: 1,
+        sequence,
+        atMs: Date.now() - this.startedAt,
+        trackId: this.trackId,
+        type: "error",
+        message: error.message,
+      };
+      appendFileSync(this.path, `${JSON.stringify(evidence)}\n`, { encoding: "utf8", mode: 0o600 });
+      this.sequence = sequence;
+      return;
+    }
+
     appendFileSync(this.path, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
+    this.sequence = sequence;
   }
 
   command(command: string): void {
@@ -202,6 +224,63 @@ export class CaptureTraceRecorder {
 
   response(command: string, response: string): void {
     this.record({ type: "response", command, response });
+  }
+}
+
+
+export interface BestEffortCaptureTraceOptions {
+  traceDir?: string;
+  onError?: (error: unknown) => void;
+}
+
+export class BestEffortCaptureTraceRecorder {
+  readonly path: string | null;
+  private recorder: CaptureTraceRecorder | null = null;
+  private warned = false;
+  private readonly onError: (error: unknown) => void;
+
+  constructor(trackId: string, options: BestEffortCaptureTraceOptions = {}) {
+    this.onError = options.onError ?? ((error) => console.warn("Capture trace disabled:", error));
+    try {
+      this.recorder = new CaptureTraceRecorder(trackId, options.traceDir);
+      this.path = this.recorder.path;
+    } catch (error) {
+      this.path = null;
+      this.disable(error);
+    }
+  }
+
+  private disable(error: unknown): void {
+    this.recorder = null;
+    if (this.warned) return;
+    this.warned = true;
+    try {
+      this.onError(error);
+    } catch {
+      // Diagnostics must never interfere with capture control.
+    }
+  }
+
+  private write(operation: (recorder: CaptureTraceRecorder) => void): void {
+    const recorder = this.recorder;
+    if (!recorder) return;
+    try {
+      operation(recorder);
+    } catch (error) {
+      this.disable(error);
+    }
+  }
+
+  record(event: CaptureTraceEvent): void {
+    this.write((recorder) => recorder.record(event));
+  }
+
+  command(command: string): void {
+    this.write((recorder) => recorder.command(command));
+  }
+
+  response(command: string, response: string): void {
+    this.write((recorder) => recorder.response(command, response));
   }
 }
 

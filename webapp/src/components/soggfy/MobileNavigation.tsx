@@ -1,7 +1,8 @@
+import type { ReactNode } from "react";
 import { IconActivityHeartbeat, IconDownload, IconHistory, IconSearch } from "@tabler/icons-react";
 import type { WorkspacePage } from "./workspace-model";
 
-const PAGES: Array<{ page: WorkspacePage; label: string; icon: React.ReactNode }> = [
+const PAGES: Array<{ page: WorkspacePage; label: string; icon: ReactNode }> = [
   { page: "search", label: "Search", icon: <IconSearch /> },
   { page: "queue", label: "Queue", icon: <IconDownload /> },
   { page: "downloads", label: "Downloads", icon: <IconHistory /> },

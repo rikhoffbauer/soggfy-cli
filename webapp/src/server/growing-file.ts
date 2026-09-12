@@ -2,6 +2,7 @@ import { closeSync, existsSync, openSync, readSync, statSync } from "fs";
 import { CORS_HEADERS } from "./http";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
+const MAX_CHUNK_BYTES = 256 * 1024;
 
 export interface GrowingFileOptions {
   getPath: () => string | undefined | null;
@@ -39,15 +40,17 @@ export function streamGrowingFile(options: GrowingFileOptions): Response {
   const startupTimeoutMs = options.startupTimeoutMs ?? 20_000;
   const pollMs = options.pollMs ?? 100;
   const startedAt = Date.now();
+  let activePath: string | null = null;
+  let activeInode: number | bigint | null = null;
+  let offset = 0;
+  let cancelled = false;
+  let closed = false;
 
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let activePath: string | null = null;
-      let activeInode: number | bigint | null = null;
-      let offset = 0;
-
-      while (true) {
+    async pull(controller) {
+      while (!closed && !cancelled) {
         if (options.signal?.aborted) {
+          closed = true;
           controller.close();
           return;
         }
@@ -60,37 +63,33 @@ export function streamGrowingFile(options: GrowingFileOptions): Response {
             if (activePath === null) {
               activePath = candidate;
               activeInode = stat.ino;
-            } else if (
-              candidate !== activePath ||
-              stat.ino !== activeInode ||
-              stat.size < offset
-            ) {
+            } else if (candidate !== activePath || stat.ino !== activeInode || stat.size < offset) {
+              closed = true;
               controller.close();
               return;
             }
 
             if (stat.size > offset) {
-              const chunk = readRange(candidate, offset, stat.size - offset);
+              const chunk = readRange(candidate, offset, Math.min(MAX_CHUNK_BYTES, stat.size - offset));
               if (chunk.byteLength > 0) {
                 offset += chunk.byteLength;
                 controller.enqueue(chunk);
+                return;
               }
             }
           }
         }
 
-        if (TERMINAL_STATES.has(state)) {
+        if (TERMINAL_STATES.has(state) || (activePath === null && Date.now() - startedAt >= startupTimeoutMs)) {
+          closed = true;
           controller.close();
           return;
         }
-
-        if (activePath === null && Date.now() - startedAt >= startupTimeoutMs) {
-          controller.close();
-          return;
-        }
-
         await sleep(pollMs, options.signal);
       }
+    },
+    cancel() {
+      cancelled = true;
     },
   });
 

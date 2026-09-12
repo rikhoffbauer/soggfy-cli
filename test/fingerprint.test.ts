@@ -26,6 +26,7 @@ function writeSineWav(path: string, seconds = 3): void {
   buffer.writeUInt16LE(2, 32);
   buffer.writeUInt16LE(16, 34);
   buffer.write("data", 36);
+  buffer.writeUInt32LE(dataBytes, 40);
   for (let i = 0; i < samples; i++) {
     const sample = Math.sin((2 * Math.PI * 440 * i) / sampleRate);
     buffer.writeInt16LE(Math.round(sample * 0x3fff), 44 + i * 2);

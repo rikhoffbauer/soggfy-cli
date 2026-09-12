@@ -67,13 +67,19 @@ test("search resolution ignores stale async responses after navigation", () => {
 
 
 test("new searches and result-tab exits invalidate pending detail requests cleanly", () => {
-  const submit = app.slice(app.indexOf("const submitSearch"), app.indexOf("const changeSearchTab"));
+  const submitSearchStart = app.indexOf("const submitSearch");
+  const changeSearchTabStart = app.indexOf("const changeSearchTab");
+  expect(submitSearchStart).toBeGreaterThanOrEqual(0);
+  expect(changeSearchTabStart).toBeGreaterThanOrEqual(0);
+  const submit = app.slice(submitSearchStart, changeSearchTabStart);
   expect(submit).toContain("albumRequestGeneration.current += 1");
   expect(submit).toContain("playlistRequestGeneration.current += 1");
   expect(submit).toContain("setAlbumLoading(false)");
   expect(submit).toContain("setPlaylistLoading(false)");
 
-  const tabChange = app.slice(app.indexOf("const changeSearchTab"), app.indexOf("const loadMoreSearch"));
+  const loadMoreSearchStart = app.indexOf("const loadMoreSearch");
+  expect(loadMoreSearchStart).toBeGreaterThanOrEqual(0);
+  const tabChange = app.slice(changeSearchTabStart, loadMoreSearchStart);
   expect(tabChange).toContain("albumRequestGeneration.current += 1");
   expect(tabChange).toContain("playlistRequestGeneration.current += 1");
   expect(tabChange).toContain("setAlbumLoading(false)");

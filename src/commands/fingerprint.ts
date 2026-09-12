@@ -17,7 +17,11 @@ Options:
   }
 
   const filePath = args[0];
-  const length = args[1] ? parseInt(args[1], 10) : 240;
+  const length = args[1] ? Number(args[1]) : 240;
+  if (!Number.isInteger(length) || length <= 0) {
+    log.error(`Invalid fingerprint length: ${args[1]}`);
+    process.exit(1);
+  }
 
   if (!existsSync(filePath)) {
     log.error(`File not found: ${filePath}`);

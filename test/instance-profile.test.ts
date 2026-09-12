@@ -43,6 +43,14 @@ test("SpotifyInstance retires an exact orphaned runtime before spawning a replac
 });
 
 
+test("SpotifyInstance refuses an exact-profile Spotify process whose identity is unverifiable", () => {
+  const guard = source.indexOf("cannot verify or terminate it safely");
+  const spawn = source.indexOf("this.process = spawn");
+  expect(guard).toBeGreaterThan(-1);
+  expect(spawn).toBeGreaterThan(guard);
+});
+
+
 test("SpotifyInstance resets transient save state before cloning login state", () => {
   const reset = source.indexOf("resetSpotifyTransientRuntimeState(this.savePath)");
   const clone = source.indexOf("cloneSpotifyLoginState(appSupportDest");
@@ -50,4 +58,12 @@ test("SpotifyInstance resets transient save state before cloning login state", (
   expect(reset).toBeGreaterThan(-1);
   expect(clone).toBeGreaterThan(reset);
   expect(spawn).toBeGreaterThan(clone);
+});
+
+
+test("SpotifyInstance aborts startup when orphan process inspection is unavailable", () => {
+  const unavailable = source.indexOf('orphanInspection.kind === "unavailable"');
+  const spawn = source.indexOf("this.process = spawn");
+  expect(unavailable).toBeGreaterThan(-1);
+  expect(spawn).toBeGreaterThan(unavailable);
 });

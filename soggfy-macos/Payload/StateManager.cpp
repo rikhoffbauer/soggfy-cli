@@ -7,14 +7,116 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#ifdef __APPLE__
+#include <libproc.h>
+#endif
 #include <limits>
 #include <sstream>
 #include <system_error>
 #include <fcntl.h>
+#include <sys/file.h>
+#ifdef __APPLE__
+#include <sys/proc_info.h>
+#endif
 #include <sys/stat.h>
+#include <signal.h>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
+
+class CaptureOwnerGuard {
+public:
+    explicit CaptureOwnerGuard(const std::string& baseSavePath) {
+        const fs::path path = fs::path(baseSavePath) / ".capture-owner.guard";
+        _fd = open(path.c_str(), O_RDWR | O_CREAT, 0600);
+        if (_fd >= 0 && flock(_fd, LOCK_EX) != 0) {
+            close(_fd);
+            _fd = -1;
+        }
+    }
+
+    ~CaptureOwnerGuard() {
+        if (_fd >= 0) {
+            flock(_fd, LOCK_UN);
+            close(_fd);
+        }
+    }
+
+    bool locked() const { return _fd >= 0; }
+
+private:
+    int _fd = -1;
+};
+
+struct CaptureOwnerRecord {
+    int pid = 0;
+    std::string birthId;
+    std::string playbackId;
+    std::string source;
+};
+
+static std::string ReadProcessBirthId(int pid) {
+#ifdef __APPLE__
+    if (pid <= 0) return {};
+    proc_bsdinfo info{};
+    const int bytes = proc_pidinfo(
+        pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info));
+    if (bytes != sizeof(info) || info.pbi_start_tvsec == 0 ||
+        info.pbi_start_tvusec >= 1000000) return {};
+    std::string micros = std::to_string(info.pbi_start_tvusec);
+    micros.insert(0, 6 - micros.size(), '0');
+    return std::to_string(info.pbi_start_tvsec) + ":" + micros;
+#else
+    (void)pid;
+    return {};
+#endif
+}
+
+static CaptureOwnerRecord ReadCaptureOwner(const fs::path& ownerPath) {
+    std::ifstream in(ownerPath);
+    CaptureOwnerRecord owner;
+    std::string second;
+    std::string third;
+    std::string fourth;
+    if (!(in >> owner.pid >> second >> third)) return owner;
+    if (in >> fourth) {
+        owner.birthId = second;
+        owner.playbackId = third;
+        owner.source = fourth;
+    } else {
+        owner.playbackId = second;
+        owner.source = third;
+    }
+    return owner;
+}
+
+static bool CaptureOwnerProcessAlive(const CaptureOwnerRecord& owner) {
+    if (owner.pid <= 0) return false;
+    errno = 0;
+    if (kill(owner.pid, 0) != 0 && errno == ESRCH) return false;
+    if (owner.birthId.empty()) return true;
+    const std::string currentBirthId = ReadProcessBirthId(owner.pid);
+    if (currentBirthId.empty()) return true;
+    return owner.birthId == currentBirthId;
+}
+
+static bool RemoveCaptureOwnerIfOwnedOrStale(
+    const fs::path& ownerPath,
+    const std::string& playbackId
+) {
+    const CaptureOwnerRecord owner = ReadCaptureOwner(ownerPath);
+    const std::string currentBirthId = ReadProcessBirthId(static_cast<int>(getpid()));
+    const bool ownedPlayback = owner.pid == static_cast<int>(getpid()) &&
+        owner.playbackId == playbackId &&
+        (owner.birthId.empty() || currentBirthId.empty() ||
+         owner.birthId == currentBirthId);
+    if (ownedPlayback || !CaptureOwnerProcessAlive(owner)) {
+        std::error_code ec;
+        fs::remove(ownerPath, ec);
+        return !ec;
+    }
+    return false;
+}
 
 static std::string SanitizePlaybackIdForPath(const std::string& playbackId) {
     std::string safe;
@@ -107,42 +209,100 @@ void StateManager::ClearSharedFiles(const std::string& playbackId) {
         fs::remove(SharedPath(playbackId, suffix), ec);
         ec.clear();
     }
-    fs::remove(fs::path(_baseSavePath) / ".capture-owner", ec);
+
+    CaptureOwnerGuard guard(_baseSavePath);
+    if (guard.locked()) {
+        RemoveCaptureOwnerIfOwnedOrStale(
+            fs::path(_baseSavePath) / ".capture-owner", playbackId);
+    }
 }
 
 bool StateManager::TryClaimWriter(const std::string& playbackId, const std::string& source) {
     if (!CaptureBackendAllowsSource(source)) return false;
 
     std::lock_guard<std::mutex> lock(_mutex);
+    const std::string sharedStatus = ReadSharedStatus(playbackId);
+    if (sharedStatus == "completed" || sharedStatus == "cancelled") return false;
     const int pid = static_cast<int>(getpid());
     if (_ownerPid == pid && _ownedTrack == playbackId && _ownedSource == source) return true;
 
+    CaptureOwnerGuard guard(_baseSavePath);
+    if (!guard.locked()) return false;
+
     const fs::path ownerPath = fs::path(_baseSavePath) / ".capture-owner";
-    int fd = open(ownerPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd >= 0) {
-        const std::string payload = std::to_string(pid) + " " + playbackId + " " + source + "\n";
-        (void)write(fd, payload.data(), payload.size());
+    const std::string birthId = ReadProcessBirthId(pid);
+    const auto claim = [&]() -> bool {
+        int fd = open(ownerPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (fd < 0) return false;
+        const std::string payload = birthId.empty()
+            ? std::to_string(pid) + " " + playbackId + " " + source + "\n"
+            : std::to_string(pid) + " " + birthId + " " + playbackId + " " + source + "\n";
+        const ssize_t written = write(fd, payload.data(), payload.size());
         close(fd);
+        if (written != static_cast<ssize_t>(payload.size())) {
+            std::error_code ec;
+            fs::remove(ownerPath, ec);
+            return false;
+        }
         _ownerPid = pid;
         _ownedTrack = playbackId;
         _ownedSource = source;
         printf("[Soggfy-INFO] PID %d claimed capture for %s via %s\n",
                pid, playbackId.c_str(), source.c_str());
         return true;
-    }
+    };
 
-    std::ifstream in(ownerPath);
-    int ownerPid = 0;
-    std::string ownerTrack;
-    std::string ownerSource;
-    in >> ownerPid >> ownerTrack >> ownerSource;
-    if (ownerPid == pid && ownerTrack == playbackId && ownerSource == source) {
+    if (claim()) return true;
+
+    const CaptureOwnerRecord owner = ReadCaptureOwner(ownerPath);
+    const std::string currentBirthId = ReadProcessBirthId(pid);
+    const bool sameProcess = owner.pid == pid &&
+        (owner.birthId.empty() || currentBirthId.empty() ||
+         owner.birthId == currentBirthId);
+    if (sameProcess && owner.playbackId == playbackId && owner.source == source) {
         _ownerPid = pid;
         _ownedTrack = playbackId;
         _ownedSource = source;
         return true;
     }
+
+    if (!CaptureOwnerProcessAlive(owner)) {
+        std::error_code ec;
+        fs::remove(ownerPath, ec);
+        if (!ec && claim()) return true;
+    }
     return false;
+}
+
+void StateManager::ReleaseWriterLocked(const std::string& playbackId) {
+    const int pid = static_cast<int>(getpid());
+    if (_ownerPid != pid || _ownedTrack != playbackId) return;
+
+    CaptureOwnerGuard guard(_baseSavePath);
+    if (!guard.locked()) return;
+
+    const fs::path ownerPath = fs::path(_baseSavePath) / ".capture-owner";
+    std::error_code ownerExistsError;
+    const bool ownerExists = fs::exists(ownerPath, ownerExistsError);
+    if (ownerExistsError) return;
+
+    if (ownerExists) {
+        const CaptureOwnerRecord owner = ReadCaptureOwner(ownerPath);
+        const std::string currentBirthId = ReadProcessBirthId(pid);
+        const bool matchesCurrentOwner = owner.pid == pid &&
+            owner.playbackId == playbackId &&
+            (owner.birthId.empty() || currentBirthId.empty() ||
+             owner.birthId == currentBirthId);
+        if (matchesCurrentOwner) {
+            std::error_code removeError;
+            fs::remove(ownerPath, removeError);
+            if (removeError) return;
+        }
+    }
+
+    _ownerPid = 0;
+    _ownedTrack.clear();
+    _ownedSource.clear();
 }
 
 bool StateManager::OwnsWriter(const std::string& playbackId, const std::string& source) const {
@@ -275,7 +435,10 @@ void StateManager::RestartOggCapture(const std::string& playbackId) {
 void StateManager::FinishPlayback(const std::string& playbackId) {
     std::lock_guard<std::mutex> lock(_mutex);
     const auto it = _playbacks.find(playbackId);
-    if (it == _playbacks.end() || it->second->discard) return;
+    if (it == _playbacks.end() || it->second->discard) {
+        ReleaseWriterLocked(playbackId);
+        return;
+    }
     auto* playback = it->second;
 
     if (playback->fileStream.is_open()) {
@@ -296,6 +459,7 @@ void StateManager::FinishPlayback(const std::string& playbackId) {
 
     playback->discard = true;
     PersistStatus(playbackId, "completed");
+    ReleaseWriterLocked(playbackId);
     printf("[Soggfy-INFO] Finalized capture for %s\n", playbackId.c_str());
 }
 
@@ -363,11 +527,7 @@ void StateManager::ResetLocalPlayback(const std::string& playbackId) {
         delete it->second;
         _playbacks.erase(it);
     }
-    if (_ownerPid == static_cast<int>(getpid()) && _ownedTrack == playbackId) {
-        _ownerPid = 0;
-        _ownedTrack.clear();
-        _ownedSource.clear();
-    }
+    ReleaseWriterLocked(playbackId);
 }
 
 void StateManager::ResetPlayback(const std::string& playbackId) {
@@ -384,9 +544,7 @@ void StateManager::ResetPlayback(const std::string& playbackId) {
         delete it->second;
         _playbacks.erase(it);
     }
-    _ownerPid = 0;
-    _ownedTrack.clear();
-    _ownedSource.clear();
+    ReleaseWriterLocked(playbackId);
 }
 
 void StateManager::CancelPlayback(const std::string& playbackId) {
@@ -404,6 +562,7 @@ void StateManager::CancelPlayback(const std::string& playbackId) {
     ec.clear();
     fs::remove(SharedPath(playbackId, ".ogg"), ec);
     PersistStatus(playbackId, "cancelled");
+    ReleaseWriterLocked(playbackId);
 }
 
 void StateManager::SetPlaybackDuration(const std::string& playbackId, uint32_t durationMs) {

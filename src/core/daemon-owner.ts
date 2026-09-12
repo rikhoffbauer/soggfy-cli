@@ -23,6 +23,12 @@ export interface OrphanSpotifyOwner {
   profileDir: string;
 }
 
+export type OrphanSpotifyInspection =
+  | { kind: "none" }
+  | { kind: "unavailable" }
+  | { kind: "unverifiable"; spotifyPid: number }
+  | { kind: "verified"; owner: OrphanSpotifyOwner };
+
 interface ProcessRow {
   pid: number;
   ppid: number;
@@ -102,6 +108,26 @@ export function findOrphanSpotifyOwnerFromSnapshots(
   return null;
 }
 
+export function inspectOrphanSpotifyOwnerFromSnapshots(
+  binaryPath: string,
+  profileDir: string,
+  psText: string,
+  readFingerprint: (pid: number) => ProcessFingerprint | null = readProcessFingerprint,
+): OrphanSpotifyInspection {
+  const spotifyPid = findOrphanSpotifyOwnerFromSnapshots(binaryPath, profileDir, psText);
+  if (!spotifyPid) return { kind: "none" };
+
+  const spotifyFingerprint = readFingerprint(spotifyPid);
+  if (!spotifyFingerprint || !isExactSoggfySpotifyCommand(spotifyFingerprint.command, binaryPath, profileDir)) {
+    return { kind: "unverifiable", spotifyPid };
+  }
+
+  return {
+    kind: "verified",
+    owner: { spotifyPid, spotifyFingerprint, binaryPath, profileDir },
+  };
+}
+
 function ownershipSnapshots(): { lsof: string; ps: string } | null {
   const lsof = Bun.spawnSync(["lsof", "-n", "-U"], { stdout: "pipe", stderr: "pipe" });
   if (lsof.exitCode !== 0) return null;
@@ -145,16 +171,19 @@ export function findLegacyDaemonOwner(socketPath: string, currentPid = process.p
   return { ...candidate, daemonFingerprint };
 }
 
+export function inspectOrphanSpotifyOwner(
+  binaryPath: string,
+  profileDir: string,
+  readProcessTable: () => string | null = processTableSnapshot,
+): OrphanSpotifyInspection {
+  const psText = readProcessTable();
+  if (psText === null) return { kind: "unavailable" };
+  return inspectOrphanSpotifyOwnerFromSnapshots(binaryPath, profileDir, psText);
+}
+
 export function findOrphanSpotifyOwner(binaryPath: string, profileDir: string): OrphanSpotifyOwner | null {
-  const psText = processTableSnapshot();
-  if (!psText) return null;
-  const spotifyPid = findOrphanSpotifyOwnerFromSnapshots(binaryPath, profileDir, psText);
-  if (!spotifyPid) return null;
-  const spotifyFingerprint = readProcessFingerprint(spotifyPid);
-  if (!spotifyFingerprint || !isExactSoggfySpotifyCommand(spotifyFingerprint.command, binaryPath, profileDir)) {
-    return null;
-  }
-  return { spotifyPid, spotifyFingerprint, binaryPath, profileDir };
+  const inspection = inspectOrphanSpotifyOwner(binaryPath, profileDir);
+  return inspection.kind === "verified" ? inspection.owner : null;
 }
 
 function assertProcessFingerprint(

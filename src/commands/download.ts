@@ -1,6 +1,6 @@
-import { existsSync, unlinkSync, statSync, mkdirSync } from "fs";
+import { existsSync, unlinkSync, statSync, mkdirSync, mkdtempSync, rmSync } from "fs";
 import { extname, join } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import { log } from "../core/log";
 import { resolveInput, type TrackMetadata } from "../core/metadata";
 import { captureTrack } from "../core/capture";
@@ -171,6 +171,7 @@ export async function downloadCommand(args: string[]): Promise<void> {
   let socketPath = IPC_SOCKET;
   let savePath = SAVE_PATH;
   let tempInstance: SpotifyInstance | null = null;
+  let tempRoot: string | null = null;
 
   if (opts.useDaemon) {
     const daemonAlive = await ping(IPC_SOCKET);
@@ -181,8 +182,9 @@ export async function downloadCommand(args: string[]): Promise<void> {
   }
 
   if (!opts.useDaemon) {
-    const tmpSocket = `/tmp/soggfy_download_${process.pid}.sock`;
-    const tmpSave = `/tmp/Soggfy_download_${process.pid}`;
+    tempRoot = mkdtempSync(join(tmpdir(), "soggfy-download-"));
+    const tmpSocket = join(tempRoot, "ipc.sock");
+    const tmpSave = join(tempRoot, "save");
     tempInstance = new SpotifyInstance(tmpSocket, tmpSave);
     try {
       await tempInstance.start();
@@ -245,5 +247,6 @@ export async function downloadCommand(args: string[]): Promise<void> {
     if (tempInstance) {
       await tempInstance.stop();
     }
+    if (tempRoot) rmSync(tempRoot, { recursive: true, force: true });
   }
 }

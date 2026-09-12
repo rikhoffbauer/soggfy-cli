@@ -6,6 +6,7 @@ import { sendIPC as sendIpcCommand } from "../../../src/core/ipc";
 import { getDaemonSpotifyInstance } from "../../../src/core/daemon-runtime";
 import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "../../../src/core/capture-control";
 import { captureMaxWaitMs, captureMonitorDecision, PlaybackProgressMonitor } from "../../../src/core/capture-monitor";
+import { BestEffortCaptureTraceRecorder } from "../../../src/core/capture-trace";
 import { migrateOfficialSpotifyAuthOnce } from "../../../src/core/auth-migration";
 import { AUTH_STATE_DIR, CAPTURE_BACKEND, OUTPUT_DIR, PROFILES_DIR, WORKSPACE_DIR, IPC_SOCKET, SAVE_PATH } from "../../../src/core/paths";
 import type { DownloadJob, TrackMetadata } from "./jobs";
@@ -55,6 +56,16 @@ export class JobPriorityInterruptedError extends Error {
 function assertJobActive(job: DownloadJob) {
   if (job.priorityInterrupted) throw new JobPriorityInterruptedError(job);
   if (job.state === "cancelled") throw new JobCancelledError(job);
+}
+
+export function sanitizedSpotifyEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const sanitized = { ...env };
+  for (const key of Object.keys(sanitized)) {
+    if (key.startsWith("SOGGFY_") || /(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|CREDENTIAL)/i.test(key)) {
+      delete sanitized[key];
+    }
+  }
+  return sanitized;
 }
 
 export class SpotifyInstance {
@@ -210,7 +221,7 @@ export class SpotifyInstance {
     mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
 
     const env = {
-      ...process.env,
+      ...sanitizedSpotifyEnvironment(),
       HOME: homeDir,
       TMPDIR: tmpDir,
       DYLD_INSERT_LIBRARIES: dylibPath,
@@ -335,6 +346,32 @@ export class SpotifyInstance {
 
   async downloadJob(job: DownloadJob): Promise<DownloadJob> {
     const trackId = job.trackId;
+    const trace = new BestEffortCaptureTraceRecorder(trackId, {
+      onError: (error) => jobs.log(
+        job,
+        `warning: capture trace disabled: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    });
+    const tracedSend = async (
+      command: string,
+      retries = 4,
+      timeoutMs = 2500,
+    ): Promise<string> => {
+      trace.command(command);
+      try {
+        const response = await this.sendIPC(command, retries, timeoutMs);
+        trace.response(command, response);
+        return response;
+      } catch (error) {
+        trace.record({
+          type: "error",
+          message: `IPC ${command}: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        throw error;
+      }
+    };
+    trace.record({ type: "phase", phase: "prepare" });
+    jobs.log(job, trace.path ? `capture trace: ${trace.path ?? "unavailable"}` : "capture trace unavailable");
     assertJobActive(job);
     this.isBusy = true;
     this.currentTrack = trackId;
@@ -345,8 +382,8 @@ export class SpotifyInstance {
       this.statusText = `Starting: ${trackId}`;
       jobs.transition(job, "starting");
       assertJobActive(job);
-      await this.sendIPC(`reset_track ${trackId}`);
-      await this.sendIPC(`set_track ${trackId}`);
+      await tracedSend(`reset_track ${trackId}`);
+      await tracedSend(`set_track ${trackId}`);
 
       const metadataPromise = fetchTrackMetadata(trackId).then((meta) => {
         if (meta) {
@@ -368,7 +405,8 @@ export class SpotifyInstance {
       this.statusText = `Playing: ${trackId}`;
       jobs.transition(job, "playing");
       assertJobActive(job);
-      await requestTrackPlayback((command) => this.sendIPC(command, 1), trackId);
+      trace.record({ type: "phase", phase: "awaiting_playback" });
+      await requestTrackPlayback((command) => tracedSend(command, 1), trackId);
 
       // Wait for the target track to actually start playing (not an ad).
       // The dylib gates capture via PlaybackStateChanged notifications.
@@ -377,7 +415,8 @@ export class SpotifyInstance {
         assertJobActive(job);
         await new Promise((r) => setTimeout(r, 500));
         try {
-          const playingRaw = await this.sendIPC("get_playing", 1);
+          const playingRaw = await tracedSend("get_playing", 1);
+          trace.record({ type: "playback", raw: playingRaw });
           const playing = parsePlaybackConfirmation(playingRaw, trackId);
           if (playing.isAd) {
             if (i % 4 === 0) jobs.log(job, `waiting: ad playing (${playing.uri})`);
@@ -390,28 +429,34 @@ export class SpotifyInstance {
 
       }
       if (!trackConfirmed) {
-        await this.sendIPC("pause").catch(() => undefined);
-        throw new Error(`target track ${trackId} was not confirmed playing`);
+        trace.record({ type: "timeout", prerequisite: "target playback confirmation", elapsedMs: 15_000 });
+        await tracedSend("pause").catch(() => undefined);
+        throw new Error(`target track ${trackId} was not confirmed playing; trace: ${trace.path ?? "unavailable"}`);
       }
 
+      trace.record({ type: "phase", phase: "awaiting_capture" });
       let status = "idle";
       for (let i = 0; i < 50; i++) {
         assertJobActive(job);
         await new Promise((r) => setTimeout(r, 500));
-        status = await this.sendIPC(`get_status ${trackId}`, 1).catch(() => "idle");
-        this.refreshCapturedBytes(job);
+        status = await tracedSend(`get_status ${trackId}`, 1).catch(() => "idle");
+        trace.record({ type: "status", status });
+        const bytes = this.refreshCapturedBytes(job);
+        trace.record({ type: "bytes", path: job.capturePath ?? "", bytes });
         if (status === "downloading" || status === "completed") break;
       }
       if (status !== "downloading" && status !== "completed") {
-        await this.sendIPC("pause").catch(() => undefined);
-        throw new Error("audio interception timed out before capture started");
+        trace.record({ type: "timeout", prerequisite: "audio interception", elapsedMs: 25_000 });
+        await tracedSend("pause").catch(() => undefined);
+        throw new Error(`audio interception timed out before capture started; trace: ${trace.path ?? "unavailable"}`);
       }
 
+      trace.record({ type: "phase", phase: "capturing" });
       jobs.transition(job, "capturing");
       assertJobActive(job);
       const durationMs = await durationPromise.catch(() => null);
       if (durationMs && durationMs > 0) {
-        await this.sendIPC(`set_duration ${trackId} ${durationMs}`).catch((err) => {
+        await tracedSend(`set_duration ${trackId} ${durationMs}`).catch((err) => {
           jobs.log(job, `warning: set_duration failed: ${err.message}`);
         });
       }
@@ -422,24 +467,35 @@ export class SpotifyInstance {
       while (captureMonitorDecision(status, Date.now() - started, maxCaptureMs) === "continue") {
         assertJobActive(job);
         await new Promise((r) => setTimeout(r, 1000));
-        status = await this.sendIPC(`get_status ${trackId}`, 1).catch(() => "ipc_lost");
-        this.refreshCapturedBytes(job);
+        status = await tracedSend(`get_status ${trackId}`, 1).catch(() => "ipc_lost");
+        trace.record({ type: "status", status });
+        const bytes = this.refreshCapturedBytes(job);
+        trace.record({ type: "bytes", path: job.capturePath ?? "", bytes });
+        playback.observeCaptureBytes(bytes);
         if (status === "ipc_lost") throw new Error("IPC lost during capture");
-        if (status !== "completed") playback.observe(await this.sendIPC("get_playing", 1).catch(() => "{}"));
+        if (status !== "completed") {
+          const playbackRaw = await tracedSend("get_playing", 1).catch(() => "{}");
+          trace.record({ type: "playback", raw: playbackRaw });
+          playback.observe(playbackRaw);
+        }
       }
 
+      trace.record({ type: "phase", phase: "finalizing" });
       jobs.transition(job, "finalizing");
       assertJobActive(job);
       if (status !== "completed") {
-        await this.sendIPC(`finish_track ${trackId}`).catch(() => undefined);
+        await tracedSend(`finish_track ${trackId}`).catch(() => undefined);
         const completed = await waitForTrackCompletion(
-          (command) => this.sendIPC(command, 1),
+          (command) => tracedSend(command, 1),
           trackId,
         );
-        if (!completed) throw new Error(`capture finalization timed out for ${trackId}`);
+        if (!completed) {
+          trace.record({ type: "timeout", prerequisite: "capture finalization", elapsedMs: 5_000 });
+          throw new Error(`capture finalization timed out for ${trackId}; trace: ${trace.path ?? "unavailable"}`);
+        }
         status = "completed";
       }
-      await this.sendIPC("pause").catch(() => undefined);
+      await tracedSend("pause").catch(() => undefined);
 
       const capturePath = findCapturedAudioPath(this.savePath, trackId);
       if (!capturePath) throw new Error("captured audio file not found in temp cache");
@@ -493,6 +549,7 @@ export class SpotifyInstance {
         completedAt: new Date().toISOString(),
       });
 
+      trace.record({ type: "phase", phase: "completed" });
       return jobs.complete(job, {
         savedPath,
         capturePath,
@@ -504,7 +561,12 @@ export class SpotifyInstance {
         metadata: meta || job.metadata,
       });
     } catch (err) {
-      await this.sendIPC("pause").catch(() => undefined);
+      trace.record({
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+      trace.record({ type: "phase", phase: "failed" });
+      await tracedSend("pause").catch(() => undefined);
       throw err;
     } finally {
       this.statusText = "Ready";

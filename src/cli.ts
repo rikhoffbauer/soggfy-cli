@@ -115,7 +115,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  log.error(err.message || String(err));
+main().catch((err: unknown) => {
+  log.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

@@ -19,6 +19,17 @@ export const SPOTIFY_COMPATIBILITY_REGISTRY_PATH = resolve(
   "../../compatibility/spotify-versions.json",
 );
 
+const MACOS_UNIX_SOCKET_PATH_MAX_BYTES = 103;
+
+export function assertCompatSocketPath(socketPath: string): void {
+  const bytes = Buffer.byteLength(socketPath, "utf8");
+  if (bytes > MACOS_UNIX_SOCKET_PATH_MAX_BYTES) {
+    throw new Error(
+      `Unix socket path is too long (${bytes} bytes; max ${MACOS_UNIX_SOCKET_PATH_MAX_BYTES}): ${socketPath}`,
+    );
+  }
+}
+
 export interface CompatProbeOptions {
   appPath: string;
   trackId: string;
@@ -157,9 +168,6 @@ async function verifyTargetPlayback(instance: SpotifyInstance, trackId: string):
       await Bun.sleep(500);
       const raw = await instance.sendCommand("get_playing").catch(() => "");
       if (parsePlaybackConfirmation(raw, trackId).confirmed) return true;
-      if (i > 0 && i % 6 === 0) {
-        await instance.sendCommand(`play spotify:track:${trackId}`).catch(() => undefined);
-      }
     }
     return false;
   } finally {
@@ -218,7 +226,7 @@ export async function probeSpotifyCompatibility(
 
   const runDir = makeRunDir(version);
   const paths = createCompatibilityRunPaths(runDir);
-  const socketPath = `/tmp/soggfy-compat-${process.pid}-${Date.now()}.sock`;
+  const socketPath = join(runDir, "ipc.sock");
   const checks = emptyChecks();
   const startedAt = new Date().toISOString();
   const commit = gitCommit(repoRoot);
@@ -226,6 +234,7 @@ export async function probeSpotifyCompatibility(
   let result: CompatibilityProbeResult | null = null;
 
   try {
+    assertCompatSocketPath(socketPath);
     applyCurrentPatch(options.appPath, paths.appPath, repoRoot, checks);
     instance = new SpotifyInstance(socketPath, paths.savePath, paths.profileDir, {
       appPath: paths.appPath,

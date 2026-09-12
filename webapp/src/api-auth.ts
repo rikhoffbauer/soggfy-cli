@@ -1,19 +1,20 @@
 const SESSION_KEY = "soggfy.apiToken";
 
-function inputUrl(input: RequestInfo | URL, origin: string): URL {
+function inputUrl(input: RequestInfo | URL, pageUrl: string): URL {
   if (input instanceof Request) return new URL(input.url);
-  return new URL(String(input), origin);
+  return new URL(String(input), pageUrl);
 }
 
 export function apiRequestInit(
   input: RequestInfo | URL,
   init: RequestInit = {},
   token: string | null,
-  origin: string,
+  pageUrl: string,
 ): RequestInit {
   if (!token) return init;
-  const url = inputUrl(input, origin);
-  if (url.origin !== origin || !url.pathname.startsWith("/api/")) return init;
+  const page = new URL(pageUrl);
+  const url = inputUrl(input, pageUrl);
+  if (url.origin !== page.origin || !url.pathname.startsWith("/api/")) return init;
   const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
   headers.set("x-soggfy-token", token);
   return { ...init, headers };
@@ -31,5 +32,5 @@ export function installApiAuthentication(): void {
   if (!token) return;
   const nativeFetch = window.fetch.bind(window);
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
-    nativeFetch(input, apiRequestInit(input, init, token, window.location.origin))) as typeof window.fetch;
+    nativeFetch(input, apiRequestInit(input, init, token, window.location.href))) as typeof window.fetch;
 }

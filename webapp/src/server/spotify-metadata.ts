@@ -29,6 +29,7 @@ export async function fetchTrackMetadata(
     const nextData = html.match(/<script id="__NEXT_DATA__" type="application\/json">({.*?})<\/script>/)?.[1];
     if (!nextData) return null;
     const entity = JSON.parse(nextData).props?.pageProps?.state?.data?.entity;
+    if (!entity) return null;
     return {
       title: entity?.title || entity?.name,
       artist: entity?.artists?.[0]?.name,

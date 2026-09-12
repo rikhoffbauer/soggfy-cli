@@ -16,7 +16,6 @@ import { cn } from "@/lib/utils"
  *           </div>
  *         ))}
  *       </div>
- *       <ScrollBar orientation="vertical" />
  *     </ScrollArea>
  * ```
  */
@@ -56,7 +55,6 @@ function ScrollArea({
  *           </div>
  *         ))}
  *       </div>
- *       <ScrollBar orientation="vertical" />
  *     </ScrollArea>
  * ```
  */
@@ -96,7 +94,6 @@ function ScrollBar({
  *           </div>
  *         ))}
  *       </div>
- *       <ScrollBar orientation="vertical" />
  *     </ScrollArea>
  * ```
  */
@@ -115,7 +112,6 @@ export type ScrollAreaProps = React.ComponentProps<typeof ScrollArea>
  *           </div>
  *         ))}
  *       </div>
- *       <ScrollBar orientation="vertical" />
  *     </ScrollArea>
  * ```
  */

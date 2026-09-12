@@ -61,6 +61,7 @@ private:
     void PersistStatus(const std::string& playbackId, const std::string& status) const;
     std::string ReadSharedStatus(const std::string& playbackId) const;
     void ClearSharedFiles(const std::string& playbackId);
+    void ReleaseWriterLocked(const std::string& playbackId);
 
     std::string _baseSavePath;
     mutable std::mutex _mutex;

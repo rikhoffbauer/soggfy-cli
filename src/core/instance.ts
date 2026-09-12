@@ -5,7 +5,7 @@ import { sendIPC, ping } from "./ipc";
 import { log } from "./log";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, resetSpotifyTransientRuntimeState, terminateProcessTree } from "./spotify-runtime";
 import { migrateOfficialSpotifyAuthOnce } from "./auth-migration";
-import { findOrphanSpotifyOwner, retireOrphanSpotifyOwner } from "./daemon-owner";
+import { inspectOrphanSpotifyOwner, retireOrphanSpotifyOwner } from "./daemon-owner";
 import {
   PATCHED_APP,
   PROFILES_DIR,
@@ -56,10 +56,22 @@ export class SpotifyInstance {
     }
     if (this.enforceSupportedVersion) assertSupportedSpotifyBundle(this.appPath);
 
-    const orphan = findOrphanSpotifyOwner(binaryPath, this.profileDir);
-    if (orphan) {
+    const orphanInspection = inspectOrphanSpotifyOwner(binaryPath, this.profileDir);
+    if (orphanInspection.kind === "unavailable") {
+      throw new Error(
+        "Soggfy cannot inspect running Spotify processes; refusing to launch a replacement that could share the same profile.",
+      );
+    }
+    if (orphanInspection.kind === "verified") {
+      const orphan = orphanInspection.owner;
       log.warn(`Retiring orphaned Soggfy Spotify process ${orphan.spotifyPid} before replacement launch.`);
       await retireOrphanSpotifyOwner(orphan);
+    } else if (orphanInspection.kind === "unverifiable") {
+      throw new Error(
+        `Spotify process ${orphanInspection.spotifyPid} already uses Soggfy profile ${this.profileDir}, `
+        + "but Soggfy cannot verify or terminate it safely. If it was started with sudo/root, "
+        + `stop it with 'sudo kill ${orphanInspection.spotifyPid}' and retry.`,
+      );
     }
 
     // Prepare directories

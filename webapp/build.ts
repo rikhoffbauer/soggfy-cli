@@ -19,6 +19,11 @@ const result = await Bun.build({
   },
 });
 
+if (!result.success) {
+  for (const diagnostic of result.logs) console.error(diagnostic);
+  process.exit(1);
+}
+
 for (const output of result.outputs) {
   console.log(` ${path.relative(process.cwd(), output.path)}  ${(output.size / 1024).toFixed(1)} KB`);
 }

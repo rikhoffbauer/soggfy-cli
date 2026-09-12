@@ -14,4 +14,5 @@ void InstallDecoderHook();
 void ResetOggCaptureState(const std::string& trackId);
 void DiscardPendingOggCapture();
 void SyncSharedCaptureStateNow();
+void MarkAudioActivity();
 extern std::atomic<bool> g_decoder_hooks_ready;
