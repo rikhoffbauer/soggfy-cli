@@ -9,6 +9,7 @@ import { serveFileWithRange } from "../http";
 import { fetchTrackMetadata } from "../spotify-metadata";
 import { parseTrackId } from "../spotify-url";
 import { resolveRepoRoot } from "../runtime-config";
+import { sanitizedSpotifyEnvironment } from "../spotify-instance";
 
 const root = join(import.meta.dir, "../../../..");
 const source = (path: string) => readFileSync(join(root, path), "utf8");
@@ -80,6 +81,21 @@ test("Spotify child environment does not inherit API credentials", () => {
   const spotify = source("webapp/src/server/spotify-instance.ts");
   expect(spotify).not.toContain("...process.env,");
   expect(spotify).toContain("sanitizedSpotifyEnvironment");
+});
+
+
+
+test("Spotify child environment strips TLS key logging as well as API credentials", () => {
+  const sanitized = sanitizedSpotifyEnvironment({
+    HOME: "/tmp/home",
+    SSLKEYLOGFILE: "/tmp/keys.log",
+    SOGGFY_API_TOKEN: "secret",
+    SPOTIFY_ACCESS_TOKEN: "access",
+  });
+  expect(sanitized.HOME).toBe("/tmp/home");
+  expect(sanitized.SSLKEYLOGFILE).toBeUndefined();
+  expect(sanitized.SOGGFY_API_TOKEN).toBeUndefined();
+  expect(sanitized.SPOTIFY_ACCESS_TOKEN).toBeUndefined();
 });
 
 test("runtime repository root supports source and bundled server layouts", () => {

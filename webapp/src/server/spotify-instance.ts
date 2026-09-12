@@ -61,7 +61,11 @@ function assertJobActive(job: DownloadJob) {
 export function sanitizedSpotifyEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const sanitized = { ...env };
   for (const key of Object.keys(sanitized)) {
-    if (key.startsWith("SOGGFY_") || /(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|CREDENTIAL)/i.test(key)) {
+    if (
+      key === "SSLKEYLOGFILE"
+      || key.startsWith("SOGGFY_")
+      || /(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|CREDENTIAL)/i.test(key)
+    ) {
       delete sanitized[key];
     }
   }
