@@ -118,3 +118,37 @@ test("default-equivalent explicit SOGGFY_HOME still upgrades same-account WebKit
   expect(output.trim()).toBe("upgraded");
   expect(readFileSync(join(owned, "WebKit/com.spotify.client/WebsiteData/session"), "utf8")).toBe("webkit-state");
 });
+
+test("explicit SOGGFY_AUTH_DIR shares owned auth with an isolated runtime home", async () => {
+  const home = mkdtempSync(join(tmpdir(), "soggfy-shared-auth-home-"));
+  roots.push(home);
+  const sharedAuthDir = join(home, "shared-auth");
+  const sharedStateDir = join(sharedAuthDir, "spotify");
+  const isolatedHome = join(home, "isolated-runtime");
+  mkdirSync(join(sharedStateDir, "Users/u"), { recursive: true });
+  writeFileSync(join(sharedStateDir, "prefs"), 'autologin.username="shared-user"\n');
+  writeFileSync(join(sharedStateDir, "Users/u/prefs"), "shared-state");
+
+  const script = [
+    'import { AUTH_DIR, AUTH_STATE_DIR } from "./src/core/paths";',
+    'import { migrateOfficialSpotifyAuthOnce } from "./src/core/auth-migration";',
+    'console.log(JSON.stringify({ authDir: AUTH_DIR, stateDir: AUTH_STATE_DIR, result: migrateOfficialSpotifyAuthOnce() }));',
+  ].join(" ");
+  const proc = Bun.spawn([process.execPath, "-e", script], {
+    cwd: join(import.meta.dir, ".."),
+    env: {
+      ...process.env,
+      HOME: home,
+      SOGGFY_HOME: isolatedHome,
+      SOGGFY_AUTH_DIR: sharedAuthDir,
+    },
+    stdout: "pipe", stderr: "pipe",
+  });
+  const [code, output] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+  expect(code).toBe(0);
+  expect(JSON.parse(output.trim())).toEqual({
+    authDir: sharedAuthDir,
+    stateDir: sharedStateDir,
+    result: "existing",
+  });
+});

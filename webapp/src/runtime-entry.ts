@@ -6,6 +6,7 @@ import { CORS_HEADERS } from "./server/http";
 import { apiSecurityFromEnv, protectApiRoutes } from "./server/security";
 import { createApiRoutes } from "./server/routes";
 import { initializeRuntimeState, POOL_SIZE, REPO_ROOT, USE_DAEMON_INSTANCE, pool } from "./server/runtime";
+import { resolveWebRoot } from "./server/runtime-config";
 
 const restoredJobs = initializeRuntimeState();
 if (restoredJobs > 0) console.log(`[Server] Restored ${restoredJobs} completed download(s) from sidecars.`);
@@ -14,7 +15,7 @@ const HTTP_CONFIG = getHttpConfig();
 const PORT = HTTP_CONFIG.port;
 const HOSTNAME = HTTP_CONFIG.host;
 const API_SECURITY = apiSecurityFromEnv(HOSTNAME);
-const WEB_ROOT = join(import.meta.dir, "public");
+const WEB_ROOT = resolveWebRoot(import.meta.dir);
 await pool.start();
 const server = Bun.serve({
   port: PORT,

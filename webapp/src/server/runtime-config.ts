@@ -14,6 +14,10 @@ export function resolveRepoRoot(serverDir = SERVER_DIR): string {
 }
 export const REPO_ROOT = resolveRepoRoot();
 
+export function resolveWebRoot(moduleDir: string, explicitRoot = process.env.SOGGFY_WEB_ROOT?.trim()): string {
+  return explicitRoot ? resolve(explicitRoot) : resolve(moduleDir, "public");
+}
+
 export function intFromEnv(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
