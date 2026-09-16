@@ -15,7 +15,7 @@ const SPOTIFY_TOTP_CIPHER_BYTES = [
 export const SPOTIFY_WEB_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
 let cachedTokens: SpotifyWebTokens | null = null;
 
-function spotifyTotpVersion(): number {
+export function spotifyTotpVersion(): number {
   const value = Number.parseInt(process.env.SPOTIFY_TOTP_VERSION ?? "", 10);
   return Number.isInteger(value) && value > 0 ? value : SPOTIFY_TOTP_VERSION;
 }

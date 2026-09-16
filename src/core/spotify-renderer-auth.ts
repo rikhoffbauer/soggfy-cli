@@ -1,4 +1,4 @@
-import { generateSpotifyWebTOTP, SPOTIFY_WEB_USER_AGENT } from "./spotify-web-auth";
+import { generateSpotifyWebTOTP, spotifyTotpVersion, SPOTIFY_WEB_USER_AGENT } from "./spotify-web-auth";
 
 export interface CDPCookie {
   name: string;
@@ -118,7 +118,7 @@ export async function getAuthenticatedSpotifyWebToken(
   url.searchParams.set("productType", "web-player");
   url.searchParams.set("totp", totp);
   url.searchParams.set("totpServer", totp);
-  url.searchParams.set("totpVer", "61");
+  url.searchParams.set("totpVer", String(spotifyTotpVersion()));
   const response = await fetchImpl(url, {
     headers: {
       Accept: "application/json",

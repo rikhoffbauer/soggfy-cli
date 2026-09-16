@@ -36,3 +36,27 @@ test("renderer auth exchanges the managed Spotify session for a web access token
   expect(result.expiresAt).toBeGreaterThan(Date.now());
   expect(requestCookie).toBe("sp_dc=secret-session; sp_key=key-value");
 });
+
+
+test("renderer auth honors the shared Spotify TOTP version override", async () => {
+  const previous = process.env.SPOTIFY_TOTP_VERSION;
+  process.env.SPOTIFY_TOTP_VERSION = "77";
+  let totpVersion = "";
+  try {
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      totpVersion = new URL(String(input)).searchParams.get("totpVer") ?? "";
+      return Response.json({
+        accessToken: "spotify-access",
+        accessTokenExpirationTimestampMs: Date.now() + 60_000,
+      });
+    }) as typeof fetch;
+    await getAuthenticatedSpotifyWebToken({
+      cookieProvider: async () => cookies,
+      fetchImpl,
+    });
+    expect(totpVersion).toBe("77");
+  } finally {
+    if (previous === undefined) delete process.env.SPOTIFY_TOTP_VERSION;
+    else process.env.SPOTIFY_TOTP_VERSION = previous;
+  }
+});
