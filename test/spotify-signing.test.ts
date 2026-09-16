@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spotifyCefSigningStrategy } from "../src/core/spotify-signing";
+import { shouldRetrySpotifyCefSigning, spotifyCefSigningStrategy } from "../src/core/spotify-signing";
 
 test("existing Spotify 1.2 signing path remains direct replacement", () => {
   expect(spotifyCefSigningStrategy("1.2.98.301")).toBe("replace-existing");
@@ -12,4 +12,12 @@ test("Spotify 1.3.0.277 removes the CEF signature before ad-hoc signing", () => 
 
 test("unknown versions do not silently opt into the 1.3 signing workaround", () => {
   expect(spotifyCefSigningStrategy("1.3.0.278")).toBe("replace-existing");
+});
+
+
+test("unknown builds retry only the known CEF replacement-signing subsystem failure", () => {
+  expect(shouldRetrySpotifyCefSigning(
+    "Spotify signing failed: replacing existing signature\ninternal error in Code Signing subsystem",
+  )).toBe(true);
+  expect(shouldRetrySpotifyCefSigning("Spotify signing failed: resource envelope is obsolete")).toBe(false);
 });

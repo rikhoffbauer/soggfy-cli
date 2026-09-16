@@ -13,12 +13,28 @@ function codesign(args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`Spotify signing failed: ${result.stderr.toString().trim()}`);
 }
 
+export function shouldRetrySpotifyCefSigning(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("replacing existing signature")
+    && message.includes("internal error in Code Signing subsystem");
+}
+
 export function signSpotifyCef(app: string): void {
   const cef = join(app, "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework");
   if (!existsSync(cef)) throw new Error(`Spotify CEF binary is missing: ${cef}`);
   const strategy = spotifyCefSigningStrategy(readSpotifyBundleVersion(app));
-  if (strategy === "remove-then-sign") codesign(["--remove-signature", cef]);
-  codesign(["-f", "-s", "-", cef]);
+  if (strategy === "remove-then-sign") {
+    codesign(["--remove-signature", cef]);
+    codesign(["-f", "-s", "-", cef]);
+    return;
+  }
+  try {
+    codesign(["-f", "-s", "-", cef]);
+  } catch (error) {
+    if (!shouldRetrySpotifyCefSigning(error)) throw error;
+    codesign(["--remove-signature", cef]);
+    codesign(["-f", "-s", "-", cef]);
+  }
 }
 
 export function assertSignedSpotifyCli(app: string): void {
