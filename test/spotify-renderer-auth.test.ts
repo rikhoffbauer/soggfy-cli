@@ -38,6 +38,30 @@ test("renderer auth exchanges the managed Spotify session for a web access token
 });
 
 
+test("renderer auth waits for the managed Spotify session during startup", async () => {
+  let cookieReads = 0;
+  const fetchImpl = (async () => Response.json({
+    accessToken: "spotify-access",
+    accessTokenExpirationTimestampMs: Date.now() + 60_000,
+  })) as typeof fetch;
+
+  const result = await getAuthenticatedSpotifyWebToken({
+    cookieProvider: async () => {
+      cookieReads += 1;
+      return cookieReads === 1
+        ? cookies.filter((cookie) => cookie.name !== "sp_dc")
+        : cookies;
+    },
+    fetchImpl,
+    rendererSessionAttempts: 2,
+    rendererSessionPollMs: 0,
+  });
+
+  expect(result.accessToken).toBe("spotify-access");
+  expect(cookieReads).toBe(2);
+});
+
+
 test("renderer auth honors the shared Spotify TOTP version override", async () => {
   const previous = process.env.SPOTIFY_TOTP_VERSION;
   process.env.SPOTIFY_TOTP_VERSION = "77";
