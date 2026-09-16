@@ -1,6 +1,7 @@
 #include "../Payload/SpotifyHookTargets.h"
 #include <cassert>
 #include <cstring>
+#include <cstdlib>
 #include <iostream>
 
 int main() {
@@ -22,6 +23,19 @@ int main() {
   assert(latestTargets->decodeAudioDataOffset == 0x12f7384);
   assert(latestTargets->oggStreamPageinOffset == 0x132b91c);
   assert(SpotifyHookFamilyForVersion("1.3.0.277") == SpotifyHookFamily::OggV1);
+
+  SpotifyHookTargets discovered{};
+  setenv("SOGGFY_COMPAT_ALLOW_DISCOVERED_TARGETS", "1", 1);
+  setenv("SOGGFY_COMPAT_EXPECTED_VERSION", "1.3.1.123", 1);
+  setenv("SOGGFY_COMPAT_HOOK_FAMILY", "OggV1", 1);
+  setenv("SOGGFY_COMPAT_DECODE_OFFSET", "0x13183ac", 1);
+  setenv("SOGGFY_COMPAT_OGG_PAGEIN_OFFSET", "0x134cf10", 1);
+  assert(SpotifyHookTargetsForCompatibilityEnvironment("1.3.1.123", &discovered));
+  assert(discovered.decodeAudioDataOffset == 0x13183ac);
+  assert(discovered.oggStreamPageinOffset == 0x134cf10);
+  assert(discovered.family == SpotifyHookFamily::OggV1);
+  assert(!SpotifyHookTargetsForCompatibilityEnvironment("1.3.1.124", &discovered));
+  unsetenv("SOGGFY_COMPAT_ALLOW_DISCOVERED_TARGETS");
 
   assert(SpotifyHookTargetsForVersion("1.2.99.318") == nullptr);
   assert(SpotifyHookFamilyForVersion("1.2.99.318") == SpotifyHookFamily::Unsupported);
