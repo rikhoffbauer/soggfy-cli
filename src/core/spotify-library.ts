@@ -30,6 +30,7 @@ export interface SpotifyLibraryPlaylist {
   owner?: string;
   imageUrl?: string;
   snapshotId?: string;
+  contentsAvailable: boolean;
   tracks: SpotifyLibraryTrack[];
   issues: SpotifyLibraryIssue[];
   totalCount: number;
@@ -47,6 +48,13 @@ export interface SpotifyLibrarySnapshot {
 export interface SpotifyLibraryOptions {
   fetchImpl?: typeof fetch;
   tokenProvider?: () => Promise<SpotifyAuthenticatedWebToken>;
+}
+
+class SpotifyLibraryHTTPError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "SpotifyLibraryHTTPError";
+  }
 }
 
 function object(value: unknown): Record<string, any> | null {
@@ -97,7 +105,10 @@ async function spotifyJSON(
     headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
   });
   if (response.status === 401 || response.status === 403) {
-    throw new Error("Soggfy does not have an authenticated Spotify session with library access");
+    throw new SpotifyLibraryHTTPError(
+      response.status,
+      "Soggfy does not have an authenticated Spotify session with library access",
+    );
   }
   if (response.status === 429) {
     throw new Error("Spotify library request was rate limited");
@@ -181,7 +192,21 @@ export async function fetchSpotifyLibrarySnapshot(
     const playlist = object(rawPlaylist);
     const id = typeof playlist?.id === "string" ? playlist.id : "";
     if (!SPOTIFY_ID.test(id)) continue;
-    const contents = await fetchPagedItems(`/playlists/${id}/items`, token, fetchImpl);
+    let contents: { items: unknown[]; total: number };
+    let contentsAvailable = true;
+    try {
+      contents = await fetchPagedItems(`/playlists/${id}/items`, token, fetchImpl);
+    } catch (error) {
+      if (!(error instanceof SpotifyLibraryHTTPError) || error.status !== 403) throw error;
+      const currentItems = object(playlist?.items);
+      const legacyTracks = object(playlist?.tracks);
+      const advertisedTotal = Number(currentItems?.total ?? legacyTracks?.total ?? 0);
+      contents = {
+        items: [],
+        total: Number.isFinite(advertisedTotal) && advertisedTotal >= 0 ? advertisedTotal : 0,
+      };
+      contentsAvailable = false;
+    }
     const tracks: SpotifyLibraryTrack[] = [];
     const issues: SpotifyLibraryIssue[] = [];
     contents.items.forEach((wrapper, index) => {
@@ -197,6 +222,7 @@ export async function fetchSpotifyLibrarySnapshot(
       owner: typeof owner?.display_name === "string" ? owner.display_name : undefined,
       imageUrl: firstImage(playlist?.images),
       snapshotId: typeof playlist?.snapshot_id === "string" ? playlist.snapshot_id : undefined,
+      contentsAvailable,
       tracks,
       issues,
       totalCount: contents.total,
