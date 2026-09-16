@@ -7,14 +7,14 @@ The production capture path intercepts Spotify's Ogg/Vorbis stream before decode
 ## Compatibility
 
 - macOS on Apple Silicon (`arm64`)
-- Spotify **1.2.98.301** and **1.2.99.317 arm64** — exact-supported in `compatibility/spotify-versions.json`
+- Spotify **1.2.98.301**, **1.2.99.317**, and **1.3.0.277 arm64** — exact-supported in `compatibility/spotify-versions.json`
 - [Homebrew](https://brew.sh/)
 - [Bun](https://bun.sh/)
 - CMake, FFmpeg/ffprobe, and Chromaprint (`fpcalc`)
 
 The private capture hooks are version-specific. Production accepts only exact `supported` entries from `compatibility/spotify-versions.json`; the observed min/max span is informational and never an inclusive whitelist. `setup.sh`, `soggfy install`, doctor, and runtime startup reject unrecorded/failed versions, while the native payload independently verifies expected function prologues before installing either private hook.
 
-Use `soggfy compat list` to inspect recorded builds and `soggfy compat probe [Spotify.app]` to apply the current patch to an isolated candidate clone and run native-hook, playback, capture, media-validation, exact whole-track fixture, and faceless-runtime checks. The fixture compares both the complete captured-file SHA-256 and the complete audio decoded to canonical PCM; `soggfy compat fixture` creates a manifest only from an independently known-good capture. `--record` stores the exact probe result. Exact per-build hook addresses may map to a shared implementation family when the private ABI and behavior are unchanged. Spotify 1.2.99.317 was re-analyzed and validated on 2026-09-11; it is recorded as **supported** with version-specific hook targets after playback, full Ogg capture, media validation, and headless checks passed.
+Use `soggfy compat list` to inspect recorded builds and `soggfy compat probe [Spotify.app]` to apply the current patch to an isolated candidate clone and run native-hook, playback, capture, media-validation, exact whole-track fixture, and faceless-runtime checks. The fixture compares both the complete captured-file SHA-256 and the complete audio decoded to canonical PCM; `soggfy compat fixture` creates a manifest only from an independently known-good capture. `--record` stores the exact probe result. Exact per-build hook addresses may map to a shared implementation family when the private ABI and behavior are unchanged. Spotify 1.2.99.317 was re-analyzed and validated on 2026-09-11. Spotify 1.3.0.277 was re-analyzed and validated on 2026-09-16, shares the `OggV1` implementation family with exact new hook addresses, and is recorded as **supported** only after signing, playback, full Ogg capture, media validation, exact whole-track fixture equality, and headless checks all passed.
 
 ## Quick start
 
@@ -219,6 +219,8 @@ bun run doctor
 On 2026-09-08, a live CLI smoke capture, an isolated webapp API capture, and `soggfy compat probe` were validated against Spotify 1.2.98.301. The test track produced a 213.573-second, 44.1 kHz stereo Vorbis capture; the webapp successfully validated it and produced a tagged MP3 of the same duration. Exact process-tree shutdown left no capture-process leaks.
 
 On 2026-09-11, Spotify 1.2.99.317 passed four consecutive non-instrumented compatibility captures of Eminem’s “8 Mile,” including the recorded probe. The production daemon was then rebuilt on that exact Spotify version and completed “8 Mile,” “Without Me,” “Like Toy Soldiers,” and “The Way I Am” through the Web UI API with full-duration validated audio. “The Way I Am” encountered one Spotify-side pause on its first attempt and recovered on the built-in retry; the other three completed on attempt 1.
+
+On 2026-09-16, Spotify 1.3.0.277 passed the recorded compatibility probe on commit `ade33aa`: exact per-build hook targets selected the existing `OggV1` implementation, both private-hook prologues validated, the isolated process remained faceless with zero on-screen windows, and the resulting capture matched both the known-good complete Ogg SHA-256 and the complete canonical decoded-PCM SHA-256 exactly.
 
 ## Safety boundaries
 

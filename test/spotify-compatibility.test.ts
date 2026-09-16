@@ -13,8 +13,10 @@ test("production support is exact even inside the observed version span", () => 
   expect(supportedSpotifyVersions()).toContain("1.2.98.301");
   expect(isSpotifyVersionSupported("1.2.98.301")).toBe(true);
   expect(isSpotifyVersionSupported("1.2.99.317")).toBe(true);
+  expect(isSpotifyVersionSupported("1.3.0.277")).toBe(true);
   expect(isSpotifyVersionSupported("1.2.98.302")).toBe(false);
-  expect(supportedSpotifySpan()).toEqual({ min: "1.2.98.301", max: "1.2.99.317" });
+  expect(isSpotifyVersionSupported("1.2.99.318")).toBe(false);
+  expect(supportedSpotifySpan()).toEqual({ min: "1.2.98.301", max: "1.3.0.277" });
 });
 
 test("Spotify dotted versions sort numerically rather than lexicographically", () => {
