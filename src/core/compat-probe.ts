@@ -176,7 +176,7 @@ function verifyHeadlessProcess(pid: number): boolean {
   const windowCheck = Bun.spawnSync(["swift", "-e", swift], {
     stdout: "pipe",
     stderr: "pipe",
-    timeout: 5_000,
+    timeout: 20_000,
     killSignal: "SIGKILL",
     maxBuffer: 64 * 1024,
   });

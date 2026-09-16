@@ -65,7 +65,7 @@ test("health probes have a deadline and compatibility uses one capture-driven pl
   expect((compat.match(/await captureTrack\(/g) ?? []).length).toBe(1);
   expect(compat).not.toContain("verifyTargetPlayback");
   expect(compat).toContain("CGWindowListCopyWindowInfo");
-  expect(compat).toContain("timeout: 5_000");
+  expect(compat).toContain("timeout: 20_000");
 });
 
 test("capture monitor handles stat races and cleans up prolonged IPC loss", () => {
