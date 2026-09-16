@@ -6,6 +6,7 @@ import { log } from "./log";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, resetSpotifyTransientRuntimeState, terminateProcessTree } from "./spotify-runtime";
 import { migrateOfficialSpotifyAuthOnce } from "./auth-migration";
 import { inspectOrphanSpotifyOwner, retireOrphanSpotifyOwner } from "./daemon-owner";
+import { compatibilityHookTargetEnvironment, type SpotifyHookTargetsCandidate } from "./spotify-hook-discovery";
 import {
   PATCHED_APP,
   PROFILES_DIR,
@@ -15,9 +16,23 @@ import {
   AUTH_STATE_DIR,
 } from "./paths";
 
+export interface SpotifyCompatibilityHookTargetOptions {
+  version: string;
+  targets: SpotifyHookTargetsCandidate;
+}
+
 export interface SpotifyInstanceOptions {
   appPath?: string;
   enforceSupportedVersion?: boolean;
+  compatibilityHookTargets?: SpotifyCompatibilityHookTargetOptions;
+}
+
+export function spotifyInstanceCompatibilityEnvironment(
+  compatibilityHookTargets?: SpotifyCompatibilityHookTargetOptions,
+): Record<string, string> {
+  return compatibilityHookTargets
+    ? compatibilityHookTargetEnvironment(compatibilityHookTargets.version, compatibilityHookTargets.targets)
+    : { SOGGFY_COMPAT_ALLOW_DISCOVERED_TARGETS: "0" };
 }
 
 export class SpotifyInstance {
@@ -27,6 +42,7 @@ export class SpotifyInstance {
   profileDir: string;
   appPath: string;
   enforceSupportedVersion: boolean;
+  compatibilityHookTargets?: SpotifyCompatibilityHookTargetOptions;
   isReady = false;
 
   constructor(
@@ -40,6 +56,7 @@ export class SpotifyInstance {
     this.profileDir = profileDir || join(PROFILES_DIR, "cli_instance");
     this.appPath = options.appPath ?? PATCHED_APP;
     this.enforceSupportedVersion = options.enforceSupportedVersion !== false;
+    this.compatibilityHookTargets = options.compatibilityHookTargets;
   }
 
   async start(): Promise<void> {
@@ -118,6 +135,7 @@ export class SpotifyInstance {
       SOGGFY_HIDDEN: "1",
       SOGGFY_CAPTURE_BACKEND: CAPTURE_BACKEND,
       SOGGFY_MUTE_OUTPUT: "1",
+      ...spotifyInstanceCompatibilityEnvironment(this.compatibilityHookTargets),
       ...(sslKeyLogPath ? { SSLKEYLOGFILE: sslKeyLogPath } : {}),
     };
 

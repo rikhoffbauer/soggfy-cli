@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { compatibilityEntryFromProbe, createCompatibilityRunPaths, isFacelessLaunchInfo } from "../src/core/compat-probe";
+import {
+  assertCompatibilityProbeRecordSafety,
+  compatibilityEntryFromProbe,
+  compatibilityProbeInstanceOptions,
+  createCompatibilityRunPaths,
+  isFacelessLaunchInfo,
+} from "../src/core/compat-probe";
 
 const successful = {
   version: "1.2.99.317",
@@ -50,6 +56,22 @@ test("probe paths stay isolated from system and production patched Spotify", () 
   expect(paths.appPath).not.toContain("/.soggfy/workspace/PatchedSpotify.app");
 });
 
+
+test("compatibility probes can pass discovered targets only to an isolated instance", () => {
+  const targets = { family: "OggV1" as const, decodeAudioDataOffset: 0x13183ac, oggStreamPageinOffset: 0x134cf10 };
+  expect(compatibilityProbeInstanceOptions("/tmp/Candidate.app", "1.3.1.123", targets)).toEqual({
+    appPath: "/tmp/Candidate.app",
+    enforceSupportedVersion: false,
+    compatibilityHookTargets: { version: "1.3.1.123", targets },
+  });
+});
+
+test("temporary discovered targets cannot be recorded as production support directly", () => {
+  expect(() => assertCompatibilityProbeRecordSafety({
+    appPath: "/tmp/Candidate.app", trackId: "x", record: true, keep: false, json: false,
+    compatibilityHookTargets: { family: "OggV1", decodeAudioDataOffset: 1, oggStreamPageinOffset: 2 },
+  })).toThrow("temporary discovered hook targets");
+});
 
 test("headless verification recognizes lsappinfo faceless registration without compiling Swift", () => {
   expect(isFacelessLaunchInfo('ASN:0x0-0x0: "Spotify" ASN:0x0-0x0: pid=123 !cgsConnection')).toBe(true);

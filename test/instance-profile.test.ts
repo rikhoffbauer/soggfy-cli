@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { PATCHED_APP } from "../src/core/paths";
-import { SpotifyInstance } from "../src/core/instance";
+import { SpotifyInstance, spotifyInstanceCompatibilityEnvironment } from "../src/core/instance";
 
 const source = readFileSync(join(import.meta.dir, "../src/core/instance.ts"), "utf8");
 
@@ -28,6 +28,24 @@ test("compatibility probes may select an isolated candidate app explicitly", () 
   expect(instance.enforceSupportedVersion).toBe(false);
 });
 
+
+test("SpotifyInstance disables discovered hook targets unless explicitly supplied", () => {
+  expect(spotifyInstanceCompatibilityEnvironment()).toEqual({
+    SOGGFY_COMPAT_ALLOW_DISCOVERED_TARGETS: "0",
+  });
+});
+
+test("SpotifyInstance can opt an isolated compatibility run into discovered targets", () => {
+  expect(spotifyInstanceCompatibilityEnvironment({
+    version: "1.3.1.123",
+    targets: { family: "OggV1", decodeAudioDataOffset: 0x13183ac, oggStreamPageinOffset: 0x134cf10 },
+  })).toMatchObject({
+    SOGGFY_COMPAT_ALLOW_DISCOVERED_TARGETS: "1",
+    SOGGFY_COMPAT_EXPECTED_VERSION: "1.3.1.123",
+    SOGGFY_COMPAT_DECODE_OFFSET: "0x13183ac",
+    SOGGFY_COMPAT_OGG_PAGEIN_OFFSET: "0x134cf10",
+  });
+});
 
 test("SpotifyInstance does not override Spotify's cache path", () => {
   expect(source).not.toContain("--cache-path=");
