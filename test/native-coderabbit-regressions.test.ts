@@ -4,9 +4,12 @@ import { join } from "node:path";
 const root = join(import.meta.dir, "..");
 const source = (path: string) => readFileSync(join(root, path), "utf8");
 
-test("Ogg hook follows libogg success semantics and gates capture on complete hook installation", () => {
+test("Ogg hook uses the validated implementation-family return convention and gates on complete hook installation", () => {
   const hook = source("soggfy-macos/Payload/DecodeHook.mm");
-  expect(hook).toContain("ret != 0");
+  const targets = source("soggfy-macos/Payload/SpotifyHookTargets.h");
+  expect(hook).toContain("ret != g_ogg_pagein_success_return.load()");
+  expect(targets).toContain("case SpotifyHookFamily::OggV1:");
+  expect(targets).toMatch(/case SpotifyHookFamily::OggV1:\s*return \{1\};/);
   expect(hook).toContain("!g_decoder_hooks_ready.load()");
   const readinessStore = hook.indexOf("g_decoder_hooks_ready.store");
   expect(readinessStore).toBeGreaterThan(-1);

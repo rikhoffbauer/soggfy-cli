@@ -51,6 +51,16 @@ test("requestTrackPlayback retries only explicit IPC play failures", async () =>
   ]);
 });
 
+test("requestTrackPlayback retries native errors that use an error-space prefix", async () => {
+  const responses = ["error Spotify local control port 7768 is not owned by this instance", "ok"];
+  const commands: string[] = [];
+  await requestTrackPlayback(async (command) => {
+    commands.push(command);
+    return responses.shift() ?? "ok";
+  }, trackId, { attempts: 3, delayMs: 1 });
+  expect(commands).toHaveLength(2);
+});
+
 test("requestTrackPlayback never retries a successful play command", async () => {
   const commands: string[] = [];
   await requestTrackPlayback(async (command) => {
@@ -58,4 +68,11 @@ test("requestTrackPlayback never retries a successful play command", async () =>
     return "ok";
   }, trackId, { attempts: 3, delayMs: 1 });
   expect(commands).toHaveLength(1);
+});
+
+test("compatibility probe uses one end-to-end capture instead of preflight playback restart", async () => {
+  const source = await Bun.file(new URL("../src/core/compat-probe.ts", import.meta.url)).text();
+  expect(source).not.toContain("verifyTargetPlayback");
+  expect((source.match(/await captureTrack\(/g) ?? []).length).toBe(1);
+  expect(source).toContain("playbackAttempts: 20");
 });

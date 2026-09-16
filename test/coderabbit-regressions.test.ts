@@ -58,11 +58,14 @@ test("private temporary Spotify launches avoid predictable /tmp paths", () => {
   expect(compat).not.toContain("/tmp/soggfy-compat-");
 });
 
-test("health probes have a deadline and compatibility playback is not re-issued", () => {
+test("health probes have a deadline and compatibility uses one capture-driven playback flow", () => {
   const daemon = source("src/commands/daemon.ts");
   const compat = source("src/core/compat-probe.ts");
   expect(daemon).toContain("AbortSignal.timeout");
-  expect(compat.match(/play spotify:track:/g)?.length).toBe(1);
+  expect((compat.match(/await captureTrack\(/g) ?? []).length).toBe(1);
+  expect(compat).not.toContain("verifyTargetPlayback");
+  expect(compat).toContain("CGWindowListCopyWindowInfo");
+  expect(compat).toContain("timeout: 5_000");
 });
 
 test("capture monitor handles stat races and cleans up prolonged IPC loss", () => {

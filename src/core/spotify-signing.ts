@@ -1,9 +1,24 @@
 import { existsSync, readdirSync } from "fs";
 import { join } from "path";
+import { readSpotifyBundleVersion } from "./spotify-runtime";
+
+export type SpotifyCefSigningStrategy = "replace-existing" | "remove-then-sign";
+
+export function spotifyCefSigningStrategy(version: string | null): SpotifyCefSigningStrategy {
+  return version === "1.3.0.277" ? "remove-then-sign" : "replace-existing";
+}
 
 function codesign(args: string[]): void {
   const result = Bun.spawnSync(["/usr/bin/codesign", ...args], { stdout: "pipe", stderr: "pipe" });
   if (result.exitCode !== 0) throw new Error(`Spotify signing failed: ${result.stderr.toString().trim()}`);
+}
+
+export function signSpotifyCef(app: string): void {
+  const cef = join(app, "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework");
+  if (!existsSync(cef)) throw new Error(`Spotify CEF binary is missing: ${cef}`);
+  const strategy = spotifyCefSigningStrategy(readSpotifyBundleVersion(app));
+  if (strategy === "remove-then-sign") codesign(["--remove-signature", cef]);
+  codesign(["-f", "-s", "-", cef]);
 }
 
 export function assertSignedSpotifyCli(app: string): void {
@@ -17,8 +32,7 @@ export function assertSignedSpotifyCli(app: string): void {
 export function signSpotifyBundle(app: string): void {
   assertSignedSpotifyCli(app);
   const frameworks = join(app, "Contents/Frameworks");
-  const cef = join(frameworks, "Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework");
-  codesign(["-f", "-s", "-", cef]);
+  signSpotifyCef(app);
   for (const name of readdirSync(frameworks)) {
     if (name.startsWith("Spotify Helper") && name.endsWith(".app")) {
       codesign(["-f", "-s", "-", join(frameworks, name)]);

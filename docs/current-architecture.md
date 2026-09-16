@@ -6,7 +6,7 @@ Status: active implementation as of 2026-09-11.
 
 The production capture path is an **Ogg/Vorbis stream capture**, not a decoded-PCM capture. `SOGGFY_CAPTURE_BACKEND` defaults to `ogg`; the only other accepted production mode is `disabled`. Unknown backend values fail closed.
 
-Spotify compatibility is exact and registry-backed. Production launch accepts only arm64 versions recorded as `supported` in `compatibility/spotify-versions.json`; the observed min/max supported span is informational only. `DecodeHook.mm` selects exact per-version hook targets, independently checks the expected machine-code prologues before calling `DobbyHook`, and `get_capabilities` reports whether both decoder/Ogg hooks actually installed. Spotify 1.2.98.301 and 1.2.99.317 are currently supported.
+Spotify compatibility is exact and registry-backed. Production launch accepts only arm64 versions recorded as `supported` in `compatibility/spotify-versions.json`; the observed min/max supported span is informational only. `DecodeHook.mm` selects exact per-version hook targets and then dispatches through a named implementation family, allowing multiple builds to share behavior only when that ABI/behavior has been validated. It independently checks expected machine-code prologues before calling `DobbyHook`, and `get_capabilities` reports whether both decoder/Ogg hooks actually installed. Spotify 1.2.98.301 and 1.2.99.317 are currently supported.
 
 ## End-to-end pipeline
 
@@ -50,7 +50,7 @@ The packaged daemon resolves its current bundle/executable and re-executes that 
 
 `soggfy compat probe [app-path]` is a developer-only validation path for new Spotify builds. It never patches the source application or the production `~/.soggfy/workspace/PatchedSpotify.app`; instead it creates an isolated clone under `~/.soggfy/compat/runs`, applies the current patch unchanged, rebuilds/installs the current payload, ad-hoc signs the clone, and launches it with an explicit compatibility-only `enforceSupportedVersion: false` option. Normal `SpotifyInstance` construction keeps exact registry enforcement enabled.
 
-The candidate must pass patch/sign verification, process launch, IPC, `get_capabilities` with `decoderHooksReady=true`, target playback confirmation, a real capture through the existing `captureTrack` path, existing media validation, and faceless WindowServer/Launch Services checks. `--record` writes the exact result into the tracked registry; only an all-green result becomes `supported`. Failed builds can be recorded for history.
+The candidate must pass patch/sign verification, process launch, IPC, `get_capabilities` with `decoderHooksReady=true`, target playback confirmation, a real capture through the existing `captureTrack` path, existing media validation, exact whole-track fixture equality, and faceless WindowServer/Launch Services checks. The fixture requires both byte-for-byte equality of the complete captured file and equality of the complete audio decoded to 44.1 kHz stereo `s16le`. `--record` writes the exact result into the tracked registry; only an all-green result becomes `supported`. Failed builds can be recorded for history.
 
 `soggfy compat list` reports exact supported entries plus an observed min/max span. The span never authorizes an untested intermediate version. The probe deliberately does not guess new offsets or signatures when native validation fails.
 
