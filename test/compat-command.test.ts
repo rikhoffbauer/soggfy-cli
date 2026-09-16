@@ -16,6 +16,23 @@ test("compat probe parses candidate path and validation options", () => {
   });
 });
 
+test("compat analyze parses automatic discovery and validation options", () => {
+  expect(parseCompatArgs(["analyze", "/tmp/Spotify.app", "--probe", "--record", "--track", trackId, "--fixture", "/tmp/reference.json", "--keep", "--json"])).toEqual({
+    action: "analyze",
+    appPath: "/tmp/Spotify.app",
+    trackId,
+    fixturePath: "/tmp/reference.json",
+    probe: true,
+    record: true,
+    keep: true,
+    json: true,
+  });
+});
+
+test("compat analyze requires probing before it can record discovered targets", () => {
+  expect(() => parseCompatArgs(["analyze", "/tmp/Spotify.app", "--record"])).toThrow("--record requires --probe");
+});
+
 test("compat fixture builds a whole-track reference manifest from a known-good capture", () => {
   expect(parseCompatArgs(["fixture", "/tmp/reference.ogg", "--track", trackId, "--output", "/tmp/reference.json", "--json"])).toEqual({
     action: "fixture",
