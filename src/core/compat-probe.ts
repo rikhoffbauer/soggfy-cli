@@ -2,7 +2,7 @@ import { signSpotifyBundle, signSpotifyCef } from "./spotify-signing";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { captureTrack } from "./capture";
-import { SpotifyInstance } from "./instance";
+import { SpotifyInstance, type SpotifyInstanceOptions } from "./instance";
 import { SOGGFY_HOME } from "./paths";
 import {
   type SpotifyCompatibilityChecks,
@@ -12,6 +12,7 @@ import {
 } from "./spotify-compatibility";
 import { readSpotifyBundleVersion } from "./spotify-runtime";
 import { defaultAudioFixturePath, readAudioFixture, verifyAudioFixture } from "./audio-fixture";
+import type { SpotifyHookTargetsCandidate } from "./spotify-hook-discovery";
 
 export const DEFAULT_COMPAT_TRACK_ID = "4PTG3Z6ehGkBFwjybzWkR8";
 export const SPOTIFY_COMPATIBILITY_REGISTRY_PATH = resolve(
@@ -37,6 +38,25 @@ export interface CompatProbeOptions {
   keep: boolean;
   json: boolean;
   fixturePath?: string;
+  compatibilityHookTargets?: SpotifyHookTargetsCandidate;
+}
+
+export function compatibilityProbeInstanceOptions(
+  appPath: string,
+  version: string,
+  targets?: SpotifyHookTargetsCandidate,
+): SpotifyInstanceOptions {
+  return {
+    appPath,
+    enforceSupportedVersion: false,
+    ...(targets ? { compatibilityHookTargets: { version, targets } } : {}),
+  };
+}
+
+export function assertCompatibilityProbeRecordSafety(options: CompatProbeOptions): void {
+  if (options.record && options.compatibilityHookTargets) {
+    throw new Error("Refusing to record production support from temporary discovered hook targets");
+  }
 }
 
 export interface CompatibilityProbeResult {
@@ -215,6 +235,7 @@ function finalResult(
 export async function probeSpotifyCompatibility(
   options: CompatProbeOptions,
 ): Promise<CompatibilityProbeResult> {
+  assertCompatibilityProbeRecordSafety(options);
   const repoRoot = resolve(import.meta.dir, "../..");
   if (!existsSync(options.appPath)) throw new Error(`Spotify app not found: ${options.appPath}`);
   const version = readSpotifyBundleVersion(options.appPath);
@@ -233,10 +254,12 @@ export async function probeSpotifyCompatibility(
   try {
     assertCompatSocketPath(socketPath);
     applyCurrentPatch(options.appPath, paths.appPath, repoRoot, checks);
-    instance = new SpotifyInstance(socketPath, paths.savePath, paths.profileDir, {
-      appPath: paths.appPath,
-      enforceSupportedVersion: false,
-    });
+    instance = new SpotifyInstance(
+      socketPath,
+      paths.savePath,
+      paths.profileDir,
+      compatibilityProbeInstanceOptions(paths.appPath, version, options.compatibilityHookTargets),
+    );
     await instance.start();
     checks.processLaunch = instance.pid !== null;
     checks.ipc = (await instance.sendCommand("ping")) === "pong";

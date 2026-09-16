@@ -292,7 +292,13 @@ void InstallDecoderHook() {
     }
     NSString *bundleVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
     const char *version = bundleVersion.UTF8String;
+    SpotifyHookTargets compatibilityTargets{};
     const SpotifyHookTargets *targets = SpotifyHookTargetsForVersion(version);
+    if (!targets && SpotifyHookTargetsForCompatibilityEnvironment(version, &compatibilityTargets)) {
+        targets = &compatibilityTargets;
+        printf("[Soggfy-WARN] Using compatibility-only discovered hook targets for %s\n", version);
+        fflush(stdout);
+    }
     if (!targets) {
         printf("[Soggfy-ERROR] Unsupported Spotify build: no native hook targets for %s\n",
                version ? version : "unknown");
