@@ -78,8 +78,9 @@ export function migrateOfficialSpotifyAuthOnce(
   // explicit path equal to the normal ~/.soggfy default (for example from
   // Bun-loaded .env) is not a custom home and may use the normal migration.
   const explicitHome = process.env.SOGGFY_HOME?.trim();
+  const explicitAuthDir = process.env.SOGGFY_AUTH_DIR?.trim();
   const defaultHome = join(homedir(), ".soggfy");
-  if (!paths && explicitHome && resolve(explicitHome) !== resolve(defaultHome)) {
+  if (!paths && explicitHome && resolve(explicitHome) !== resolve(defaultHome) && !explicitAuthDir) {
     return existsSync(AUTH_STATE_DIR) ? "existing" : "suppressed";
   }
   paths ??= defaultPaths();

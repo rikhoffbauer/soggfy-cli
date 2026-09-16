@@ -96,30 +96,47 @@ function normalizeTrack(value: unknown): SpotifyLibraryTrack | null {
     playable: item.is_playable !== false,
   };
 }
+const MAX_RATE_LIMIT_RETRIES = 2;
+
+function retryAfterMilliseconds(response: Response, attempt: number): number {
+  const raw = response.headers.get("Retry-After")?.trim();
+  const seconds = raw === undefined ? Number.NaN : Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
+  return 1_000 * (2 ** attempt);
+}
+
 async function spotifyJSON(
   path: string,
   token: string,
   fetchImpl: typeof fetch,
 ): Promise<Record<string, any>> {
-  const response = await fetchImpl(`${SPOTIFY_API}${path}`, {
-    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
-  });
-  if (response.status === 401 || response.status === 403) {
-    throw new SpotifyLibraryHTTPError(
-      response.status,
-      "Soggfy does not have an authenticated Spotify session with library access",
-    );
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetchImpl(`${SPOTIFY_API}${path}`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new SpotifyLibraryHTTPError(
+        response.status,
+        "Soggfy does not have an authenticated Spotify session with library access",
+      );
+    }
+    if (response.status === 429) {
+      const retryMs = retryAfterMilliseconds(response, attempt);
+      if (attempt < MAX_RATE_LIMIT_RETRIES) {
+        await Bun.sleep(retryMs);
+        continue;
+      }
+      const retrySeconds = Math.ceil(retryMs / 1_000);
+      throw new Error(`Spotify library request was rate limited; retry after ${retrySeconds} seconds`);
+    }
+    if (!response.ok) {
+      throw new Error(`Spotify library request failed with HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    const mapped = object(payload);
+    if (!mapped) throw new Error("Spotify library returned an invalid response");
+    return mapped;
   }
-  if (response.status === 429) {
-    throw new Error("Spotify library request was rate limited");
-  }
-  if (!response.ok) {
-    throw new Error(`Spotify library request failed with HTTP ${response.status}`);
-  }
-  const payload = await response.json();
-  const mapped = object(payload);
-  if (!mapped) throw new Error("Spotify library returned an invalid response");
-  return mapped;
 }
 
 async function fetchPagedItems(

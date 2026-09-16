@@ -8,7 +8,7 @@ import { JobRegistry } from "../jobs";
 import { serveFileWithRange } from "../http";
 import { fetchTrackMetadata } from "../spotify-metadata";
 import { parseTrackId } from "../spotify-url";
-import { resolveRepoRoot } from "../runtime-config";
+import { resolveRepoRoot, resolveWebRoot } from "../runtime-config";
 import { sanitizedSpotifyEnvironment } from "../spotify-instance";
 
 const root = join(import.meta.dir, "../../../..");
@@ -102,6 +102,11 @@ test("runtime repository root supports source and bundled server layouts", () =>
   expect(resolveRepoRoot("/repo/webapp/src/server")).toBe(resolve("/repo"));
   expect(resolveRepoRoot("/repo/dist/webapp")).toBe(resolve("/repo"));
   expect(resolveRepoRoot("/repo/dist/webapp/versions/build-123")).toBe(resolve("/repo"));
+});
+
+test("bundled runtime can explicitly locate external web assets", () => {
+  expect(resolveWebRoot("/Applications/Sonata/Soggfy.bundle", "/tmp/sonata-web")).toBe(resolve("/tmp/sonata-web"));
+  expect(resolveWebRoot("/repo/dist/webapp")).toBe(resolve("/repo/dist/webapp/public"));
 });
 
 test("cover downloads are bounded and growing streams are pull-driven and cancellable", () => {

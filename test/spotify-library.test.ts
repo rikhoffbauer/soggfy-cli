@@ -89,3 +89,32 @@ test("fetchSpotifyLibrarySnapshot fails explicitly when the Soggfy session is no
     fetchImpl,
   })).rejects.toThrow("authenticated Spotify session");
 });
+
+test("fetchSpotifyLibrarySnapshot retries a transient 429 using Retry-After", async () => {
+  let meAttempts = 0;
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/me") {
+      meAttempts += 1;
+      if (meAttempts === 1) {
+        return new Response(JSON.stringify({ error: { status: 429, message: "API rate limit exceeded" } }), {
+          status: 429,
+          headers: { "Retry-After": "0" },
+        });
+      }
+      return Response.json({ id: "account", display_name: "Account" });
+    }
+    if (url.pathname === "/v1/me/tracks" || url.pathname === "/v1/me/playlists") {
+      return Response.json({ items: [], total: 0, next: null });
+    }
+    return new Response("missing", { status: 404 });
+  }) as typeof fetch;
+
+  const snapshot = await fetchSpotifyLibrarySnapshot({
+    tokenProvider: async () => ({ accessToken: "access", expiresAt: Date.now() + 60_000 }),
+    fetchImpl,
+  });
+
+  expect(meAttempts).toBe(2);
+  expect(snapshot.account).toEqual({ id: "account", displayName: "Account" });
+});
