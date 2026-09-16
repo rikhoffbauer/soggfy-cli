@@ -16,6 +16,8 @@ export interface SpotifyRendererAuthOptions {
   debugPort?: number;
   cookieProvider?: () => Promise<CDPCookie[]>;
   fetchImpl?: typeof fetch;
+  rendererSessionAttempts?: number;
+  rendererSessionPollMs?: number;
 }
 
 function isSpotifyDomain(domain: string): boolean {
@@ -100,17 +102,38 @@ function explicitSpotifyCookie(): string | null {
   return value;
 }
 
+async function waitForAuthenticatedRendererCookie(
+  provider: () => Promise<CDPCookie[]>,
+  attempts: number,
+  pollMs: number,
+): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return buildSpotifyCookieHeader(await provider());
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts && pollMs > 0) await Bun.sleep(pollMs);
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Soggfy renderer does not contain an authenticated Spotify session");
+}
+
 export async function getAuthenticatedSpotifyWebToken(
   options: SpotifyRendererAuthOptions = {},
 ): Promise<SpotifyAuthenticatedWebToken> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const explicit = explicitSpotifyCookie();
+  const rendererCookieProvider = options.cookieProvider
+    ?? (() => readSpotifyRendererCookies(
+      options.debugPort ?? defaultSpotifyRendererDebugPort(), fetchImpl
+    ));
+  const attempts = Math.max(1, options.rendererSessionAttempts ?? 20);
+  const pollMs = Math.max(0, options.rendererSessionPollMs ?? 250);
   const cookies = explicit
-    ?? buildSpotifyCookieHeader(await (options.cookieProvider
-      ? options.cookieProvider()
-      : readSpotifyRendererCookies(
-          options.debugPort ?? defaultSpotifyRendererDebugPort(), fetchImpl
-        )));
+    ?? await waitForAuthenticatedRendererCookie(rendererCookieProvider, attempts, pollMs);
 
   const totp = generateSpotifyWebTOTP();
   const url = new URL("https://open.spotify.com/api/token");
