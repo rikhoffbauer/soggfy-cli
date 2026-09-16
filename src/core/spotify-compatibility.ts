@@ -11,6 +11,7 @@ export interface SpotifyCompatibilityChecks {
   playback?: boolean;
   capture?: boolean;
   mediaValidation?: boolean;
+  audioFixture?: boolean;
   headless?: boolean;
 }
 

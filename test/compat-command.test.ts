@@ -5,12 +5,23 @@ import type { SpotifyCompatibilityRegistry } from "../src/core/spotify-compatibi
 const trackId = "4PTG3Z6ehGkBFwjybzWkR8";
 
 test("compat probe parses candidate path and validation options", () => {
-  expect(parseCompatArgs(["probe", "/tmp/Spotify.app", "--track", trackId, "--record", "--keep", "--json"])).toEqual({
+  expect(parseCompatArgs(["probe", "/tmp/Spotify.app", "--track", trackId, "--fixture", "/tmp/reference.json", "--record", "--keep", "--json"])).toEqual({
     action: "probe",
     appPath: "/tmp/Spotify.app",
     trackId,
+    fixturePath: "/tmp/reference.json",
     record: true,
     keep: true,
+    json: true,
+  });
+});
+
+test("compat fixture builds a whole-track reference manifest from a known-good capture", () => {
+  expect(parseCompatArgs(["fixture", "/tmp/reference.ogg", "--track", trackId, "--output", "/tmp/reference.json", "--json"])).toEqual({
+    action: "fixture",
+    audioPath: "/tmp/reference.ogg",
+    trackId,
+    outputPath: "/tmp/reference.json",
     json: true,
   });
 });

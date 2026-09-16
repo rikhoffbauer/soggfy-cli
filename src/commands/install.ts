@@ -1,4 +1,4 @@
-import { signSpotifyBundle } from "../core/spotify-signing";
+import { signSpotifyBundle, signSpotifyCef } from "../core/spotify-signing";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { log } from "../core/log";
@@ -138,17 +138,22 @@ export async function installCommand(args: string[]): Promise<void> {
     );
 
     log.step(4, totalSteps, "Stripping signatures and ad-hoc signing");
-    const signTargets = [
-      join(stagedApp, "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework"),
-      join(stagedApp, "Contents/MacOS/Spotify"),
-    ];
-    for (const target of signTargets) {
-      if (existsSync(target)) {
-        run(["codesign", "-f", "-s", "-", target], `codesign ${target}`);
-        log.ok(`Signed: ${target.split("/").pop()}`);
-      } else {
-        log.warn(`Signature target missing: ${target}`);
-      }
+    const cefTarget = join(
+      stagedApp,
+      "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework",
+    );
+    if (existsSync(cefTarget)) {
+      signSpotifyCef(stagedApp);
+      log.ok("Signed: Chromium Embedded Framework");
+    } else {
+      log.warn(`Signature target missing: ${cefTarget}`);
+    }
+    const spotifyTarget = join(stagedApp, "Contents/MacOS/Spotify");
+    if (existsSync(spotifyTarget)) {
+      run(["codesign", "-f", "-s", "-", spotifyTarget], `codesign ${spotifyTarget}`);
+      log.ok("Signed: Spotify");
+    } else {
+      log.warn(`Signature target missing: ${spotifyTarget}`);
     }
 
     log.step(5, totalSteps, "Building payload (libsoggfy.dylib)");

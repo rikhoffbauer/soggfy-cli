@@ -35,7 +35,7 @@ export async function requestTrackPlayback(
   for (let attempt = 0; attempt < attempts; attempt++) {
     lastResponse = (await sendCommand(`play spotify:track:${trackId}`)).trim();
     if (lastResponse === "ok") return;
-    if (!lastResponse.startsWith("error:")) {
+    if (!/^error(?::|\s)/.test(lastResponse)) {
       throw new Error(`Unexpected Spotify play response: ${lastResponse || "<empty>"}`);
     }
     if (attempt + 1 < attempts) await Bun.sleep(delayMs);

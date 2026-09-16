@@ -1,8 +1,7 @@
-import { signSpotifyBundle } from "./spotify-signing";
+import { signSpotifyBundle, signSpotifyCef } from "./spotify-signing";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { captureTrack } from "./capture";
-import { parsePlaybackConfirmation } from "./capture-control";
 import { SpotifyInstance } from "./instance";
 import { SOGGFY_HOME } from "./paths";
 import {
@@ -12,6 +11,7 @@ import {
   upsertCompatibilityEntry,
 } from "./spotify-compatibility";
 import { readSpotifyBundleVersion } from "./spotify-runtime";
+import { defaultAudioFixturePath, readAudioFixture, verifyAudioFixture } from "./audio-fixture";
 
 export const DEFAULT_COMPAT_TRACK_ID = "4PTG3Z6ehGkBFwjybzWkR8";
 export const SPOTIFY_COMPATIBILITY_REGISTRY_PATH = resolve(
@@ -36,6 +36,7 @@ export interface CompatProbeOptions {
   record: boolean;
   keep: boolean;
   json: boolean;
+  fixturePath?: string;
 }
 
 export interface CompatibilityProbeResult {
@@ -58,7 +59,7 @@ export interface CompatibilityRunPaths {
 
 const REQUIRED_CHECKS: ReadonlyArray<keyof Required<SpotifyCompatibilityChecks>> = [
   "patching", "signing", "processLaunch", "ipc", "decoderHooks",
-  "playback", "capture", "mediaValidation", "headless",
+  "playback", "capture", "mediaValidation", "audioFixture", "headless",
 ];
 
 export function createCompatibilityRunPaths(runDir: string): CompatibilityRunPaths {
@@ -79,6 +80,7 @@ function emptyChecks(): Required<SpotifyCompatibilityChecks> {
     playback: false,
     capture: false,
     mediaValidation: false,
+    audioFixture: false,
     headless: false,
   };
 }
@@ -149,7 +151,7 @@ function applyCurrentPatch(sourceApp: string, candidateApp: string, repoRoot: st
   const spotifyBinary = join(candidateApp, "Contents/MacOS/Spotify");
   checks.patching = true;
   const cef = join(candidateApp, "Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework");
-  if (existsSync(cef)) runChecked("codesign", ["-f", "-s", "-", cef], "sign Chromium Embedded Framework");
+  if (existsSync(cef)) signSpotifyCef(candidateApp);
   runChecked("codesign", ["-f", "-s", "-", spotifyBinary], "sign Spotify binary");
 
   const builtPayload = join(payloadRoot, "build/libsoggfy.dylib");
@@ -159,20 +161,8 @@ function applyCurrentPatch(sourceApp: string, candidateApp: string, repoRoot: st
   checks.signing = true;
 }
 
-async function verifyTargetPlayback(instance: SpotifyInstance, trackId: string): Promise<boolean> {
-  await instance.sendCommand(`reset_track ${trackId}`);
-  await instance.sendCommand(`set_track ${trackId}`);
-  await instance.sendCommand(`play spotify:track:${trackId}`);
-  try {
-    for (let i = 0; i < 30; i++) {
-      await Bun.sleep(500);
-      const raw = await instance.sendCommand("get_playing").catch(() => "");
-      if (parsePlaybackConfirmation(raw, trackId).confirmed) return true;
-    }
-    return false;
-  } finally {
-    await instance.sendCommand("pause").catch(() => undefined);
-  }
+export function isFacelessLaunchInfo(output: string): boolean {
+  return output.includes("!cgsConnection");
 }
 
 function verifyHeadlessProcess(pid: number): boolean {
@@ -180,11 +170,18 @@ function verifyHeadlessProcess(pid: number): boolean {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const faceless = launchInfo.exitCode === 0 && launchInfo.stdout.toString().includes("!cgsConnection");
+  if (launchInfo.exitCode !== 0 || !isFacelessLaunchInfo(launchInfo.stdout.toString())) return false;
+
   const swift = `import CoreGraphics; import Foundation; let pid:Int = ${pid}; let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements], kCGNullWindowID) as? [[String:Any]] ?? []).filter { (($0[kCGWindowOwnerPID as String] as? Int) ?? -1) == pid }; print(windows.count)`;
-  const windowCheck = Bun.spawnSync(["swift", "-e", swift], { stdout: "pipe", stderr: "pipe" });
+  const windowCheck = Bun.spawnSync(["swift", "-e", swift], {
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 20_000,
+    killSignal: "SIGKILL",
+    maxBuffer: 64 * 1024,
+  });
   const windowCount = Number.parseInt(windowCheck.stdout.toString().trim(), 10);
-  return faceless && windowCheck.exitCode === 0 && windowCount === 0;
+  return windowCheck.exitCode === 0 && windowCount === 0;
 }
 
 export function recordCompatibilityProbe(
@@ -260,12 +257,31 @@ export async function probeSpotifyCompatibility(
     checks.headless = verifyHeadlessProcess(instance.pid);
     if (!checks.headless) throw new Error("Candidate Spotify exposed a visible GUI/window registration");
 
-    checks.playback = await verifyTargetPlayback(instance, options.trackId);
-    if (!checks.playback) throw new Error(`Candidate could not confirm target playback for ${options.trackId}`);
-
-    const capture = await captureTrack(socketPath, paths.savePath, options.trackId);
+    const capture = await captureTrack(socketPath, paths.savePath, options.trackId, {
+      playbackAttempts: 20,
+      playbackDelayMs: 500,
+    });
+    // captureTrack only returns after exact target playback was confirmed and
+    // the complete captured file passed media validation. One run therefore
+    // proves playback + capture without a pause/restart preflight cycle.
+    checks.playback = true;
     checks.capture = capture.bytesWritten > 0;
     checks.mediaValidation = true;
+
+    const fixturePath = options.fixturePath ?? defaultAudioFixturePath(options.trackId);
+    const fixture = readAudioFixture(fixturePath);
+    if (fixture.trackId !== options.trackId) {
+      throw new Error(`Audio fixture track mismatch: expected ${options.trackId}, manifest is ${fixture.trackId}`);
+    }
+    const fixtureVerification = verifyAudioFixture(capture.wavPath, fixture);
+    checks.audioFixture = fixtureVerification.ok;
+    if (!fixtureVerification.ok) {
+      throw new Error(
+        `Whole-track audio fixture mismatch: exactFile=${fixtureVerification.exactFileMatch} `
+        + `decodedPcm=${fixtureVerification.decodedPcmMatch} fixture=${fixturePath}`,
+      );
+    }
+
     result = finalResult({
       version,
       architecture: "arm64",

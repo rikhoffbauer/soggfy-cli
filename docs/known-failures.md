@@ -1,10 +1,10 @@
 # Known Failure Modes
 
-Current as of 2026-09-11.
+Current as of 2026-09-16.
 
 ## Spotify version mismatch
 
-Production support is an exact-version registry. Spotify **1.2.98.301** and **1.2.99.317 arm64** are currently supported; unrecorded builds and entries recorded as `failed` are treated as unsupported.
+Production support is an exact-version registry. Spotify **1.2.98.301**, **1.2.99.317**, and **1.3.0.277 arm64** are currently supported; unrecorded builds and entries recorded as `failed` are treated as unsupported.
 
 Expected behavior:
 
@@ -14,7 +14,7 @@ Expected behavior:
 - native hook installation also verifies the expected prologues and fails closed if the binary does not match.
 - `soggfy compat probe` can test the current patch against an isolated candidate clone without weakening those production checks.
 
-On 2026-09-08, Spotify **1.2.99.317 arm64** initially failed because both private hook functions had moved. On 2026-09-11, the new addresses were independently identified from unique function-body matches, added as exact version-specific targets, and revalidated through four consecutive full compatibility captures. The registry now records 1.2.99.317 as `supported`.
+On 2026-09-08, Spotify **1.2.99.317 arm64** initially failed because both private hook functions had moved. On 2026-09-11, the new addresses were independently identified from unique function-body matches, added as exact version-specific targets, and revalidated through four consecutive full compatibility captures. The registry now records 1.2.99.317 as `supported`. On 2026-09-16, Spotify **1.3.0.277 arm64** was separately re-analyzed, assigned exact new hook offsets while reusing the validated `OggV1` implementation family, and recorded as `supported` only after the complete captured Ogg and complete canonical decoded PCM matched the known-good whole-track fixture exactly.
 
 Do not "fix" this by removing the checks or installing guessed offsets. Re-analyze the new Spotify binary, establish new signatures/offsets, rerun `soggfy compat probe`, and record support only after every probe check passes.
 
@@ -91,7 +91,7 @@ The web server attaches to the daemon-owned Spotify instance and does not begin 
 
 The original Spotify signature on `spotify_cli` is required for local API authentication. Recursive ad-hoc signing destroys it. All installers and refresh paths use `signSpotifyBundle`, signing only the payload, capture helpers/framework and outer app; deep **verification** remains enabled. An old patched app with an ad-hoc CLI must be rebuilt from an official supported bundle.
 
-Adding/replacing `libsoggfy.dylib` changes the app bundle seal. Setup, CLI install, and webapp payload refresh therefore sign the payload, re-sign the **completed app bundle**, and then run strict deep verification.
+Adding/replacing `libsoggfy.dylib` changes the app bundle seal. Setup, CLI install, and webapp payload refresh therefore sign the payload, re-sign the **completed app bundle**, and then run strict deep verification. Spotify 1.3.0.277 additionally requires removing CEF’s existing Developer ID signature before ad-hoc re-signing it; older validated 1.2.x builds retain the direct replacement signing path.
 
 A signing or verification error is fatal. Do not downgrade it to a warning: DYLD injection behavior otherwise becomes environment-dependent and difficult to diagnose.
 

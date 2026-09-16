@@ -41,6 +41,7 @@ typedef int (*DecodeAudioData_t)(void* x0, float* x1, size_t* x2, const char* x3
 static DecodeAudioData_t orig_DecodeAudioData = nullptr;
 
 std::atomic<bool> g_decoder_hooks_ready{false};
+static std::atomic<int> g_ogg_pagein_success_return{1};
 static std::mutex g_ogg_preroll_mutex;
 static OggPreRollBuffer g_ogg_preroll;
 static OggStreamSelection g_ogg_stream_selection;
@@ -67,7 +68,7 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
     if (!orig_ogg_stream_pagein) return 0;
 
     int ret = orig_ogg_stream_pagein(os, og);
-    if (ret != 0 || !og || !g_decoder_hooks_ready.load()) return ret;
+    if (ret != g_ogg_pagein_success_return.load() || !og || !g_decoder_hooks_ready.load()) return ret;
 
     unsigned char* hdr = og->header;
     long hlen = og->header_len;
@@ -301,31 +302,49 @@ void InstallDecoderHook() {
 
     printf("[Soggfy-DEBUG] Found Spotify image base = 0x%lx (version %s)\n",
            base, targets->version);
+    const SpotifyHookFamilyConfig familyConfig =
+        SpotifyHookFamilyConfigForFamily(targets->family);
+    g_ogg_pagein_success_return.store(familyConfig.oggPageinSuccessReturn);
+    printf("[Soggfy-DEBUG] Hook family %u uses ogg_stream_pagein success return %d\n",
+           static_cast<unsigned>(targets->family), familyConfig.oggPageinSuccessReturn);
+
     fflush(stdout);
 
-    // Prologues are validated again at runtime. Unknown builds fail closed above.
-    static constexpr uint8_t decodePrologue[] = {
-        0xff, 0xc3, 0x01, 0xd1, 0xfc, 0x6f, 0x01, 0xa9,
-        0xfa, 0x67, 0x02, 0xa9, 0xf8, 0x5f, 0x03, 0xa9,
-    };
-    static constexpr uint8_t oggPageinPrologue[] = {
-        0x08, 0x08, 0x40, 0xb9, 0x88, 0x02, 0xf8, 0x37,
-        0xf4, 0x4f, 0xbe, 0xa9, 0xfd, 0x7b, 0x01, 0xa9,
-    };
+    switch (targets->family) {
+        case SpotifyHookFamily::OggV1: {
+            // OggV1 is the existing capture implementation shared by all builds
+            // whose ABI and hook prologues have been validated end to end.
+            static constexpr uint8_t decodePrologue[] = {
+                0xff, 0xc3, 0x01, 0xd1, 0xfc, 0x6f, 0x01, 0xa9,
+                0xfa, 0x67, 0x02, 0xa9, 0xf8, 0x5f, 0x03, 0xa9,
+            };
+            static constexpr uint8_t oggPageinPrologue[] = {
+                0x08, 0x08, 0x40, 0xb9, 0x88, 0x02, 0xf8, 0x37,
+                0xf4, 0x4f, 0xbe, 0xa9, 0xfd, 0x7b, 0x01, 0xa9,
+            };
 
-    const uintptr_t decodeAddr = base + targets->decodeAudioDataOffset;
-    const uintptr_t oggPageinAddr = base + targets->oggStreamPageinOffset;
-    const bool decodeOk = InstallCheckedHook(
-        "DecodeAudioData", decodeAddr, decodePrologue, sizeof(decodePrologue),
-        reinterpret_cast<void*>(my_DecodeAudioData),
-        reinterpret_cast<void**>(&orig_DecodeAudioData));
-    const bool oggOk = InstallCheckedHook(
-        "ogg_stream_pagein", oggPageinAddr, oggPageinPrologue, sizeof(oggPageinPrologue),
-        reinterpret_cast<void*>(my_ogg_stream_pagein),
-        reinterpret_cast<void**>(&orig_ogg_stream_pagein));
+            const uintptr_t decodeAddr = base + targets->decodeAudioDataOffset;
+            const uintptr_t oggPageinAddr = base + targets->oggStreamPageinOffset;
+            const bool decodeOk = InstallCheckedHook(
+                "DecodeAudioData", decodeAddr, decodePrologue, sizeof(decodePrologue),
+                reinterpret_cast<void*>(my_DecodeAudioData),
+                reinterpret_cast<void**>(&orig_DecodeAudioData));
+            const bool oggOk = InstallCheckedHook(
+                "ogg_stream_pagein", oggPageinAddr, oggPageinPrologue, sizeof(oggPageinPrologue),
+                reinterpret_cast<void*>(my_ogg_stream_pagein),
+                reinterpret_cast<void**>(&orig_ogg_stream_pagein));
 
-    g_decoder_hooks_ready.store(decodeOk && oggOk);
-    if (!decodeOk || !oggOk) {
-        printf("[Soggfy-ERROR] Ogg backend disabled for this Spotify build.\n");
+            g_decoder_hooks_ready.store(decodeOk && oggOk);
+            if (!decodeOk || !oggOk) {
+                printf("[Soggfy-ERROR] Ogg backend disabled for this Spotify build.\n");
+            }
+            return;
+        }
+        case SpotifyHookFamily::Unsupported:
+            break;
     }
+
+    printf("[Soggfy-ERROR] Unsupported Spotify hook family for %s\n",
+           version ? version : "unknown");
+    fflush(stdout);
 }

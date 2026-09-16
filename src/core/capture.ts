@@ -16,10 +16,16 @@ export interface CaptureResult {
   metadata: TrackMetadata;
 }
 
+export interface CaptureOptions {
+  playbackAttempts?: number;
+  playbackDelayMs?: number;
+}
+
 export async function captureTrack(
   socketPath: string,
   savePath: string,
   trackId: string,
+  options: CaptureOptions = {},
 ): Promise<CaptureResult> {
   const trace = new CaptureTraceRecorder(trackId);
   const tracedSend = async (
@@ -43,7 +49,10 @@ export async function captureTrack(
 
   // Tell Spotify to play the track
   trace.record({ type: "phase", phase: "awaiting_playback" });
-  await requestTrackPlayback((command) => tracedSend(command), trackId);
+  await requestTrackPlayback((command) => tracedSend(command), trackId, {
+    attempts: options.playbackAttempts ?? 3,
+    delayMs: options.playbackDelayMs ?? 500,
+  });
   log.info(`Playback started for ${trackId}`);
 
   // Wait for the correct track to be confirmed playing

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "trackId": "4PTG3Z6ehGkBFwjybzWkR8",
+  "createdAt": "2026-09-16T19:04:13.574Z",
+  "file": {
+    "bytes": 4286257,
+    "sha256": "bbd38bf7bcb6a653da32bb06b9aa876cda1d1ee626fec4014d4bafc6ee1cdfe7"
+  },
+  "decodedPcm": {
+    "format": "s16le",
+    "sampleRate": 44100,
+    "channels": 2,
+    "bytes": 37674336,
+    "sha256": "55bc2a2d46aafc237e9b726dfaec4b4255a1098acb6998d5df9a9a8f5dce618a"
+  }
+}
