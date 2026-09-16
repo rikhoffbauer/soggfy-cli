@@ -67,3 +67,11 @@ test("SpotifyInstance aborts startup when orphan process inspection is unavailab
   expect(unavailable).toBeGreaterThan(-1);
   expect(spawn).toBeGreaterThan(unavailable);
 });
+
+test("SpotifyInstance can expose a dedicated loopback renderer debug port for authenticated library access", () => {
+  const instance = new SpotifyInstance("/tmp/auth.sock", "/tmp/auth-save", "/tmp/auth-profile", {
+    debugPort: 19224,
+  });
+  expect(instance.debugPort).toBe(19224);
+  expect(source).toContain('`--remote-debugging-port=${this.debugPort}`');
+});

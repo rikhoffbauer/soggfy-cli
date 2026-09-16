@@ -6,6 +6,7 @@ import { fetchAllSpotifyPlaylistTracks, fetchSpotifyPlaylistPage } from "../../.
 import { fetchSpotifyAlbumPage, SpotifyAlbumRequestError } from "../../../src/core/spotify-album";
 import { resolveInput as resolveSpotifyInput } from "../../../src/core/metadata";
 import { fetchSpotifyLyrics } from "../../../src/core/spotify-lyrics";
+import { fetchSpotifyLibrarySnapshot } from "../../../src/core/spotify-library";
 import { CAPTURE_BACKEND, OUTPUT_DIR } from "../../../src/core/paths";
 import { CORS_HEADERS, jsonResponse, serveFileWithRange } from "./http";
 import { parseAlbumId, parsePlaylistId, parseTrackId } from "./spotify-url";
@@ -34,6 +35,19 @@ export function createApiRoutes() {
         captureBackend: CAPTURE_BACKEND,
         revision: jobs.revision,
       }),
+    },
+    "/api/library": {
+      GET: async () => {
+        try {
+          return jsonResponse(await fetchSpotifyLibrarySnapshot());
+        } catch (err: any) {
+          const message = err instanceof Error ? err.message : "Spotify library request failed";
+          const status = /authenticated Spotify session/i.test(message)
+            ? 401
+            : /rate limited/i.test(message) ? 429 : 502;
+          return jsonResponse({ error: message }, { status });
+        }
+      },
     },
     "/api/logs": {
       GET: (req: Request) => {

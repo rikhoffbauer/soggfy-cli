@@ -19,6 +19,7 @@ import {
   IPC_SOCKET, SAVE_PATH, ensureDirs,
 } from "../core/paths";
 import { SpotifyInstance } from "../core/instance";
+import { defaultSpotifyRendererDebugPort } from "../core/spotify-renderer-auth";
 import { registerDaemonSpotifyInstance, unregisterDaemonSpotifyInstance } from "../core/daemon-runtime";
 import { ping } from "../core/ipc";
 import { getHttpConfig, getHttpOrigin } from "../core/http-config";
@@ -380,7 +381,9 @@ async function daemonRun(): Promise<void> {
   writeDaemonRecord(record);
   appendDaemonLog("Daemon starting...");
 
-  const instance = new SpotifyInstance(IPC_SOCKET, SAVE_PATH);
+  const instance = new SpotifyInstance(IPC_SOCKET, SAVE_PATH, undefined, {
+    debugPort: defaultSpotifyRendererDebugPort(),
+  });
   let shuttingDown = false;
 
   const shutdown = async () => {

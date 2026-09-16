@@ -41,7 +41,9 @@ export SPOTIFY_CLIENT_TOKEN='...'
 
 Web credentials are not written into Soggfy's auth export. Avoid placing them in shell history, source control, or world-readable files.
 
-Normal search/playlist browsing needs no manual credential. Cookie-based authentication works for authenticated search/playlist requests and lyrics. When supplying tokens directly, provide both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`.
+Normal search/playlist browsing needs no manual credential. Personal-library access (`GET /api/library`) instead reuses Soggfy's existing authenticated desktop session: the managed Spotify renderer exposes a loopback-only DevTools port, Soggfy reads its Spotify-domain cookies, and the resulting short-lived access token stays in Soggfy process memory. No separate Spotify OAuth registration or second login is required.
+
+`SPOTIFY_COOKIE` with an authenticated `sp_dc` value remains an explicit Soggfy-side override when renderer cookie access is unavailable. When supplying search tokens directly, provide both `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_CLIENT_TOKEN`; these anonymous/catalog-token overrides are not a substitute for an authenticated personal-library session.
 
 ## Output and runtime state
 

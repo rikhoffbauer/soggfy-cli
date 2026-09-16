@@ -86,6 +86,11 @@ export async function readSpotifyRendererCookies(
   }
   return readCDPCookies(target.webSocketDebuggerUrl);
 }
+export function defaultSpotifyRendererDebugPort(): number {
+  const base = Number.parseInt(process.env.SOGGFY_DEBUG_PORT_BASE ?? "9223", 10);
+  return (Number.isInteger(base) && base > 0 ? base : 9223) + 1;
+}
+
 function explicitSpotifyCookie(): string | null {
   const value = process.env.SPOTIFY_COOKIE?.trim();
   if (!value) return null;
@@ -103,7 +108,9 @@ export async function getAuthenticatedSpotifyWebToken(
   const cookies = explicit
     ?? buildSpotifyCookieHeader(await (options.cookieProvider
       ? options.cookieProvider()
-      : readSpotifyRendererCookies(options.debugPort ?? 9224, fetchImpl)));
+      : readSpotifyRendererCookies(
+          options.debugPort ?? defaultSpotifyRendererDebugPort(), fetchImpl
+        )));
 
   const totp = generateSpotifyWebTOTP();
   const url = new URL("https://open.spotify.com/api/token");

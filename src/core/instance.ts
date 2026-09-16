@@ -18,6 +18,7 @@ import {
 export interface SpotifyInstanceOptions {
   appPath?: string;
   enforceSupportedVersion?: boolean;
+  debugPort?: number;
 }
 
 export class SpotifyInstance {
@@ -27,6 +28,7 @@ export class SpotifyInstance {
   profileDir: string;
   appPath: string;
   enforceSupportedVersion: boolean;
+  debugPort?: number;
   isReady = false;
 
   constructor(
@@ -40,6 +42,7 @@ export class SpotifyInstance {
     this.profileDir = profileDir || join(PROFILES_DIR, "cli_instance");
     this.appPath = options.appPath ?? PATCHED_APP;
     this.enforceSupportedVersion = options.enforceSupportedVersion !== false;
+    this.debugPort = options.debugPort;
   }
 
   async start(): Promise<void> {
@@ -129,6 +132,7 @@ export class SpotifyInstance {
       "--disable-extensions",
       "--disable-background-networking",
       `--user-data-dir=${this.profileDir}`,
+      ...(this.debugPort ? [`--remote-debugging-port=${this.debugPort}`] : []),
       ...(sslKeyLogPath ? [`--ssl-key-log-file=${sslKeyLogPath}`] : []),
     ];
 

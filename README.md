@@ -103,6 +103,8 @@ Searches Spotify for tracks, artists, and playlists using the same normalized se
 
 Catalog search works without manual credentials by acquiring Spotify's anonymous Web Player token plus client token. `SPOTIFY_COOKIE` or the pair `SPOTIFY_ACCESS_TOKEN` + `SPOTIFY_CLIENT_TOKEN` can still override that path when authenticated web access is needed. Token/upstream errors are written to stderr and JSON mode never emits partial data. See [`docs/cli/search.md`](docs/cli/search.md) for details.
 
+Personal-library access through `GET /api/library` deliberately uses the authenticated Soggfy-managed Spotify session rather than a second OAuth flow. Soggfy reads Spotify-domain cookies from its own loopback renderer DevTools endpoint, exchanges them for a short-lived web token in memory, and returns only normalized library metadata. `SPOTIFY_COOKIE` remains a Soggfy-side override for headless/external setups; API consumers never receive the cookie or access token.
+
 ### CLI help and documentation
 
 The command reference under [`docs/cli/`](docs/cli/) is the source of truth for both the terminal and the documentation website. For example, `soggfy download --help`, `soggfy search --help`, and `soggfy help scripting` render those Markdown documents directly. The static VitePress site builds with `bun run docs:build` and is configured to deploy to [rikhoffbauer.github.io/soggfy-cli](https://rikhoffbauer.github.io/soggfy-cli/) through GitHub Pages.
@@ -168,6 +170,7 @@ Important endpoints:
 
 - `GET /api/health`
 - `GET /api/instances`
+- `GET /api/library` (authenticated account, Liked Songs, and complete playlist contents)
 - `GET /api/jobs`
 - `GET /api/search?q=<query>`
 - `GET /api/playlist?id=<playlist>&offset=<n>&limit=<n>`
