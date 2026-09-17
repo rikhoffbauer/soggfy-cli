@@ -106,3 +106,24 @@ The shared login-state helper copies only preferences/`Users`, clone-on-write co
 Runtime and login cleanup track exact root/descendant PIDs. Broad `killall Spotify`, `pkill`, or `pgrep -f` cleanup is intentionally absent because another Spotify/Soggfy-based application may be running concurrently.
 
 If a crash occurs before the owner can clean up, inspect the recorded PID/tree and runtime directory rather than restoring broad name-based termination.
+
+## Interrupted web runtime build leaves a publish lock
+
+Web runtime publication is serialized by `dist/.webapp-publish.lock`. The lock deliberately fails closed: a waiting build times out rather than deleting a lock it does not own. The `owner` file contains the publisher PID.
+
+Diagnose a timeout before removing anything:
+
+```sh
+cd /path/to/soggfy-cli
+owner="$(cat dist/.webapp-publish.lock/owner)"
+ps -p "$owner" -o pid=,ppid=,etime=,command=
+```
+
+If `ps` reports a live process, do **not** remove the lock. Let that publisher finish or explicitly stop the owning build first. If `ps` reports no such PID, the recorded owner is dead and the stale lock may be removed:
+
+```sh
+rm -rf dist/.webapp-publish.lock
+bun run build:web-runtime
+```
+
+Do not add automatic stale-lock deletion based only on elapsed time. An active publisher may legitimately be slow, and PID ownership must be established before recovery. Integration-test publishers are separately bounded so an interrupted test cannot retain the lock indefinitely.

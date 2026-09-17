@@ -129,3 +129,21 @@ test("non-finite terminal history limits fall back to 500", () => {
   }
   expect(registry.all()).toHaveLength(500);
 });
+
+
+test("completed job is reusable only while its saved artifact exists", () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-job-reuse-"));
+  historyRoots.push(root);
+  const audio = join(root, `${trackId}.mp3`);
+  writeFileSync(audio, "audio");
+  const registry = new JobRegistry();
+  const completed = registry.create(trackId);
+  registry.complete(completed, { savedPath: audio, outputFormat: "mp3" });
+  expect(registry.findReusable(trackId)?.id).toBe(completed.id);
+
+  rmSync(audio);
+  expect(registry.findReusable(trackId)).toBeUndefined();
+  const replacement = registry.create(trackId);
+  expect(replacement.id).not.toBe(completed.id);
+  expect(replacement.state).toBe("queued");
+});

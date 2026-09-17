@@ -6,7 +6,7 @@ import { createServer } from "node:net";
 
 const root = join(import.meta.dir, "..");
 const scratch: string[] = [];
-afterAll(() => scratch.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true })));
+afterAll(() => scratch.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true })), 30_000);
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -92,4 +92,4 @@ test("built web runtime serves API and UI outside the source checkout", async ()
     proc.kill("SIGTERM");
     await proc.exited;
   }
-});
+}, 30_000);

@@ -138,7 +138,7 @@ test("concurrent runtime publications use collision-resistant temporary pointers
 test("concurrent direct web runtime builds both finish with a usable server", async () => {
   const repoRoot = join(import.meta.dir, "..");
   const launch = () => Bun.spawn(["bun", "run", "webapp/build-runtime.ts"], {
-    cwd: repoRoot, stdout: "ignore", stderr: "pipe",
+    cwd: repoRoot, stdout: "ignore", stderr: "pipe", timeout: 25_000,
   });
   const first = launch();
   const second = launch();
@@ -148,4 +148,4 @@ test("concurrent direct web runtime builds both finish with a usable server", as
     throw new Error(`concurrent builds failed: ${firstCode}/${secondCode}\n${errors.join("\n")}`);
   }
   expect(existsSync(join(repoRoot, "dist/webapp/server.js"))).toBe(true);
-});
+}, 30_000);

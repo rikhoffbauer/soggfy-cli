@@ -166,6 +166,10 @@ export class JobRegistry {
     const existing = this.findByTrack(trackId);
     if (!existing) return undefined;
     if (existing.state === "failed" || existing.state === "cancelled") return undefined;
+    if (existing.state === "completed" && (!existing.savedPath || !existsSync(existing.savedPath))) {
+      if (this.byTrack.get(trackId) === existing.id) this.byTrack.delete(trackId);
+      return undefined;
+    }
     return existing;
   }
 

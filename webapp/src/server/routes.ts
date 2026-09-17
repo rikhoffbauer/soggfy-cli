@@ -367,6 +367,14 @@ export function createApiRoutes(options: {
           const body = await req.json();
           const input = body.url || body.trackId;
           if (!input) return jsonResponse({ success: false, error: "Missing 'url' or 'trackId'" }, { status: 400 });
+          const directTrackId = typeof body.trackId === "string" ? parseTrackId(body.trackId) : null;
+          if (directTrackId) {
+            const job = await pool.addJob(directTrackId);
+            return jsonResponse({
+              success: true, queued: true, count: 1, trackIds: [job.trackId], jobs: [job], jobIds: [job.id],
+            });
+          }
+
           const trackIds = await resolveSpotifyUrl(input);
           if (trackIds.length === 0) return jsonResponse({ success: false, error: "Could not extract any valid tracks from the input URL." }, { status: 400 });
 

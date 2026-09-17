@@ -1,309 +1,95 @@
-# `soggfy-cli` Review
+# Repository review — 2026-09-17
 
-Reviewed: 2026-09-08
-Branch: `main`
-Commit: `dccafa5f978664b8f7a2ca8733fa7d11aa284a4c`
+Reviewed working tree at `87ccbff` (`fix: retire stale standalone spotify before daemon start`). This document began as the 2026-09-17 assessment; the findings below were subsequently remediated in the same working session and are retained with their original evidence for traceability.
 
-## Resolution status — 2026-09-08
+The earlier review and its remediation checkpoints are preserved in [REVIEW-2026-09-08.md](REVIEW-2026-09-08.md). Its resolved findings are historical, not additional current defects.
 
-The review below is preserved as the baseline assessment of `main` at `dccafa5f`. The findings were addressed on branch `fix/review-findings` in these implementation checkpoints:
-
-- `4474ad3` — build reproducibility, CI/typechecking, credentials, TLS logging, signing checks, architecture claims, fixture coverage.
-- `071a5f2` — release-safe daemon re-exec/readiness/logging/process cleanup and removal of the daemon binary-stream route.
-- `b7cfdec` — media validation, strict stream options, safe transcoding/raw behavior.
-- `187cf1c` — Ogg-only production capture policy, cross-process single-writer ownership/shared controls, private-hook validation, scanner fix.
-- `77e410a` — shared CLI/webapp runtime, exact lifecycle/login cleanup, playback/finalization confirmation, isolated webapp state, completed-bundle signing, Spotify version gating.
+## Resolution status — 2026-09-17
 
 | Finding | Status | Resolution |
 |---|---|---|
-| P0.1 backend not enforced | **Fixed** | `CapturePolicy` accepts only `ogg`/`disabled`; raw Ogg, decoder mutation, and hook installation use the same policy; unsafe PCM capture families were removed. |
-| P0.2 multiple writers | **Fixed** | Atomic `.capture-owner`, shared generation/gate/status/control files, and owner checks enforce one writer across injected processes. |
-| P0.3 packaged daemon source dependency | **Fixed** | Daemon re-executes the current bundled executable instead of `../cli.ts`. |
-| P0.4 binary stream into daemon log | **Fixed** | Legacy daemon `/api/stream` path was removed. |
-| P1.1 hard-coded addresses unchecked | **Fixed / intentionally version-bound** | Only Spotify 1.2.98.301 arm64 is accepted; both private hook prologues are checked before `DobbyHook`. Unknown builds fail closed. |
-| P1.2 unsafe PCM format assumptions | **Fixed** | Production PCM capture backends were removed. The retained CoreAudio wrapper only mutes output and does not interpret/capture PCM. |
-| P1.3 corrupt/truncated/silent success | **Fixed** | Container/duration/decode/signal validation gates success; finalization waits for shared `completed`. |
-| P1.4 CI green while TS fails | **Fixed** | Root/webapp typechecks, native fixture, webapp build, and deterministic tests are CI/build gates. |
-| P1.5 divergent runtime models | **Substantially fixed** | CLI/webapp now share paths, backend config, IPC, media, login cloning, compatibility checks, and process lifecycle. Their higher-level daemon vs pool/job orchestration intentionally remains separate. |
-| P1.6 non-reproducible builds | **Fixed** | Bun lockfiles are tracked/frozen and Dobby is pinned to a commit. |
-| P1.7 incorrect Intel claim | **Fixed** | Requirements/documentation state Apple Silicon arm64. |
-| P1.8 auth traversal/permissions | **Fixed** | Imports are constrained below Spotify `Users`; snapshots are owner-only. |
-| P1.9 TLS key logging default-on | **Fixed** | Key logging is opt-in via `SOGGFY_SSL_KEYLOG_FILE`. |
-| P1.10 signing failures ignored | **Fixed** | Setup/install/webapp sign the completed bundle and strictly verify it; failure is fatal. |
-| P2.1 option validation | **Fixed** | Stream parser rejects missing values, unknown flags, and unsupported formats. |
-| P2.2 raw corrupts Ogg | **Fixed** | Raw PCM output rejects compressed captures. |
-| P2.3 scanner final match | **Fixed** | Scan loop includes the final legal offset. |
-| P2.4 daemon readiness returns success | **Fixed** | Readiness timeout returns failure and cleans up. |
-| P2.5 broad process cleanup | **Fixed** | CLI, webapp, auth, and setup terminate exact launched process trees; no runtime `pkill`/`killall` remains. |
-| P2.6 temp/log permissions | **Fixed** | Runtime/profile/save/log/control directories/files use private ownership modes. |
-| P2.7 native fixture not gated | **Fixed** | Native fixture is part of automated verification/CI. |
-| P2.8 fake skip | **Fixed** | Fingerprint test is deterministic instead of a passing pseudo-skip. |
-| P2.9 stale setup dependencies | **Fixed** | Setup/doctor use the current dependency and workspace model. |
-| P2.10 duplicate version sources | **Fixed** | Package versioning was consolidated; Spotify compatibility has an explicit runtime constant plus the shell setup mirror. |
-| P2.11 decoder mutation uncoupled | **Fixed** | Decoder acceleration is allowed only for the Ogg backend, active track, open gate, and elected writer. |
-| P2.12 output cleanup | **Fixed** | Stream/capture cleanup is exception-safe and invalid source captures are preserved for diagnosis rather than mislabeled as success. |
+| P1 — CLI captures bypass daemon scheduler | **Fixed** | Daemon-backed CLI downloads submit a direct `trackId` to `/api/download`, bind to the exact returned job ID, and poll that scheduler job to a validated saved artifact. If daemon IPC is alive but its scheduler API is unavailable, the CLI fails closed instead of issuing direct capture IPC. |
+| P1 — loopback API accepts foreign-origin mutations | **Fixed** | The common API wrapper now enforces loopback request-host policy, same-origin/absent browser `Origin`, rejects opaque/cross-site mutations, requires `application/json`, and honors an explicitly configured token on loopback. Origin-less native clients remain supported. |
+| P2 — temporary cleanup deletes retained captures | **Fixed** | Standalone retained/failed media is moved to owner-only `~/.soggfy/captures` before temporary runtime deletion. Lifecycle tests cover normal cleanup, `--keep-wav`, transcode failure, capture-validation failure, and instance-start failure. |
+| P2 — missing completed artifact blocks re-download | **Fixed** | Completed jobs are reusable only while their `savedPath` still exists; a missing artifact invalidates track reuse so a replacement job can queue normally. |
+| Build-test timeout/stale-lock follow-up | **Fixed / documented** | Runtime-build tests have realistic explicit timeouts, spawned publishers are bounded, slow cleanup has an explicit hook timeout, and safe fail-closed stale-lock diagnosis/recovery is documented. |
 
-### Post-fix verification
+## Scope and assessment criteria
 
-Automated verification after the fixes: `bun test` **44 passed / 0 failed**, root and webapp TypeScript passed, native fixture/build passed, CLI/webapp production builds passed, doctor passed every check, `bash -n setup.sh` passed, and `git diff --check` passed.
+Inspected CLI capture/output lifecycle, shared daemon ownership, native IPC dispatch, web queue/state/output handling, API authorization, build publication, documentation, and existing tests. Criteria: capture correctness; concurrency and ownership; retention/recovery; HTTP trust boundaries; useful regression coverage; reproducible builds and handover. Vendored reference implementations were not comprehensively audited. Live Spotify capture, credentials, injection, signing and browser playback were not exercised.
 
-Live macOS verification against Spotify 1.2.98.301 also passed. A CLI capture of `4PTG3Z6ehGkBFwjybzWkR8` produced a validated 4,286,257-byte Ogg/Vorbis stream (44.1 kHz stereo, 213.573333 s). An isolated webapp run captured the same track in one attempt, passed signal validation without warnings, transcoded/tagged a same-duration MP3, and shut down without leaked capture processes. The CLI smoke also exercised the intended startup recovery: the first AppleEvent returned `-1708`, a later retry succeeded, and only then did capture proceed.
+The strongest existing safeguards are exact version/prologue checks, native writer ownership, media validation and process fingerprint checks. The original findings below crossed those component boundaries; their pre-fix evidence is retained alongside the implemented resolutions.
 
-The remaining release constraint is explicit rather than accidental: private hooks currently support only Spotify 1.2.98.301 arm64. A Spotify update requires new binary analysis/signatures and live validation before the supported-version constant should change.
+## Findings
 
-## Verdict
+### 1. P1 — CLI captures bypass the daemon's job scheduler — FIXED
 
-The project has a useful prototype core and several good defensive pieces, but it is **not release-ready** in its current form. The largest risks are in the exact area the project depends on most: capture-source isolation, multi-process ownership of captured files, and packaged daemon execution.
+**Resolution:** `src/core/daemon-capture.ts` discovers the daemon's published HTTP origin, submits the track through `/api/download`, follows the exact returned scheduler job ID, and consumes only its completed saved artifact. `downloadCommand` uses this path whenever the daemon scheduler is healthy and refuses direct shared IPC when daemon IPC exists without the scheduler. Direct URL/playlist web submissions retain their existing asynchronous queue semantics. Cross-boundary fixtures verify two CLI-backed jobs plus one web job serialize at concurrency one and that terminal failure releases ownership.
 
-The highest-priority problems are not cosmetic. They can cause incorrect/corrupt captures, make `SOGGFY_CAPTURE_BACKEND=disabled` write audio anyway, or make the published CLI archive fail when starting its daemon.
+**Evidence:** `src/commands/download.ts:169-180,208` selects the shared daemon socket after a ping and calls `captureTrack` directly. `src/core/capture.ts:46-52` immediately issues `reset_track`, `set_track` and playback commands. The web daemon uses the same socket/save directory in `webapp/src/server/spotify-instance.ts:94-97`; only web jobs participate in `SpotifyPoolManager` scheduling. Native `soggfy-macos/Payload/Main.mm:626-633,684-689` accepts those state-changing commands without a caller-owned capture lease.
 
-Recommended status: **experimental / developer-only** until the P0 findings below are fixed and covered by deterministic tests.
+**Impact:** a CLI download started while a web job is capturing, or two simultaneous daemon-backed CLI downloads, can change the active track underneath the other caller. Their subsequent pause/reset/finalization commands can disrupt each other. Native single-writer election prevents duplicate writer processes; it does not serialize independent capture requests.
 
-## Review rubric
+**Best fix:** make the daemon scheduler the sole owner of captures. Submit CLI requests as daemon jobs, await that job's validated result and copy/transcode it to the requested CLI destination. Keep temporary standalone capture only for the explicit standalone path. If retaining direct IPC temporarily, introduce one cross-process lease covering the whole capture lifecycle and require both CLI and web paths to use it; a process-local mutex is insufficient.
 
-The review evaluated:
+**Validation:** add an offline integration fixture with a recording fake playback/IPC backend. Start two CLI requests plus a web job and assert that each track's reset/play/finalize sequence is serialized, failures release ownership, and one client cannot pause or delete another client's capture. Then repeat with two real tracks on a supported Spotify build. This review traced the concrete conflicting call paths; it did not intentionally interrupt live captures.
 
-1. Capture correctness and track isolation.
-2. Process, IPC, and daemon lifecycle reliability.
-3. Packaged/release behavior rather than source-tree-only behavior.
-4. Build reproducibility and CI coverage.
-5. Type safety, automated tests, and failure observability.
-6. Security/privacy of credentials, temporary files, and debug facilities.
-7. Documentation accuracy and architectural coherence.
+### 2. P1 — Loopback API mutations accept foreign-origin requests — FIXED
 
-## Verification performed
+**Resolution:** mutation protection is centralized in `protectApiRoutes`. Loopback mode rejects non-loopback request hosts, foreign/opaque origins and cross-site fetch metadata, requires JSON content type, and honors a configured loopback token. Same-origin browser requests and origin-less native clients remain valid; existing remote bearer/session behavior is retained.
 
-| Check | Result |
-|---|---|
-| `bun test` | PASS: 7 tests, 0 failures |
-| `bun run build:cli` | PASS |
-| `cmake --build soggfy-macos/build -j 4` | PASS |
-| `scripts/run-state-manager-fixture.sh` | PASS |
-| Root TypeScript check | FAIL: config/dependency issue; after forcing Bun types, `capture.ts` has a real missing import and root JSX config is incomplete |
-| `webapp` build after locked dependency install | PASS |
-| `webapp` typecheck after dependency install | FAIL: 15 errors in `chart.tsx` and `src/index.ts` |
-| `scripts/doctor.ts` in this checkout | FAIL: patched workspace/app bundle and webapp dependencies were not installed |
-| Native dylib architecture | `arm64` only |
-| Lockfiles | both root and `webapp/bun.lock` are ignored by `.gitignore` |
+**Evidence:** `webapp/src/server/security.ts:14-18` disables authorization for every loopback bind, including when a token is configured. The wrapper at `:89-102` checks neither request origin nor fetch metadata. Mutations such as `webapp/src/server/routes.ts:186-193` call `req.json()` without requiring JSON content type.
 
-The passing test count overstates core coverage. `test/fingerprint.test.ts:6-10` silently returns success when its hard-coded `/tmp` sample does not exist. Most other tests exercise the separate `webapp/src/server` helpers, not the root CLI/native capture path.
+**Reproduction:** invoked the actual `protectApiRoutes` wrapper with loopback security and a harmless sentinel POST handler, supplying `Origin: https://untrusted.example`, `Content-Type: text/plain`, and JSON text. Result: `{"status":200,"mutated":true}`. No Spotify action was performed. Browser-specific local-network restrictions were not tested, so this establishes the server-side gap, not a verified exploit in every browser.
 
-## P0 — must fix before release
+**Impact:** any foreign-origin request that reaches the local server can trigger playback, queueing or cancellation. Omitting CORS response headers does not make a received mutation safe. The default loopback service needs to distinguish the app's own browser requests from unrelated sites.
 
-### P0.1 — Capture backend selection is not actually enforced
+**Best fix:** centrally reject foreign or opaque browser origins for mutation routes, validate expected Host/origin policy, and require `application/json` for JSON mutations. Preserve origin-less native clients under an explicit policy. Honor an explicitly configured API token even on loopback. Apply protection once in the common wrapper.
 
-**Evidence:**
+**Validation:** test foreign, `null`, valid same-origin and absent Origin cases, JSON versus plain-text bodies, configured loopback tokens, and current remote bearer/session behavior. Add a browser check confirming that an unrelated page cannot trigger a sentinel action.
 
-- Root CLI defaults to `pcm`: `src/core/paths.ts:24`.
-- `CaptureBackendAllows()` returns `true` for every PCM hook when backend is `pcm`: `soggfy-macos/Payload/Main.mm:259-273`.
-- Multiple PCM hook families are installed simultaneously: AVAsset, AudioUnitRender, AudioConverter, and render callback paths in `Main.mm:1023-1147`.
-- Raw Ogg capture bypasses `CaptureBackendAllows()` entirely and writes directly through `ReceiveOggData()`: `soggfy-macos/Payload/DecodeHook.mm:71-106`.
+### 3. P2 — Temporary downloads delete captures promised to be retained — FIXED
 
-This directly contradicts `docs/current-architecture.md:7-9,70`, which says the backend defaults to disabled and prevents simultaneous hook-family writes. In practice, even the `webapp`'s `disabled` default does not prevent the raw Ogg hook from writing if that hook fires.
+**Resolution:** standalone retained media is moved out of the ephemeral Spotify tree into `~/.soggfy/captures` with private permissions before the runtime tree is removed. `createDownloadCommand` provides a narrow external-operation seam so the actual command lifecycle is tested with real temporary filesystem state for success cleanup, `--keep-wav`, transcode failure, capture-validation failure and instance-start failure.
 
-**Impact:** the same requested track can be sourced from multiple stages of Spotify's audio pipeline, causing duplicate/mixed bytes, premature size completion, or an unexpected `.ogg` result when `pcm` was requested. `disabled` cannot be trusted as a no-capture safety mode.
+**Evidence:** `src/commands/download.ts:184-197` puts standalone captures under `tempRoot/save`. The per-file cleanup at `:240-243` honors `--keep-wav` and preserves a capture when output processing fails, but `:246-250` unconditionally removes the entire temporary root. `test/download-cleanup.test.ts` only tests the boolean helper, not the enclosing cleanup.
 
-**Fix:** make capture routing a single central decision used by *every* hook. Use an explicit backend/source enum and allow exactly one writer source per process/job. The Ogg hook and the 12x decoder mutation must also obey `disabled`.
+**Impact:** `download --no-daemon --keep-wav ...` loses its intermediate capture. The same occurs when no daemon is available. A failed transcode or failed validation can also destroy the sole capture despite the preservation intent/error message, making diagnosis or retry require a fresh download.
 
-### P0.2 — Multiple injected Spotify processes can write the same track file
+**Best fix:** before deleting temporary runtime files, move retained/failed captures into an owner-only persistent capture directory and print the resulting path to stderr. Separate runtime cleanup from media retention, and put startup cleanup under the same lifecycle guard. Do not retain the entire Spotify temporary profile merely to retain one media file.
 
-**Evidence:**
+**Validation:** exercise `downloadCommand` with injected instance/capture/output operations and a real temporary filesystem. Cover successful cleanup, successful `--keep-wav`, transcode failure, capture validation failure and instance-start failure. Assert file existence after the command returns or throws; testing only a helper predicate misses this bug.
 
-- Helper processes poll the shared `active_track.txt` and explicitly set `g_capture_gated=false`: `Main.mm:1152-1176`.
-- The payload installs audio hooks and the watchdog in **all** injected processes: `Main.mm:1268-1274`.
-- All processes inherit the same `SOGGFY_SAVE_PATH` from a `SpotifyInstance`.
-- `StateManager` is process-local and opens deterministic `<trackId>.wav` / `<trackId>.ogg` paths: `StateManager.cpp:100-170`.
+### 4. P2 — A completed job with a deleted output blocks normal re-download — FIXED
 
-The main process's target/ad notification gate therefore does not govern helper writers. Two helpers can independently open/truncate/write the same output path, while the main process's `StateManager`/IPC status does not necessarily describe those writes.
+**Resolution:** `JobRegistry.findReusable` now treats a completed job as reusable only when `savedPath` exists. Missing completed artifacts remove the stale track reuse mapping, allowing `SpotifyPoolManager` to create a replacement queued job while preserving normal deduplication for active and intact completed jobs.
 
-**Impact:** data races, truncation, interleaving, wrong-track/ad capture, misleading status, and nondeterministic completion.
+**Evidence:** `webapp/src/server/jobs.ts:165-169` treats every completed job as reusable without checking its artifact. `webapp/src/server/pool.ts:54-64` returns it before enqueueing. `/api/download` uses `addJob`, and playlist queue-all similarly counts it as existing. The separate `playNow` path does perform an output check, so behavior differs by entry point.
 
-**Fix:** establish one authoritative capture owner. Prefer installing write-capable audio hooks only in the process proven to own the desired decoder, or relay captured buffers/pages to a single writer process over dedicated IPC. Never let multiple process-local `StateManager`s target the same pathname.
+**Reproduction:** created a completed job whose `savedPath` points to a nonexistent temporary file and called the actual `new SpotifyPoolManager(0).addResolvedJob(trackId)`. Result: `{"returnedSameJob":true,"state":"completed","queued":[]}`. No network or Spotify process was needed.
 
-### P0.3 — The packaged CLI daemon re-executes a source file that is not in the release
+**Impact:** deleting or moving a downloaded file while the daemon is running leaves API download/playlist queue requests reporting reuse instead of producing a replacement. The file route then returns unavailable output, and retry only accepts failed/cancelled jobs.
 
-`src/commands/daemon.ts:82-90` and `:250-260` derive `${__dirname}/../cli.ts` and run it with Bun. The bundle preserves this logic (`dist/cli.js` currently contains the same expression), but bundling moves `__dirname` to the bundle directory.
+**Best fix:** centralize reusable-job eligibility: active jobs are reusable; completed jobs are reusable only when a usable saved artifact exists. When a completed artifact disappears, create a replacement job (or explicitly invalidate the old completion) consistently across play, download and collection queueing.
 
-In the GitHub release layout the executable is `release-bundle/bin/soggfy`; there is no `release-bundle/cli.ts`. The source-tree path only works before bundling.
+**Validation:** complete a fixture job, remove its output, then exercise each enqueue path and verify a replacement is queued. Also cover intact completed outputs, active duplicates and failed jobs so deduplication remains correct.
 
-**Impact:** `soggfy daemon start` and the daemon's `/api/stream` child dispatch are broken or source-tree-dependent in the artifact CI publishes.
+## Verification after remediation
 
-**Fix:** re-exec the current entrypoint instead of constructing a source path. Under Bun, use the current script (`process.argv[1]`) with `process.execPath`, and add a smoke test that extracts the exact release tarball to a temporary directory and starts/stops the daemon from there.
+- `bun test`: **427 passed, 0 failed**, 1,271 expectations across 93 files.
+- Remediation-focused suite: **40 passed, 0 failed**, including daemon job binding, shared scheduler serialization/failure release, mutation boundary policy, missing-artifact replacement, full standalone download lifecycle, and both runtime-build integration tests.
+- `bun run typecheck` and `bun run typecheck:webapp`: passed.
+- Native fixtures passed: state manager, process role, Ogg pre-roll, exact hook targets, and child-process DYLD inheritance.
+- `bun run docs:build`: passed after moving aside an old root-owned generated VitePress `dist` tree and rebuilding it as the current user.
+- Native payload build (`cmake -B soggfy-macos/build -S soggfy-macos && cmake --build soggfy-macos/build`): passed.
+- Release builds (`bun run build:cli` and `bun run build:web-runtime`): passed.
+- `git diff --check`: passed.
+- The generated `dist/webapp/versions` tree had accumulated 98 ignored build versions during repeated verification and caused an `ENOSPC` copy failure against the nearly-full system `/tmp`; no publisher/lock was active, so the ignored generated web runtime was removed and rebuilt fresh before rerunning the affected suite. This was verification-environment cleanup, not a source-code workaround.
 
-### P0.4 — Daemon `/api/stream` routes binary audio into the daemon log
+Fresh authenticated Spotify capture was not performed as part of this remediation. Historical supported-version live captures remain documented separately; a fresh live smoke is still appropriate before a release that changes the native capture/runtime stack.
 
-The daemon itself is launched with stdout/stderr appended to `DAEMON_LOG` (`daemon.ts:86-93`). Its `/api/stream` endpoint then spawns `soggfy stream <track>` with both streams set to `inherit` (`daemon.ts:250-260`). A normal `stream` invocation writes audio bytes to stdout.
+## Remaining release validation
 
-**Impact:** successful API streaming can append MP3/WAV/other binary data into `daemon.log`, corrupting logs and potentially consuming large amounts of disk. The endpoint also returns success immediately without tracking whether the child succeeds.
-
-**Fix:** do not implement the daemon API by launching the stdout-oriented CLI command. Call a shared job/capture service directly. At minimum, capture child stdout separately and return/route it intentionally rather than inheriting daemon stdout.
-
-## P1 — high priority
-
-### P1.1 — Native hooks are tied to hard-coded Spotify addresses without compatibility checks
-
-`DecodeHook.mm:152-178` hooks `base + 0x127fe94` and `base + 0x12b32c8`. There is no Spotify binary/version fingerprint, instruction signature validation, or checked `DobbyHook` return before those addresses are used.
-
-A Spotify update can therefore turn a previously valid build into a crash or hook an unrelated function.
-
-**Fix:** fingerprint supported Spotify builds, resolve targets by validated signatures/symbol context where possible, verify hook prologues before patching, check hook return codes, and fail closed with a precise unsupported-version error.
-
-### P1.2 — PCM format assumptions are unsafe across the installed hook families
-
-`StateManager` always writes IEEE float32, stereo, 44.1 kHz WAV headers (`StateManager.cpp:70-98`). The CoreAudio/AudioConverter hooks cast output buffers to `float*` and infer mono/interleaved/non-interleaved layout without querying the actual stream format.
-
-`AudioConverterFillComplexBuffer` in particular treats packet output as float PCM even though the converter output format is not established. The private AVAsset decoder hook also assumes a fixed ABI/layout.
-
-**Impact:** a hook can produce bytes that do not match the WAV header or even compressed/non-float data interpreted as floats. The file may still be non-empty and therefore appear successful to the root CLI.
-
-**Fix:** capture and validate the actual `AudioStreamBasicDescription` associated with the selected hook. One backend should own one known format; reject rather than guess when the format cannot be proven.
-
-### P1.3 — Root CLI accepts corrupt/truncated/silent captures as successful
-
-`src/core/capture.ts:142-148` only requires that an output file exists and has a size. `src/core/transcode.ts:40-46` similarly treats an ffmpeg zero exit plus non-empty output as success. There is no RIFF/Ogg structural validation, expected-duration tolerance, signal sanity check, or `ffprobe` gate.
-
-The separate `webapp/src/server/media.ts` already contains substantially better validation logic, but the root CLI does not share it.
-
-**Fix:** move media validation into one shared module and require it before reporting completion. Validate container structure, codec/sample format, duration tolerance, ffprobe decodeability, and basic signal health. Preserve rejected captures for diagnostics with an explicit failure status.
-
-### P1.4 — CI is green while both TypeScript trees fail typechecking
-
-Root `tsconfig.json` references `bun-types`, while `package.json` installs `@types/bun`; a normal `tsc --noEmit` cannot resolve the configured type package. Forcing the installed Bun types exposes a real error: `src/core/capture.ts:43` uses `readFileSync` without importing it. That exception is swallowed by the surrounding empty `catch`, so the file-based track-confirmation fallback silently never works.
-
-The root config also includes `src/web/frontend.tsx` without a JSX compiler option. After installing `webapp` dependencies from its local lockfile, its typecheck still reports 15 source errors: 13 in `src/components/ui/chart.tsx`, plus `src/index.ts:677` (`queued` possibly undefined) and `:969` (the `archiver` import is not callable under its declared types).
-
-`.github/workflows/ci.yml` runs tests and bundles, but never runs either typecheck.
-
-**Fix:** repair both tsconfigs/types, make `typecheck` an explicit root script, typecheck root and webapp independently in CI, and fail PRs on errors.
-
-### P1.5 — The repository contains two divergent products with incompatible setup/state models
-
-The root CLI uses `~/.soggfy/workspace/PatchedSpotify.app`, one daemon socket, and `src/core/*`. `setup.sh` + `webapp/src/index.ts` instead use repository-local `workspace/`, a Spotify instance pool, a separate job registry, duplicate URL/IPC/metadata logic, and separate output handling.
-
-`README.md` describes the root CLI architecture; `docs/current-architecture.md` describes the webapp architecture. Their capture-backend defaults and validation guarantees differ.
-
-**Impact:** fixes can land in one implementation while the other remains broken; documentation can be correct for one entrypoint and false for another; tests in one tree give confidence about code that the other entrypoint never calls.
-
-**Fix:** choose one runtime architecture. Extract shared capture/IPC/media primitives into one package/module and make CLI + web UI thin clients of the same service. Remove the obsolete implementation once parity is reached.
-
-### P1.6 — Builds/releases are not reproducible
-
-`.gitignore:8` ignores every `bun.lock`, including `webapp/bun.lock`; neither lockfile is tracked. CI runs plain `bun install`, so dependency resolution can change between builds without a repository change.
-
-Native builds are also mutable: `soggfy-macos/CMakeLists.txt:13-17` fetches Dobby from `GIT_TAG master` rather than a pinned commit.
-
-**Fix:** commit root and webapp lockfiles, use `bun install --frozen-lockfile` in CI, pin Dobby to a reviewed commit SHA, and record the Spotify/payload compatibility tuple in release metadata. Restrict GitHub Actions `contents: write` to the release job; the build/test job only needs read access.
-
-### P1.7 — Intel support is claimed but the payload/release is ARM64-only
-
-`README.md:31` claims “Apple Silicon or Intel”. CMake forces `CMAKE_OSX_ARCHITECTURES "arm64"` (`CMakeLists.txt:8-9`), CI publishes `soggfy-macos-arm64.tar.gz`, and the locally built dylib is confirmed `Mach-O ... arm64`.
-
-**Fix:** either remove the Intel claim and fail early on x86_64, or build/test a universal/x86_64 payload and provide per-architecture hook resolution. Given the hard-coded ARM64 offsets, documenting Apple Silicon-only is the realistic short-term choice.
-
-### P1.8 — Auth import permits path traversal; auth export permissions are too loose
-
-`src/commands/auth.ts:58-64` directly joins untrusted snapshot keys under `USERS_DIR` without rejecting `..` traversal. A crafted imported JSON file can escape that directory and overwrite other files writable by the user.
-
-`auth export` writes credential material using default file permissions (`auth.ts:193-195`). With a typical `022` umask this is commonly `0644`, inappropriate for a portable credential snapshot.
-
-**Fix:** validate every imported relative path with `resolve()` and require it to remain strictly under the intended root; reject absolute/traversal paths and unexpected value types. Create auth exports with mode `0600`, avoid logging sensitive details, and document that the file contains reusable account state.
-
-### P1.9 — TLS session key logging is enabled by default
-
-`src/core/instance.ts:78-106` sets `SSLKEYLOGFILE` to `/tmp/sslkeylog.log` and passes the equivalent Chromium flag. `Main.mm` also supplies the same fallback. This is unrelated to normal capture and leaves TLS session secrets in a predictable temporary path.
-
-**Fix:** make TLS key logging opt-in behind a clearly named debug flag, create the file with owner-only permissions, and delete/rotate it explicitly when debugging ends.
-
-### P1.10 — Installer reports successful signing without checking the result
-
-`src/commands/install.ts:125-128` calls `codesign` with `Bun.spawnSync()` but ignores its exit status and immediately logs `Signed`. `setup.sh` similarly uses `codesign ... || true` for important targets.
-
-**Impact:** installation can appear successful while the patched Spotify executable/framework is not loadable with the injected dylib; the failure then surfaces much later as a handshake timeout.
-
-**Fix:** use the existing checked command helper for every required signing operation, run `codesign --verify --deep --strict` on the finished copied bundle, and emit the failing target/stderr directly.
-
-## P2 — medium/cleanup findings
-
-### P2.1 — CLI option parsing needs validation
-
-`src/commands/stream.ts:55-69` consumes values after `-o`/`-f` without checking that a value exists, accepts arbitrary format strings via a type cast, and silently ignores unknown flags. Invalid input should fail immediately with a usage error and non-zero exit.
-
-### P2.2 — `raw` output corrupts an Ogg capture
-
-`captureTrack()` can return an `.ogg` path in its `wavPath` field. `transcode.ts:21-26` and `:67-75` implement `raw` by blindly removing 44 bytes as though every input were WAV. Detect the actual container first; raw PCM should only be available for proven PCM WAV input.
-
-### P2.3 — Pattern scanner misses the final valid match position
-
-`Scanner.cpp:79-85` loops with `n < sec->size - parsed_pattern.size()`. It should include the final legal offset (`<=`). If a section is exactly the pattern length, it currently checks nothing.
-
-### P2.4 — Daemon readiness timeout returns success
-
-`daemon.ts:107-129` waits up to 90 seconds for IPC. If readiness never arrives but the child process stays alive, the command only warns and returns normally. Treat readiness timeout as startup failure, terminate/recycle the failed child, and exit non-zero.
-
-### P2.5 — Process cleanup is broader than necessary
-
-Root daemon/instance shutdown uses `pkill -9 -f SOGGFY_SOCKET_PATH=...` (`daemon.ts:151-153`, `instance.ts:149-163`). Prefer tracking exact child PIDs/process groups. Broad command-line matching increases the chance of killing an unrelated development process using the same environment marker.
-
-### P2.6 — Temporary output/log permissions are not intentionally constrained
-
-`Main.mm:1207-1210` creates the capture directory with mode `0777` (subject to umask), sockets/files use predictable `/tmp` names, and all injected processes append to `/tmp/soggfy.log`. Use a user-private directory (`0700`), owner-only files where appropriate, and per-instance/per-PID logs.
-
-### P2.7 — Native test fixture exists but is not a CI gate
-
-`scripts/run-state-manager-fixture.sh` passes locally and is valuable, but CI only runs `bun test`. Add the fixture explicitly, then extend it to cover cancellation, Ogg/WAV separation, byte limits, invalid formats, and backend-disabled no-write behavior.
-
-### P2.8 — Test skipping is implemented as a passing test
-
-`test/fingerprint.test.ts:6-10` prints “Skipping” and returns. This looks green in CI even when the intended fixture is absent. Generate a deterministic audio fixture in the test or use an explicit skip mechanism with a separate required fixture test.
-
-### P2.9 — Dependency/setup documentation is stale
-
-The native build no longer uses Capstone, but `README.md:56`, `src/commands/install.ts:53`, and `setup.sh` still install/check `capstone` and `pkg-config`. Remove unused dependencies to reduce setup time and failure surface.
-
-### P2.10 — Versioning has multiple unsynchronized sources
-
-`package.json` and the CLI source both carry version information independently, while GitHub releases are tag-driven. Generate/read the CLI version from one authoritative source and verify the release tag matches it.
-
-### P2.11 — Fast-decode mutation is not coupled to capture safety
-
-`DecodeHook.mm:137-146` changes Spotify's reported decoded sample count to implement the 12x speed trick whenever the track is ungated. It does not consult the selected backend. A diagnostic/disabled mode should not mutate playback timing, and production capture should only enable acceleration after the chosen backend has proven it can preserve sample continuity.
-
-### P2.12 — Output cleanup is not exception-safe
-
-`stream.ts` deletes the intermediate capture only after successful output handling. Failed transcoding or stdout errors leave temp media behind even without `--keep-wav`. Preserve failures deliberately in a named diagnostics area or clean them in a `finally`; do not leave behavior accidental.
-
-## What is already good
-
-- `/Applications/Spotify.app` is copied rather than modified in place.
-- IPC uses bounded retries/timeouts and readiness requires a real ping/pong handshake.
-- The native `StateManager` fixture is fast and deterministic enough to become a useful regression suite.
-- The webapp job registry has explicit lifecycle states instead of inferring progress from files alone.
-- The webapp media module contains useful WAV validation, signal checks, ffprobe validation, fallback preservation, and sidecars.
-- The native payload and root CLI both build successfully on the reviewed Apple Silicon machine.
-- Release CI at least verifies native architecture/linkage and packages a concrete artifact rather than publishing source-only output.
-
-## Recommended fix order
-
-1. **Make capture single-writer and backend-authoritative.** Disable raw Ogg/decoder mutation when not selected; guarantee one hook family and one process owns a job's output.
-2. **Fix packaged daemon execution.** Re-exec the current CLI artifact and remove stdout-to-log binary routing; add an extracted-release smoke test.
-3. **Unify the runtime.** Make CLI and web UI share one capture/job/media implementation and one workspace/config model.
-4. **Make media correctness a hard gate.** Reuse structural/signal/ffprobe validation everywhere and reject unverifiable captures.
-5. **Turn CI into a release gate.** Add root/webapp typechecks, native fixture tests, release-artifact smoke tests, and deterministic generated audio fixtures.
-6. **Make builds deterministic and compatibility-aware.** Commit Bun locks, pin Dobby, identify supported Spotify builds, and resolve/validate hooks safely.
-7. **Harden credentials/debug/install behavior.** Fix auth traversal + permissions, disable TLS key logging by default, and verify every codesign operation.
-
-## Release acceptance checklist
-
-Do not call the project release-ready until all of the following are true:
-
-- [ ] `SOGGFY_CAPTURE_BACKEND=disabled` produces no captured media and performs no 12x decoder mutation.
-- [ ] A capture has exactly one writer PID and exactly one selected hook/backend; a test proves no duplicate/interleaved writes.
-- [ ] The exact extracted CI release archive can run `install`/`daemon start`/`daemon status`/`daemon stop` without any source tree present.
-- [ ] Root and webapp typechecks, unit tests, native fixtures, and builds all pass from a clean locked checkout.
-- [ ] Truncated, silent, malformed, wrong-duration, or format-mismatched captures are rejected rather than reported successful.
-- [ ] Native hooks refuse unsupported Spotify builds before patching unknown offsets.
-- [ ] Dependency resolution is locked/pinned and the supported CPU architecture in documentation matches the produced artifact.
-
-## Bottom line
-
-The strongest part of the repository is the newer job/validation work in `webapp`; the weakest part is the native capture ownership model and the split between that webapp architecture and the root CLI architecture. Fixing individual symptoms in the current multi-hook/multi-process design will likely keep producing regressions. The highest-leverage change is to make **one process + one backend + one writer** an invariant, then put the CLI and web UI on top of that same implementation.
+1. On a supported Spotify build, run a fresh daemon-backed CLI capture and web capture to confirm the scheduler path against the real runtime.
+2. If release confidence requires it, exercise simultaneous CLI/web submissions and verify queue order plus final media independently with `ffprobe`/whole-track fixtures.
+3. Keep the fail-closed web-runtime publish-lock recovery procedure in `docs/known-failures.md`; never remove a lock until its recorded owner PID is confirmed dead.

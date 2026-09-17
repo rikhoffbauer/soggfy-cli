@@ -1,13 +1,14 @@
-import { existsSync, unlinkSync, statSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { chmodSync, copyFileSync, existsSync, unlinkSync, statSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "fs";
 import { extname, join } from "path";
 import { homedir, tmpdir } from "os";
 import { log } from "../core/log";
 import { resolveInput, type TrackMetadata } from "../core/metadata";
-import { captureTrack } from "../core/capture";
+import { captureTrack, type CaptureResult } from "../core/capture";
 import { streamToWriter, transcode, tagMp3, type OutputFormat } from "../core/transcode";
 import { SpotifyInstance } from "../core/instance";
 import { ping } from "../core/ipc";
-import { IPC_SOCKET, SAVE_PATH, ensureDirs } from "../core/paths";
+import { captureTrackViaDaemon, daemonApiHealthy } from "../core/daemon-capture";
+import { IPC_SOCKET, RETAINED_CAPTURE_DIR, SAVE_PATH, ensureDirs } from "../core/paths";
 
 export interface DownloadOptions {
   output?: string;
@@ -137,116 +138,209 @@ export function shouldRemoveCaptureAfterOutput(options: {
   return options.outputSucceeded && !options.keepCapture;
 }
 
-export async function downloadCommand(args: string[]): Promise<void> {
-  const { inputs, opts } = parseDownloadArgs(args);
-
-  if (inputs.length === 0) {
-    log.error("No track or playlist specified. Use 'soggfy download --help' for usage.");
-    process.exit(1);
-  }
-
-  ensureDirs();
-
-  // Resolve all track IDs from inputs (tracks, albums, playlists)
-  const allTrackIds: string[] = [];
-  for (const input of inputs) {
-    log.info(`Resolving tracks from input...`);
-    const ids = await resolveInput(input);
-    if (ids.length === 0) {
-      log.error(`Could not resolve any tracks from: ${input}`);
-      process.exit(1);
-    }
-    allTrackIds.push(...ids);
-  }
-
-  log.ok(`Resolved ${allTrackIds.length} track(s)`);
-
-  // If output path is a directory, ensure it exists
-  const isDirOutput = opts.output ? isDirectoryPath(opts.output) : false;
-  if (opts.output && isDirOutput) {
-    mkdirSync(opts.output, { recursive: true });
-  }
-
-  // Determine if we should use the daemon or start a temporary instance
-  let socketPath = IPC_SOCKET;
-  let savePath = SAVE_PATH;
-  let tempInstance: SpotifyInstance | null = null;
-  let tempRoot: string | null = null;
-
-  if (opts.useDaemon) {
-    const daemonAlive = await ping(IPC_SOCKET);
-    if (!daemonAlive) {
-      log.info("Daemon not running. Starting temporary Spotify instance...");
-      opts.useDaemon = false;
-    }
-  }
-
-  if (!opts.useDaemon) {
-    tempRoot = mkdtempSync(join(tmpdir(), "soggfy-download-"));
-    const tmpSocket = join(tempRoot, "ipc.sock");
-    const tmpSave = join(tempRoot, "save");
-    tempInstance = new SpotifyInstance(tmpSocket, tmpSave);
-    try {
-      await tempInstance.start();
-    } catch (e: any) {
-      log.error(`Failed to start Spotify: ${e.message}`);
-      log.info("Run 'soggfy install' first, then 'soggfy auth login'.");
-      process.exit(1);
-    }
-    socketPath = tmpSocket;
-    savePath = tmpSave;
-  }
-
+export function retainStandaloneCapture(
+  capturePath: string,
+  trackId: string,
+  retainedDir = RETAINED_CAPTURE_DIR,
+): string {
+  mkdirSync(retainedDir, { recursive: true, mode: 0o700 });
+  const extension = extname(capturePath) || ".audio";
+  const destination = join(retainedDir, `${trackId}-${Date.now()}${extension}`);
   try {
-    for (let i = 0; i < allTrackIds.length; i++) {
-      const trackId = allTrackIds[i];
-
-      if (allTrackIds.length > 1) {
-        log.header(`[${i + 1}/${allTrackIds.length}] Processing ${trackId}`);
-      }
-
-      const result = await captureTrack(socketPath, savePath, trackId);
-      let outputSucceeded = false;
-      try {
-        if (opts.output) {
-          let outputPath: string;
-          if (isDirOutput) {
-            const fileName = formatTrackFileName(
-              trackId, result.metadata, opts.format!, i, allTrackIds.length,
-            );
-            outputPath = join(opts.output, fileName);
-          } else {
-            outputPath = allTrackIds.length > 1
-              ? opts.output.replace(/(\.\w+)$/, `_${i + 1}$1`)
-              : opts.output;
-          }
-
-          log.info(`Transcoding to ${opts.format}...`);
-          if (!transcode(result.wavPath, outputPath, opts.format!)) {
-            throw new Error(`Transcoding failed for ${trackId}`);
-          }
-          if (opts.format === "mp3" && result.metadata) {
-            await tagMp3(outputPath, result.metadata);
-          }
-          log.ok(`Saved: ${outputPath}`);
-        } else {
-          const stdout = new WritableStream<Uint8Array>({
-            write(chunk) { process.stdout.write(chunk); },
-            close() {},
-          });
-          await streamToWriter(result.wavPath, stdout, opts.format!);
-        }
-        outputSucceeded = true;
-      } finally {
-        if (shouldRemoveCaptureAfterOutput({ keepCapture: Boolean(opts.keepWav), outputSucceeded }) && existsSync(result.wavPath)) {
-          try { unlinkSync(result.wavPath); } catch {}
-        }
-      }
-    }
-  } finally {
-    if (tempInstance) {
-      await tempInstance.stop();
-    }
-    if (tempRoot) rmSync(tempRoot, { recursive: true, force: true });
+    renameSync(capturePath, destination);
+  } catch {
+    copyFileSync(capturePath, destination);
+    unlinkSync(capturePath);
   }
+  chmodSync(destination, 0o600);
+  log.info(`Preserved capture: ${destination}`);
+  return destination;
 }
+
+function retainStandaloneCaptureCandidate(
+  savePath: string,
+  trackId: string,
+  retainCapture: (capturePath: string, trackId: string) => string = retainStandaloneCapture,
+): string | undefined {
+  for (const extension of [".ogg", ".wav"]) {
+    const candidate = join(savePath, `${trackId}${extension}`);
+    if (existsSync(candidate)) return retainCapture(candidate, trackId);
+  }
+  return undefined;
+}
+
+interface DownloadSpotifyInstance {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export interface DownloadCommandDependencies {
+  ensureDirs: typeof ensureDirs;
+  resolveInput: typeof resolveInput;
+  daemonApiHealthy: typeof daemonApiHealthy;
+  ping: typeof ping;
+  makeTempRoot: () => string;
+  createSpotifyInstance: (socketPath: string, savePath: string) => DownloadSpotifyInstance;
+  captureTrack: typeof captureTrack;
+  captureTrackViaDaemon: typeof captureTrackViaDaemon;
+  transcode: typeof transcode;
+  tagMp3: typeof tagMp3;
+  streamToWriter: typeof streamToWriter;
+  retainCapture: (capturePath: string, trackId: string) => string;
+}
+
+const DEFAULT_DOWNLOAD_DEPENDENCIES: DownloadCommandDependencies = {
+  ensureDirs,
+  resolveInput,
+  daemonApiHealthy,
+  ping,
+  makeTempRoot: () => mkdtempSync(join(tmpdir(), "soggfy-download-")),
+  createSpotifyInstance: (socketPath, savePath) => new SpotifyInstance(socketPath, savePath),
+  captureTrack,
+  captureTrackViaDaemon,
+  transcode,
+  tagMp3,
+  streamToWriter,
+  retainCapture: retainStandaloneCapture,
+};
+
+export function createDownloadCommand(
+  overrides: Partial<DownloadCommandDependencies> = {},
+): (args: string[]) => Promise<void> {
+  const deps: DownloadCommandDependencies = { ...DEFAULT_DOWNLOAD_DEPENDENCIES, ...overrides };
+  return async (args: string[]): Promise<void> => {
+    const { inputs, opts } = parseDownloadArgs(args);
+
+    if (inputs.length === 0) {
+      log.error("No track or playlist specified. Use 'soggfy download --help' for usage.");
+      process.exit(1);
+    }
+
+    deps.ensureDirs();
+
+    // Resolve all track IDs from inputs (tracks, albums, playlists)
+    const allTrackIds: string[] = [];
+    for (const input of inputs) {
+      log.info(`Resolving tracks from input...`);
+      const ids = await deps.resolveInput(input);
+      if (ids.length === 0) {
+        log.error(`Could not resolve any tracks from: ${input}`);
+        process.exit(1);
+      }
+      allTrackIds.push(...ids);
+    }
+
+    log.ok(`Resolved ${allTrackIds.length} track(s)`);
+
+    // If output path is a directory, ensure it exists
+    const isDirOutput = opts.output ? isDirectoryPath(opts.output) : false;
+    if (opts.output && isDirOutput) {
+      mkdirSync(opts.output, { recursive: true });
+    }
+
+    // Determine if we should use the daemon or start a temporary instance
+    let socketPath = IPC_SOCKET;
+    let savePath = SAVE_PATH;
+    let tempInstance: DownloadSpotifyInstance | null = null;
+    let tempRoot: string | null = null;
+    let useDaemon = Boolean(opts.useDaemon);
+
+    if (useDaemon) {
+      const schedulerAlive = await deps.daemonApiHealthy();
+      if (!schedulerAlive) {
+        const daemonIpcAlive = await deps.ping(IPC_SOCKET);
+        if (daemonIpcAlive) {
+          throw new Error("Spotify daemon IPC is active but its scheduler API is unavailable; refusing an unscheduled capture");
+        }
+        log.info("Daemon not running. Starting temporary Spotify instance...");
+        useDaemon = false;
+      }
+    }
+
+    if (!useDaemon) {
+      tempRoot = deps.makeTempRoot();
+      const tmpSocket = join(tempRoot, "ipc.sock");
+      const tmpSave = join(tempRoot, "save");
+      tempInstance = deps.createSpotifyInstance(tmpSocket, tmpSave);
+      socketPath = tmpSocket;
+      savePath = tmpSave;
+    }
+
+    try {
+      if (tempInstance) {
+        try {
+          await tempInstance.start();
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          throw new Error(`Failed to start Spotify: ${detail}. Run 'soggfy install' first, then 'soggfy auth login'.`);
+        }
+      }
+
+      for (let i = 0; i < allTrackIds.length; i++) {
+        const trackId = allTrackIds[i];
+
+        if (allTrackIds.length > 1) {
+          log.header(`[${i + 1}/${allTrackIds.length}] Processing ${trackId}`);
+        }
+
+        let result: CaptureResult;
+        try {
+          result = useDaemon
+            ? await deps.captureTrackViaDaemon(trackId)
+            : await deps.captureTrack(socketPath, savePath, trackId);
+        } catch (error) {
+          if (!useDaemon) retainStandaloneCaptureCandidate(savePath, trackId, deps.retainCapture);
+          throw error;
+        }
+        let outputSucceeded = false;
+        try {
+          if (opts.output) {
+            let outputPath: string;
+            if (isDirOutput) {
+              const fileName = formatTrackFileName(
+                trackId, result.metadata, opts.format!, i, allTrackIds.length,
+              );
+              outputPath = join(opts.output, fileName);
+            } else {
+              outputPath = allTrackIds.length > 1
+                ? opts.output.replace(/(\.\w+)$/, `_${i + 1}$1`)
+                : opts.output;
+            }
+
+            log.info(`Transcoding to ${opts.format}...`);
+            if (!deps.transcode(result.wavPath, outputPath, opts.format!)) {
+              throw new Error(`Transcoding failed for ${trackId}`);
+            }
+            if (opts.format === "mp3" && result.metadata) {
+              await deps.tagMp3(outputPath, result.metadata);
+            }
+            log.ok(`Saved: ${outputPath}`);
+          } else {
+            const stdout = new WritableStream<Uint8Array>({
+              write(chunk) { process.stdout.write(chunk); },
+              close() {},
+            });
+            await deps.streamToWriter(result.wavPath, stdout, opts.format!);
+          }
+          outputSucceeded = true;
+        } finally {
+          if (!useDaemon && existsSync(result.wavPath)) {
+            if (shouldRemoveCaptureAfterOutput({ keepCapture: Boolean(opts.keepWav), outputSucceeded })) {
+              try { unlinkSync(result.wavPath); } catch {}
+            } else {
+              deps.retainCapture(result.wavPath, trackId);
+            }
+          }
+        }
+      }
+    } finally {
+      try {
+        if (tempInstance) await tempInstance.stop();
+      } finally {
+        if (tempRoot) rmSync(tempRoot, { recursive: true, force: true });
+      }
+    }
+  };
+}
+
+export const downloadCommand = createDownloadCommand();

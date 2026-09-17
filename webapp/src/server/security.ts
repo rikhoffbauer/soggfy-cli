@@ -8,14 +8,15 @@ const MAX_SESSIONS = 128;
 export interface ApiSecurity {
   required: boolean;
   token?: string;
+  loopbackOnly: boolean;
   sessions: Map<string, number>;
 }
 
 export function apiSecurityFromEnv(host: string, env: NodeJS.ProcessEnv = process.env): ApiSecurity {
-  if (isLoopbackHost(host)) return { required: false, sessions: new Map() };
   const token = env.SOGGFY_API_TOKEN?.trim();
+  if (isLoopbackHost(host)) return { required: Boolean(token), token, loopbackOnly: true, sessions: new Map() };
   if (!token) throw new Error("SOGGFY_API_TOKEN is required when SOGGFY_HOST is not loopback");
-  return { required: true, token, sessions: new Map() };
+  return { required: true, token, loopbackOnly: false, sessions: new Map() };
 }
 
 function secureEqual(left: string, right: string): boolean {
@@ -73,6 +74,40 @@ export function authorizeApiRequest(req: Request, security: ApiSecurity): boolea
   return suppliedTokenIsValid(req, security) || validSession(req, security);
 }
 
+const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function mutationBoundaryError(req: Request, method: string, security: ApiSecurity): Response | null {
+  const requestUrl = new URL(req.url);
+  if (security.loopbackOnly && !isLoopbackHost(requestUrl.hostname)) {
+    return Response.json({ error: "Loopback API requests require a loopback request host" }, { status: 403 });
+  }
+  if (!MUTATION_METHODS.has(method.toUpperCase())) return null;
+
+  const origin = req.headers.get("origin");
+  if (origin !== null) {
+    if (origin === "null") {
+      return Response.json({ error: "Opaque browser origins may not mutate the API" }, { status: 403 });
+    }
+    try {
+      if (new URL(origin).origin !== requestUrl.origin) {
+        return Response.json({ error: "Cross-origin API mutation rejected" }, { status: 403 });
+      }
+    } catch {
+      return Response.json({ error: "Invalid Origin header" }, { status: 403 });
+    }
+  }
+
+  if (req.headers.get("sec-fetch-site") === "cross-site") {
+    return Response.json({ error: "Cross-site API mutation rejected" }, { status: 403 });
+  }
+
+  const contentType = (req.headers.get("content-type") || "").split(";", 1)[0]!.trim().toLowerCase();
+  if (contentType !== "application/json") {
+    return Response.json({ error: "API mutations require application/json" }, { status: 415 });
+  }
+  return null;
+}
+
 function withSessionCookie(response: Response, security: ApiSecurity, req: Request): Response {
   pruneSessions(security);
   const session = randomBytes(32).toString("base64url");
@@ -94,11 +129,15 @@ export function protectApiRoutes(routes: Record<string, any>, security: ApiSecur
     for (const [method, handler] of Object.entries(definition)) {
       if (typeof handler !== "function") continue;
       wrapped[method] = async (req: Request, ...args: unknown[]) => {
+        const boundaryError = mutationBoundaryError(req, method, security);
+        if (boundaryError) return boundaryError;
         if (!authorizeApiRequest(req, security)) {
           return Response.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
         }
         const response = await handler(req, ...args);
-        return suppliedTokenIsValid(req, security) && !validSession(req, security) ? withSessionCookie(response, security, req) : response;
+        return suppliedTokenIsValid(req, security) && !validSession(req, security)
+          ? withSessionCookie(response, security, req)
+          : response;
       };
     }
     protectedRoutes[path] = wrapped;

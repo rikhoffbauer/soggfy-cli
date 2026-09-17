@@ -10,6 +10,7 @@ export const WORKSPACE_DIR = join(SOGGFY_HOME, "workspace");
 export const PATCHED_APP = join(WORKSPACE_DIR, "PatchedSpotify.app");
 export const PROFILES_DIR = join(WORKSPACE_DIR, "profiles");
 export const OUTPUT_DIR = join(SOGGFY_HOME, "output");
+export const RETAINED_CAPTURE_DIR = join(SOGGFY_HOME, "captures");
 export const AUTH_DIR = process.env.SOGGFY_AUTH_DIR?.trim() || join(SOGGFY_HOME, "auth");
 export const AUTH_STATE_DIR = join(AUTH_DIR, "spotify");
 export const PAYLOAD_DIR = join(SOGGFY_HOME, "payload");
@@ -31,7 +32,7 @@ export const DOBBY_REPO = "https://github.com/jmpews/Dobby.git";
 export const CAPTURE_BACKEND = process.env.SOGGFY_CAPTURE_BACKEND || "ogg";
 
 export function ensureDirs() {
-  const dirs = [SOGGFY_HOME, SOGGFY_DATA, SOGGFY_RUNTIME_DIR, WORKSPACE_DIR, PROFILES_DIR, OUTPUT_DIR, AUTH_DIR, PAYLOAD_DIR, LOG_DIR];
+  const dirs = [SOGGFY_HOME, SOGGFY_DATA, SOGGFY_RUNTIME_DIR, WORKSPACE_DIR, PROFILES_DIR, OUTPUT_DIR, RETAINED_CAPTURE_DIR, AUTH_DIR, PAYLOAD_DIR, LOG_DIR];
   for (const dir of dirs) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);
