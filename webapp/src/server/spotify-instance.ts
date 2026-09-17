@@ -8,6 +8,7 @@ import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion
 import { captureMaxWaitMs, captureMonitorDecision, PlaybackProgressMonitor } from "../../../src/core/capture-monitor";
 import { BestEffortCaptureTraceRecorder } from "../../../src/core/capture-trace";
 import { migrateOfficialSpotifyAuthOnce } from "../../../src/core/auth-migration";
+import { inspectOrphanSpotifyOwner, retireOrphanSpotifyOwner } from "../../../src/core/daemon-owner";
 import { AUTH_STATE_DIR, CAPTURE_BACKEND, OUTPUT_DIR, PROFILES_DIR, WORKSPACE_DIR, IPC_SOCKET, SAVE_PATH } from "../../../src/core/paths";
 import type { DownloadJob, TrackMetadata } from "./jobs";
 import { copyAudioFallback, expectedOggBytes, findCapturedAudioPath, transcodeAudioToMp3, validateAudioFile, writeSidecar } from "./media";
@@ -219,6 +220,24 @@ export class SpotifyInstance {
     const dylibPath = join(appPath, "Contents/MacOS/libsoggfy.dylib");
     if (!existsSync(binaryPath)) throw new Error(`Patched Spotify binary missing: ${binaryPath}`);
     if (!existsSync(dylibPath)) throw new Error(`Payload dylib missing: ${dylibPath}`);
+
+    if (!USE_DAEMON_INSTANCE && this.id === 1) {
+      const daemonProfileDir = join(PROFILES_DIR, "cli_instance");
+      const orphanInspection = inspectOrphanSpotifyOwner(binaryPath, daemonProfileDir);
+      if (orphanInspection.kind === "unavailable") {
+        throw new Error(
+          "Soggfy cannot inspect running Spotify processes; refusing to launch a standalone pool that could conflict with a stale daemon instance.",
+        );
+      }
+      if (orphanInspection.kind === "verified") {
+        this.log(`Retiring orphaned daemon-owned Soggfy Spotify process ${orphanInspection.owner.spotifyPid} before standalone launch.`);
+        await retireOrphanSpotifyOwner(orphanInspection.owner);
+      } else if (orphanInspection.kind === "unverifiable") {
+        throw new Error(
+          `Spotify process ${orphanInspection.spotifyPid} still uses the daemon Soggfy profile, but its identity cannot be verified safely.`,
+        );
+      }
+    }
 
     const tmpDir = join(this.profileDir, "tmp");
     mkdirSync(homeDir, { recursive: true, mode: 0o700 });

@@ -143,6 +143,36 @@ test("orphan Spotify retirement refuses PID reuse before signaling", async () =>
 });
 
 
+test("orphan Spotify retirement accepts the process disappearing after its first verified signal", async () => {
+  const binary = "/Users/user/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify";
+  const profile = "/Users/user/.soggfy/workspace/profiles/cli_instance";
+  const fingerprint = {
+    startedAt: "Thu Sep 11 02:12:14 2026",
+    birthId: "1789092734:111111",
+    command: `${binary} --user-data-dir=${profile}`,
+  };
+  const owner = {
+    spotifyPid: 8061,
+    binaryPath: binary,
+    profileDir: profile,
+    spotifyFingerprint: fingerprint,
+  };
+  let current: typeof fingerprint | null = fingerprint;
+  let terminateTreeCalled = false;
+
+  await retireOrphanSpotifyOwner(owner, {
+    readFingerprint: () => current,
+    terminateTree: async (_pid, _exited, options) => {
+      terminateTreeCalled = true;
+      options.beforeSignal?.(8061, "SIGTERM");
+      current = null;
+      options.beforeSignal?.(8061, "SIGKILL");
+    },
+  });
+
+  expect(terminateTreeCalled).toBe(true);
+});
+
 test("orphan Spotify inspection preserves an unavailable process-table state", () => {
   const binary = "/Users/user/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify";
   const profile = "/Users/user/.soggfy/workspace/profiles/cli_instance";

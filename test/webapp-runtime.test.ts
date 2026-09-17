@@ -66,6 +66,18 @@ test("webapp capture coordinator records replay evidence and trusts byte progres
 });
 
 
+test("standalone web Spotify instances retire an orphaned daemon-owned Spotify before spawning", () => {
+  const daemonAttach = instanceSource.indexOf("if (USE_DAEMON_INSTANCE && this.id === 1)");
+  const daemonReturn = instanceSource.indexOf("return;", daemonAttach);
+  const inspect = instanceSource.indexOf("inspectOrphanSpotifyOwner", daemonReturn);
+  const retire = instanceSource.indexOf("retireOrphanSpotifyOwner", inspect);
+  const spawn = instanceSource.indexOf("this.process = spawn", daemonReturn);
+  expect(inspect).toBeGreaterThan(daemonReturn);
+  expect(retire).toBeGreaterThan(inspect);
+  expect(spawn).toBeGreaterThan(retire);
+});
+
+
 test("standalone web Spotify instances reset transient save state before cloning login state", () => {
   const daemonAttach = instanceSource.indexOf("if (USE_DAEMON_INSTANCE && this.id === 1)");
   const daemonReturn = instanceSource.indexOf("return;", daemonAttach);
