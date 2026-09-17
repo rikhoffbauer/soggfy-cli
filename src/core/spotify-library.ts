@@ -339,15 +339,20 @@ function normalizeRendererLibraryPayload(payload: SpotifyRendererLibraryPayload)
 export async function fetchSpotifyLibrarySnapshot(
   options: SpotifyLibraryOptions = {},
 ): Promise<SpotifyLibrarySnapshot> {
-  if (!options.tokenProvider) {
+  if (options.tokenProvider) return fetchSpotifyLibrarySnapshotFromWebAPI(options);
+
+  const rendererProvider = options.rendererProvider
+    ?? (() => fetchSpotifyRendererLibraryPayload({ fetchImpl: options.fetchImpl }));
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const rendererPayload = await (options.rendererProvider
-        ? options.rendererProvider()
-        : fetchSpotifyRendererLibraryPayload({ fetchImpl: options.fetchImpl }));
-      return normalizeRendererLibraryPayload(rendererPayload);
-    } catch (rendererError) {
-      if (options.rendererProvider) throw rendererError;
+      return normalizeRendererLibraryPayload(await rendererProvider());
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await Bun.sleep(250 * (2 ** attempt));
     }
   }
-  return fetchSpotifyLibrarySnapshotFromWebAPI(options);
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Spotify renderer library request failed");
 }

@@ -19,7 +19,10 @@ import {
   findOutputForTrack, jobs, pool, resolveSpotifyUrl,
 } from "./runtime";
 
-export function createApiRoutes() {
+export function createApiRoutes(options: {
+  libraryProvider?: typeof fetchSpotifyLibrarySnapshot;
+} = {}) {
+  const libraryProvider = options.libraryProvider ?? fetchSpotifyLibrarySnapshot;
   return {
     "/api/health": {
       GET: () => jsonResponse({
@@ -39,7 +42,7 @@ export function createApiRoutes() {
     "/api/library": {
       GET: async () => {
         try {
-          return jsonResponse(await fetchSpotifyLibrarySnapshot());
+          return jsonResponse(await libraryProvider());
         } catch (err: any) {
           const message = err instanceof Error ? err.message : "Spotify library request failed";
           const status = /authenticated Spotify session/i.test(message)

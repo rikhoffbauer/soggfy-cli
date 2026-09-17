@@ -140,6 +140,30 @@ test("renderer local files are preserved as unavailable library issues", async (
   expect(snapshot.likedSongs.totalCount).toBe(1);
 });
 
+test("fetchSpotifyLibrarySnapshot retries a transient renderer failure without falling back to Web API", async () => {
+  let rendererAttempts = 0;
+  let webCalls = 0;
+  const snapshot = await fetchSpotifyLibrarySnapshot({
+    rendererProvider: async () => {
+      rendererAttempts += 1;
+      if (rendererAttempts === 1) throw new Error("renderer temporarily unavailable");
+      return {
+        account: { id: "desktop-user", displayName: "Desktop User" },
+        likedSongs: { items: [], totalCount: 0 },
+        playlists: [],
+      };
+    },
+    fetchImpl: (async () => {
+      webCalls += 1;
+      return new Response("unexpected web fallback", { status: 500 });
+    }) as typeof fetch,
+  });
+
+  expect(rendererAttempts).toBe(2);
+  expect(webCalls).toBe(0);
+  expect(snapshot.account.id).toBe("desktop-user");
+});
+
 test("fetchSpotifyLibrarySnapshot prefers the authenticated desktop renderer library", async () => {
   const rendererTrack = (id: string, name: string) => ({
     type: "track",
