@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { collectRendererLikedSongs, collectRendererPages } from "../src/core/spotify-renderer-library";
+import { collectRendererLikedSongs, collectRendererPages, waitForRendererLibraryReady } from "../src/core/spotify-renderer-library";
 
 test("renderer pagination continues after a short page when no total is advertised", async () => {
   const requests: number[] = [];
@@ -95,4 +95,30 @@ test("renderer liked songs fall back to LibraryAPI.getTracks when pseudo-playlis
   expect(playlistCalls).toBe(1);
   expect(result.items).toHaveLength(1);
   expect(result.totalCount).toBe(1);
+});
+
+
+test("renderer library readiness waits for the React service registry instead of failing cold startup", async () => {
+  let attempts = 0;
+  const waits: number[] = [];
+  const value = await waitForRendererLibraryReady(async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("Spotify renderer root is unavailable");
+    if (attempts === 2) throw new Error("Spotify renderer React tree is unavailable");
+    if (attempts === 3) throw new Error("Spotify renderer service registry is unavailable");
+    return { id: "account", likedSongsUri: "spotify:playlist:liked" };
+  }, 5, 25, async (ms) => { waits.push(ms); });
+
+  expect(value).toEqual({ id: "account", likedSongsUri: "spotify:playlist:liked" });
+  expect(attempts).toBe(4);
+  expect(waits).toEqual([25, 25, 25]);
+});
+
+test("renderer library readiness does not retry unrelated evaluation failures", async () => {
+  let attempts = 0;
+  await expect(waitForRendererLibraryReady(async () => {
+    attempts += 1;
+    throw new Error("Playlist permission denied");
+  }, 5, 0, async () => {})).rejects.toThrow("Playlist permission denied");
+  expect(attempts).toBe(1);
 });

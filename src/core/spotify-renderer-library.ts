@@ -200,6 +200,28 @@ export async function waitForRendererLikedSongsReady(
   return latest;
 }
 
+export async function waitForRendererLibraryReady<T>(
+  readReadyValue: () => Promise<T>,
+  attempts = 60,
+  pollMs = 250,
+  sleepImpl: (ms: number) => Promise<unknown> = Bun.sleep,
+): Promise<T> {
+  const maxAttempts = Math.max(1, attempts);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await readReadyValue();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      const notReady = /Spotify renderer (?:root|React tree|service registry|service) is unavailable/i.test(message);
+      if (!notReady || attempt === maxAttempts - 1) throw error;
+      await sleepImpl(Math.max(0, pollMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Spotify renderer library is unavailable");
+}
+
 export async function collectRendererLikedSongs(
   fetchTrackPage: (offset: number, limit: number) => Promise<RendererPage>,
   fetchPlaylistPage: (uri: string, offset: number, limit: number) => Promise<RendererPage>,
@@ -259,15 +281,17 @@ export async function fetchSpotifyRendererLibraryPayload(
       return await library.getTracks({ offset: ${offset}, limit: ${limit} });
     `));
 
-    const identity = await session.evaluate<{ id: string; likedSongsUri?: string }>(expression(`
-      const library = service('LibraryAPI');
-      return {
-        id: typeof library._currentUsername === 'string' && library._currentUsername
-          ? library._currentUsername : 'spotify',
-        likedSongsUri: typeof library._likedSongsUri === 'string' && library._likedSongsUri
-          ? library._likedSongsUri : undefined,
-      };
-    `));
+    const identity = await waitForRendererLibraryReady(() =>
+      session.evaluate<{ id: string; likedSongsUri?: string }>(expression(`
+        const library = service('LibraryAPI');
+        return {
+          id: typeof library._currentUsername === 'string' && library._currentUsername
+            ? library._currentUsername : 'spotify',
+          likedSongsUri: typeof library._likedSongsUri === 'string' && library._likedSongsUri
+            ? library._likedSongsUri : undefined,
+        };
+      `)),
+    );
 
     const contents = await collectRendererPages(libraryPage, 100);
     const likedSongs = await collectRendererLikedSongs(
