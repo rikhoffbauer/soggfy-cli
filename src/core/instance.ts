@@ -1,5 +1,5 @@
 import { spawn, type Subprocess } from "bun";
-import { existsSync, unlinkSync, mkdirSync } from "fs";
+import { existsSync, unlinkSync, mkdirSync, readdirSync } from "fs";
 import { join } from "path";
 import { sendIPC, ping } from "./ipc";
 import { log } from "./log";
@@ -26,6 +26,17 @@ export interface SpotifyInstanceOptions {
   enforceSupportedVersion?: boolean;
   debugPort?: number;
   compatibilityHookTargets?: SpotifyCompatibilityHookTargetOptions;
+}
+
+export function managedStandaloneProfileDirs(profilesDir = PROFILES_DIR): string[] {
+  try {
+    return readdirSync(profilesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^instance_\d+$/.test(entry.name))
+      .map((entry) => join(profilesDir, entry.name))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  } catch {
+    return [];
+  }
 }
 
 export function spotifyInstanceCompatibilityEnvironment(
@@ -76,22 +87,14 @@ export class SpotifyInstance {
     }
     if (this.enforceSupportedVersion) assertSupportedSpotifyBundle(this.appPath);
 
-    const orphanInspection = inspectOrphanSpotifyOwner(binaryPath, this.profileDir);
-    if (orphanInspection.kind === "unavailable") {
-      throw new Error(
-        "Soggfy cannot inspect running Spotify processes; refusing to launch a replacement that could share the same profile.",
-      );
-    }
-    if (orphanInspection.kind === "verified") {
-      const orphan = orphanInspection.owner;
-      log.warn(`Retiring orphaned Soggfy Spotify process ${orphan.spotifyPid} before replacement launch.`);
-      await retireOrphanSpotifyOwner(orphan);
-    } else if (orphanInspection.kind === "unverifiable") {
-      throw new Error(
-        `Spotify process ${orphanInspection.spotifyPid} already uses Soggfy profile ${this.profileDir}, `
-        + "but Soggfy cannot verify or terminate it safely. If it was started with sudo/root, "
-        + `stop it with 'sudo kill ${orphanInspection.spotifyPid}' and retry.`,
-      );
+    await this.retireOrphanedProfile(binaryPath, this.profileDir, "Soggfy profile");
+
+    const daemonProfileDir = join(PROFILES_DIR, "cli_instance");
+    if (this.profileDir === daemonProfileDir) {
+      for (const standaloneProfileDir of managedStandaloneProfileDirs()) {
+        if (standaloneProfileDir === this.profileDir) continue;
+        await this.retireOrphanedProfile(binaryPath, standaloneProfileDir, "standalone web runtime profile");
+      }
     }
 
     // Prepare directories
@@ -173,6 +176,28 @@ export class SpotifyInstance {
 
     this.isReady = true;
     log.ok("Spotify instance ready.");
+  }
+
+  private async retireOrphanedProfile(binaryPath: string, profileDir: string, label: string): Promise<void> {
+    const orphanInspection = inspectOrphanSpotifyOwner(binaryPath, profileDir);
+    if (orphanInspection.kind === "unavailable") {
+      throw new Error(
+        `Soggfy cannot inspect running Spotify processes; refusing to launch while checking ${label} ${profileDir}.`,
+      );
+    }
+    if (orphanInspection.kind === "verified") {
+      const orphan = orphanInspection.owner;
+      log.warn(`Retiring orphaned ${label} Spotify process ${orphan.spotifyPid} before replacement launch.`);
+      await retireOrphanSpotifyOwner(orphan);
+      return;
+    }
+    if (orphanInspection.kind === "unverifiable") {
+      throw new Error(
+        `Spotify process ${orphanInspection.spotifyPid} already uses ${label} ${profileDir}, `
+        + "but Soggfy cannot verify or terminate it safely. If it was started with sudo/root, "
+        + `stop it with 'sudo kill ${orphanInspection.spotifyPid}' and retry.`,
+      );
+    }
   }
 
   private pipeProcessLogs(): void {

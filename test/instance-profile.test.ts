@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { PATCHED_APP } from "../src/core/paths";
-import { SpotifyInstance, spotifyInstanceCompatibilityEnvironment } from "../src/core/instance";
+import { managedStandaloneProfileDirs, SpotifyInstance, spotifyInstanceCompatibilityEnvironment } from "../src/core/instance";
 
 const source = readFileSync(join(import.meta.dir, "../src/core/instance.ts"), "utf8");
 
@@ -62,10 +63,12 @@ test("SpotifyInstance retires an exact orphaned runtime before spawning a replac
 
 
 test("SpotifyInstance refuses an exact-profile Spotify process whose identity is unverifiable", () => {
-  const guard = source.indexOf("cannot verify or terminate it safely");
+  const orphanCheck = source.indexOf("await this.retireOrphanedProfile(binaryPath, this.profileDir");
   const spawn = source.indexOf("this.process = spawn");
-  expect(guard).toBeGreaterThan(-1);
-  expect(spawn).toBeGreaterThan(guard);
+  expect(source).toContain('orphanInspection.kind === "unverifiable"');
+  expect(source).toContain("cannot verify or terminate it safely");
+  expect(orphanCheck).toBeGreaterThan(-1);
+  expect(spawn).toBeGreaterThan(orphanCheck);
 });
 
 
@@ -80,10 +83,11 @@ test("SpotifyInstance resets transient save state before cloning login state", (
 
 
 test("SpotifyInstance aborts startup when orphan process inspection is unavailable", () => {
-  const unavailable = source.indexOf('orphanInspection.kind === "unavailable"');
+  const orphanCheck = source.indexOf("await this.retireOrphanedProfile(binaryPath, this.profileDir");
   const spawn = source.indexOf("this.process = spawn");
-  expect(unavailable).toBeGreaterThan(-1);
-  expect(spawn).toBeGreaterThan(unavailable);
+  expect(source).toContain('orphanInspection.kind === "unavailable"');
+  expect(orphanCheck).toBeGreaterThan(-1);
+  expect(spawn).toBeGreaterThan(orphanCheck);
 });
 
 test("SpotifyInstance can expose a dedicated loopback renderer debug port for authenticated library access", () => {
@@ -92,4 +96,28 @@ test("SpotifyInstance can expose a dedicated loopback renderer debug port for au
   });
   expect(instance.debugPort).toBe(19224);
   expect(source).toContain('`--remote-debugging-port=${this.debugPort}`');
+});
+
+
+test("managedStandaloneProfileDirs returns only Soggfy standalone runtime profiles in numeric order", () => {
+  const root = mkdtempSync(join(tmpdir(), "soggfy-profiles-"));
+  try {
+    for (const name of ["instance_10", "cli_instance", "instance_2", "instance_bad", "instance_1"]) {
+      mkdirSync(join(root, name));
+    }
+    expect(managedStandaloneProfileDirs(root)).toEqual([
+      join(root, "instance_1"),
+      join(root, "instance_2"),
+      join(root, "instance_10"),
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("daemon-profile SpotifyInstance retires orphaned standalone runtimes before spawning", () => {
+  const standaloneScan = source.indexOf("managedStandaloneProfileDirs()");
+  const spawn = source.indexOf("this.process = spawn");
+  expect(standaloneScan).toBeGreaterThan(-1);
+  expect(spawn).toBeGreaterThan(standaloneScan);
 });
