@@ -1,4 +1,4 @@
-import { terminateProcessTree } from "./spotify-runtime";
+import { terminateProcessTree, type ProcessTreeTerminationOptions } from "./spotify-runtime";
 import { readKernelProcessBirthId } from "./process-birth";
 
 export interface ProcessFingerprint {
@@ -221,6 +221,11 @@ function assertOrphanSpotifyFingerprint(
 
 export interface OrphanSpotifyRetireDependencies {
   readFingerprint?: (pid: number) => ProcessFingerprint | null;
+  terminateTree?: (
+    rootPid: number,
+    rootExited?: Promise<number>,
+    options?: ProcessTreeTerminationOptions,
+  ) => Promise<void>;
   terminate?: (
     pid: number,
     expectedFingerprint: ProcessFingerprint,
@@ -231,9 +236,16 @@ export interface OrphanSpotifyRetireDependencies {
 async function terminateVerifiedOrphanSpotify(
   owner: OrphanSpotifyOwner,
   readFingerprint: (pid: number) => ProcessFingerprint | null,
+  terminateTree: typeof terminateProcessTree = terminateProcessTree,
 ): Promise<void> {
-  await terminateProcessTree(owner.spotifyPid, undefined, {
-    beforeSignal: () => assertOrphanSpotifyFingerprint(owner, readFingerprint),
+  let verifiedSignalAttempted = false;
+  await terminateTree(owner.spotifyPid, undefined, {
+    beforeSignal: () => {
+      const current = readFingerprint(owner.spotifyPid);
+      if (!current && verifiedSignalAttempted) return;
+      assertOrphanSpotifyFingerprint(owner, () => current);
+      verifiedSignalAttempted = true;
+    },
   });
 }
 
@@ -246,7 +258,7 @@ export async function retireOrphanSpotifyOwner(
   if (dependencies.terminate) {
     await dependencies.terminate(owner.spotifyPid, owner.spotifyFingerprint, readFingerprint);
   } else {
-    await terminateVerifiedOrphanSpotify(owner, readFingerprint);
+    await terminateVerifiedOrphanSpotify(owner, readFingerprint, dependencies.terminateTree);
   }
 }
 
