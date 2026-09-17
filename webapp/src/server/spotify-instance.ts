@@ -163,6 +163,25 @@ export class SpotifyInstance {
     }
   }
 
+  private async retireOrphanedProfile(binaryPath: string, profileDir: string, label: string) {
+    const orphanInspection = inspectOrphanSpotifyOwner(binaryPath, profileDir);
+    if (orphanInspection.kind === "unavailable") {
+      throw new Error(
+        `Soggfy cannot inspect running Spotify processes; refusing to launch while checking ${label}.`,
+      );
+    }
+    if (orphanInspection.kind === "verified") {
+      this.log(`Retiring orphaned ${label} Spotify process ${orphanInspection.owner.spotifyPid} before launch.`);
+      await retireOrphanSpotifyOwner(orphanInspection.owner);
+      return;
+    }
+    if (orphanInspection.kind === "unverifiable") {
+      throw new Error(
+        `Spotify process ${orphanInspection.spotifyPid} still uses ${label}, but its identity cannot be verified safely.`,
+      );
+    }
+  }
+
   async start() {
     this.statusText = "Starting";
     this.lastError = undefined;
@@ -221,21 +240,12 @@ export class SpotifyInstance {
     if (!existsSync(binaryPath)) throw new Error(`Patched Spotify binary missing: ${binaryPath}`);
     if (!existsSync(dylibPath)) throw new Error(`Payload dylib missing: ${dylibPath}`);
 
+    await this.retireOrphanedProfile(binaryPath, this.profileDir, `instance_${this.id} profile`);
+
     if (!USE_DAEMON_INSTANCE && this.id === 1) {
       const daemonProfileDir = join(PROFILES_DIR, "cli_instance");
-      const orphanInspection = inspectOrphanSpotifyOwner(binaryPath, daemonProfileDir);
-      if (orphanInspection.kind === "unavailable") {
-        throw new Error(
-          "Soggfy cannot inspect running Spotify processes; refusing to launch a standalone pool that could conflict with a stale daemon instance.",
-        );
-      }
-      if (orphanInspection.kind === "verified") {
-        this.log(`Retiring orphaned daemon-owned Soggfy Spotify process ${orphanInspection.owner.spotifyPid} before standalone launch.`);
-        await retireOrphanSpotifyOwner(orphanInspection.owner);
-      } else if (orphanInspection.kind === "unverifiable") {
-        throw new Error(
-          `Spotify process ${orphanInspection.spotifyPid} still uses the daemon Soggfy profile, but its identity cannot be verified safely.`,
-        );
+      if (daemonProfileDir !== this.profileDir) {
+        await this.retireOrphanedProfile(binaryPath, daemonProfileDir, "daemon Soggfy profile");
       }
     }
 

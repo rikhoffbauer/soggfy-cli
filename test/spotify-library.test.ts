@@ -118,3 +118,83 @@ test("fetchSpotifyLibrarySnapshot retries a transient 429 using Retry-After", as
   expect(meAttempts).toBe(2);
   expect(snapshot.account).toEqual({ id: "account", displayName: "Account" });
 });
+
+test("renderer local files are preserved as unavailable library issues", async () => {
+  const snapshot = await fetchSpotifyLibrarySnapshot({
+    rendererProvider: async () => ({
+      account: { id: "desktop-user", displayName: "Desktop User" },
+      likedSongs: {
+        items: [{
+          type: "track", uri: "spotify:local:::unavailable:123", name: "Unavailable local",
+          isLocal: true, isPlayable: false, duration: { milliseconds: 123000 },
+          artists: [], album: { name: "Local", images: [] },
+        }],
+        totalCount: 1,
+      },
+      playlists: [],
+    }),
+  });
+
+  expect(snapshot.likedSongs.tracks).toEqual([]);
+  expect(snapshot.likedSongs.issues).toEqual([{ index: 0, reason: "unavailable" }]);
+  expect(snapshot.likedSongs.totalCount).toBe(1);
+});
+
+test("fetchSpotifyLibrarySnapshot prefers the authenticated desktop renderer library", async () => {
+  const rendererTrack = (id: string, name: string) => ({
+    type: "track",
+    uri: `spotify:track:${id}`,
+    name,
+    artists: [{ name: "Renderer Artist" }],
+    album: {
+      name: "Renderer Album",
+      images: [{ url: `spotify:image:${"a".repeat(40)}` }],
+    },
+    duration: { milliseconds: 456000 },
+    isPlayable: true,
+  });
+  let webCalls = 0;
+  const snapshot = await fetchSpotifyLibrarySnapshot({
+    rendererProvider: async () => ({
+      account: { id: "desktop-user", displayName: "Desktop User" },
+      likedSongs: {
+        items: [rendererTrack(ids.likedA, "Renderer Liked")],
+        totalCount: 1,
+      },
+      playlists: [{
+        uri: `spotify:playlist:${ids.playlist}`,
+        name: "Renderer Playlist",
+        owner: "Desktop User",
+        images: [{ url: `spotify:mosaic:${"1".repeat(40)}:${"2".repeat(40)}` }],
+        contentsAvailable: true,
+        items: [rendererTrack(ids.playlistTrack, "Renderer Playlist Track")],
+        totalCount: 1,
+      }],
+    }),
+    fetchImpl: (async () => {
+      webCalls += 1;
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch,
+  });
+
+  expect(webCalls).toBe(0);
+  expect(snapshot.account).toEqual({ id: "desktop-user", displayName: "Desktop User" });
+  expect(snapshot.likedSongs.tracks[0]).toMatchObject({
+    id: ids.likedA,
+    title: "Renderer Liked",
+    durationMs: 456000,
+    playable: true,
+  });
+  expect(snapshot.likedSongs.tracks[0]?.imageUrl).toBe(`https://i.scdn.co/image/${"a".repeat(40)}`);
+  expect(snapshot.playlists[0]).toMatchObject({
+    id: ids.playlist,
+    name: "Renderer Playlist",
+    owner: "Desktop User",
+    contentsAvailable: true,
+    totalCount: 1,
+  });
+  expect(snapshot.playlists[0]?.tracks[0]?.title).toBe("Renderer Playlist Track");
+  expect(snapshot.playlists[0]?.imageUrl).toBe(
+    `https://mosaic.scdn.co/640/${"1".repeat(40)}${"2".repeat(40)}`,
+  );
+});

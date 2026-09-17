@@ -1,9 +1,16 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
   buildSpotifyCookieHeader,
   getAuthenticatedSpotifyWebToken,
   type CDPCookie,
 } from "../src/core/spotify-renderer-auth";
+
+const originalSpotifyCookie = process.env.SPOTIFY_COOKIE;
+beforeAll(() => { delete process.env.SPOTIFY_COOKIE; });
+afterAll(() => {
+  if (originalSpotifyCookie === undefined) delete process.env.SPOTIFY_COOKIE;
+  else process.env.SPOTIFY_COOKIE = originalSpotifyCookie;
+});
 
 const cookies: CDPCookie[] = [
   { name: "sp_dc", value: "secret-session", domain: ".spotify.com", path: "/" },
@@ -37,6 +44,42 @@ test("renderer auth exchanges the managed Spotify session for a web access token
   expect(requestCookie).toBe("sp_dc=secret-session; sp_key=key-value");
 });
 
+
+test("renderer auth can use the managed desktop renderer bearer token when no sp_dc cookie exists", async () => {
+  let tokenExchangeCalls = 0;
+  const result = await getAuthenticatedSpotifyWebToken({
+    cookieProvider: async () => [],
+    bearerTokenProvider: async () => "desktop-renderer-access",
+    fetchImpl: (async () => {
+      tokenExchangeCalls += 1;
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch,
+    rendererSessionAttempts: 1,
+    rendererSessionPollMs: 0,
+  });
+
+  expect(result.accessToken).toBe("desktop-renderer-access");
+  expect(result.expiresAt).toBeGreaterThan(Date.now());
+  expect(tokenExchangeCalls).toBe(0);
+});
+
+test("explicit Spotify cookie still takes precedence over renderer bearer fallback", async () => {
+  process.env.SPOTIFY_COOKIE = "sp_dc=explicit-session";
+  let bearerReads = 0;
+  try {
+    const result = await getAuthenticatedSpotifyWebToken({
+      bearerTokenProvider: async () => { bearerReads += 1; return "renderer-token"; },
+      fetchImpl: (async () => Response.json({
+        accessToken: "cookie-exchanged-access",
+        accessTokenExpirationTimestampMs: Date.now() + 60_000,
+      })) as typeof fetch,
+    });
+    expect(result.accessToken).toBe("cookie-exchanged-access");
+    expect(bearerReads).toBe(0);
+  } finally {
+    delete process.env.SPOTIFY_COOKIE;
+  }
+});
 
 test("renderer auth waits for the managed Spotify session during startup", async () => {
   let cookieReads = 0;

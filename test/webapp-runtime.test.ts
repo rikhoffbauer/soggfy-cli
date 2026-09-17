@@ -66,14 +66,21 @@ test("webapp capture coordinator records replay evidence and trusts byte progres
 });
 
 
+test("standalone web Spotify instances retire an orphan using their own profile before spawning", () => {
+  const ownProfileRetire = instanceSource.indexOf("await this.retireOrphanedProfile(binaryPath, this.profileDir");
+  const spawn = instanceSource.indexOf("this.process = spawn");
+  expect(ownProfileRetire).toBeGreaterThan(-1);
+  expect(spawn).toBeGreaterThan(ownProfileRetire);
+});
+
 test("standalone web Spotify instances retire an orphaned daemon-owned Spotify before spawning", () => {
   const daemonAttach = instanceSource.indexOf("if (USE_DAEMON_INSTANCE && this.id === 1)");
   const daemonReturn = instanceSource.indexOf("return;", daemonAttach);
-  const inspect = instanceSource.indexOf("inspectOrphanSpotifyOwner", daemonReturn);
-  const retire = instanceSource.indexOf("retireOrphanSpotifyOwner", inspect);
+  const daemonProfile = instanceSource.indexOf('const daemonProfileDir = join(PROFILES_DIR, "cli_instance")', daemonReturn);
+  const retire = instanceSource.indexOf("await this.retireOrphanedProfile(binaryPath, daemonProfileDir", daemonProfile);
   const spawn = instanceSource.indexOf("this.process = spawn", daemonReturn);
-  expect(inspect).toBeGreaterThan(daemonReturn);
-  expect(retire).toBeGreaterThan(inspect);
+  expect(daemonProfile).toBeGreaterThan(daemonReturn);
+  expect(retire).toBeGreaterThan(daemonProfile);
   expect(spawn).toBeGreaterThan(retire);
 });
 
