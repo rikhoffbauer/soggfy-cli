@@ -53,6 +53,29 @@ export function generateSpotifyWebTOTP(nowMs = Date.now()): string {
 export function invalidateSpotifyWebTokens(): void {
   cachedTokens = null;
 }
+
+const AUTH_FETCH_ATTEMPTS = 5;
+
+async function fetchSpotifyAuth(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  fetchImpl: typeof fetch,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < AUTH_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetchImpl(input, init);
+      if (response.status < 500 || attempt + 1 >= AUTH_FETCH_ATTEMPTS) return response;
+      try { await response.body?.cancel(); } catch {}
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= AUTH_FETCH_ATTEMPTS) throw error;
+    }
+    await Bun.sleep(Math.min(2_000, 250 * (2 ** attempt)));
+  }
+  throw lastError instanceof Error ? lastError : new Error("Spotify authentication request failed");
+}
+
 async function acquireSpotifyWebTokens(fetchImpl: typeof fetch): Promise<SpotifyWebTokens> {
   const directAccess = process.env.SPOTIFY_ACCESS_TOKEN;
   const directClient = process.env.SPOTIFY_CLIENT_TOKEN;
@@ -76,14 +99,14 @@ async function acquireSpotifyWebTokens(fetchImpl: typeof fetch): Promise<Spotify
     "User-Agent": SPOTIFY_WEB_USER_AGENT,
   };
   if (cookie) tokenHeaders.Cookie = cookie;
-  const tokenRes = await fetchImpl(tokenURL, { headers: tokenHeaders });
+  const tokenRes = await fetchSpotifyAuth(tokenURL, { headers: tokenHeaders }, fetchImpl);
   if (!tokenRes.ok) throw new Error(`Spotify web token request failed with HTTP ${tokenRes.status}`);
   const tokenData: any = await tokenRes.json();
   if (!tokenData.accessToken || !tokenData.clientId) {
     throw new Error("Spotify web token response did not contain an access token and client id");
   }
 
-  const clientTokenRes = await fetchImpl("https://clienttoken.spotify.com/v1/clienttoken", {
+  const clientTokenRes = await fetchSpotifyAuth("https://clienttoken.spotify.com/v1/clienttoken", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({
@@ -100,7 +123,7 @@ async function acquireSpotifyWebTokens(fetchImpl: typeof fetch): Promise<Spotify
         },
       },
     }),
-  });
+  }, fetchImpl);
   if (!clientTokenRes.ok) {
     throw new Error(`Spotify client-token request failed with HTTP ${clientTokenRes.status}`);
   }

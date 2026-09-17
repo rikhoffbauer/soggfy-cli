@@ -205,6 +205,46 @@ test("searchSpotify forwards an explicit result offset to Pathfinder", async () 
   }
 });
 
+test("anonymous search retries a transient web token network failure", async () => {
+  const saved = {
+    access: process.env.SPOTIFY_ACCESS_TOKEN,
+    client: process.env.SPOTIFY_CLIENT_TOKEN,
+    cookie: process.env.SPOTIFY_COOKIE,
+  };
+  delete process.env.SPOTIFY_ACCESS_TOKEN;
+  delete process.env.SPOTIFY_CLIENT_TOKEN;
+  delete process.env.SPOTIFY_COOKIE;
+  invalidateSpotifySearchTokens();
+  let tokenAttempts = 0;
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/api/token") {
+      tokenAttempts += 1;
+      if (tokenAttempts === 1) throw new TypeError("socket connection closed");
+      return Response.json({
+        accessToken: "anonymous-access", clientId: "web-client", isAnonymous: true,
+        accessTokenExpirationTimestampMs: Date.now() + 3_600_000,
+      });
+    }
+    if (url.hostname === "clienttoken.spotify.com") {
+      return Response.json({ granted_token: { token: "client-token" } });
+    }
+    return Response.json(response);
+  }) as typeof fetch;
+  try {
+    const results = await searchSpotify("one", { types: ["track"], limit: 5, fetchImpl });
+    expect(results).toHaveLength(1);
+    expect(tokenAttempts).toBe(2);
+  } finally {
+    invalidateSpotifySearchTokens();
+    const restore = (key: string, value: string | undefined) => value === undefined
+      ? delete process.env[key] : void (process.env[key] = value);
+    restore("SPOTIFY_ACCESS_TOKEN", saved.access);
+    restore("SPOTIFY_CLIENT_TOKEN", saved.client);
+    restore("SPOTIFY_COOKIE", saved.cookie);
+  }
+});
+
 test("anonymous search acquires web and client tokens without a Spotify cookie", async () => {
   const saved = {
     access: process.env.SPOTIFY_ACCESS_TOKEN,
