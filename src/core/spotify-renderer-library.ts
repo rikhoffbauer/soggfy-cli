@@ -200,6 +200,45 @@ export async function waitForRendererLikedSongsReady(
   return latest;
 }
 
+export async function collectRendererLikedSongs(
+  fetchTrackPage: (offset: number, limit: number) => Promise<RendererPage>,
+  fetchPlaylistPage: (uri: string, offset: number, limit: number) => Promise<RendererPage>,
+  likedSongsUri?: string,
+  options: {
+    readinessAttempts?: number;
+    readinessPollMs?: number;
+    sleepImpl?: (ms: number) => Promise<unknown>;
+  } = {},
+): Promise<{ items: unknown[]; totalCount: number }> {
+  if (likedSongsUri) {
+    try {
+      return await collectRendererPages(
+        (offset, limit) => fetchPlaylistPage(likedSongsUri, offset, limit),
+        100,
+      );
+    } catch {
+      // Older Spotify builds may expose _likedSongsUri without allowing the
+      // pseudo-playlist through PlaylistAPI. Fall back to LibraryAPI.getTracks.
+    }
+  }
+
+  const readyFirstPage = await waitForRendererLikedSongsReady(
+    fetchTrackPage,
+    options.readinessAttempts ?? 8,
+    options.readinessPollMs ?? 250,
+    options.sleepImpl ?? Bun.sleep,
+  );
+  let firstPage: RendererPage | undefined = readyFirstPage;
+  return collectRendererPages(async (offset, limit) => {
+    if (offset === 0 && firstPage) {
+      const page = firstPage;
+      firstPage = undefined;
+      return page;
+    }
+    return fetchTrackPage(offset, limit);
+  }, 100);
+}
+
 export async function fetchSpotifyRendererLibraryPayload(
   options: SpotifyRendererLibraryOptions = {},
 ): Promise<SpotifyRendererLibraryPayload> {
@@ -220,17 +259,25 @@ export async function fetchSpotifyRendererLibraryPayload(
       return await library.getTracks({ offset: ${offset}, limit: ${limit} });
     `));
 
+    const identity = await session.evaluate<{ id: string; likedSongsUri?: string }>(expression(`
+      const library = service('LibraryAPI');
+      return {
+        id: typeof library._currentUsername === 'string' && library._currentUsername
+          ? library._currentUsername : 'spotify',
+        likedSongsUri: typeof library._likedSongsUri === 'string' && library._likedSongsUri
+          ? library._likedSongsUri : undefined,
+      };
+    `));
+
     const contents = await collectRendererPages(libraryPage, 100);
-    const readyLikedPage = await waitForRendererLikedSongsReady(likedPage);
-    let firstLikedPage: RendererPage | undefined = readyLikedPage;
-    const likedSongs = await collectRendererPages(async (offset, limit) => {
-      if (offset === 0 && firstLikedPage) {
-        const page = firstLikedPage;
-        firstLikedPage = undefined;
-        return page;
-      }
-      return likedPage(offset, limit);
-    }, 100);
+    const likedSongs = await collectRendererLikedSongs(
+      likedPage,
+      (uri, offset, limit) => session.evaluate<RendererPage>(expression(`
+        const playlists = service('PlaylistAPI');
+        return await playlists.getContents(${JSON.stringify(uri)}, { offset: ${offset}, limit: ${limit} });
+      `)),
+      identity.likedSongsUri,
+    );
     const playlistEntries = contents.items.filter((item: any) => item?.type === "playlist" && item?.uri);
     const playlists: SpotifyRendererLibraryPayload["playlists"] = [];
 
@@ -263,17 +310,12 @@ export async function fetchSpotifyRendererLibraryPayload(
       });
     }
 
-    const account = await session.evaluate<{ id: string }>(expression(`
-      const library = service('LibraryAPI');
-      return { id: typeof library._currentUsername === 'string' && library._currentUsername
-        ? library._currentUsername : 'spotify' };
-    `));
     const owned = playlistEntries.find((entry: any) => entry?.isOwnedBySelf && entry?.owner?.name) as any;
     return {
       account: {
-        id: account?.id || "spotify",
+        id: identity?.id || "spotify",
         displayName: typeof owned?.owner?.name === "string" && owned.owner.name
-          ? owned.owner.name : account?.id || "spotify",
+          ? owned.owner.name : identity?.id || "spotify",
       },
       likedSongs,
       playlists,

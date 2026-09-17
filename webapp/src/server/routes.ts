@@ -19,6 +19,13 @@ import {
   findOutputForTrack, jobs, pool, resolveSpotifyUrl,
 } from "./runtime";
 
+
+export function shouldServeExistingOutputForStream(
+  requestedJob: { state: string } | undefined,
+): boolean {
+  return !requestedJob || requestedJob.state === "completed";
+}
+
 export function createApiRoutes(options: {
   libraryProvider?: typeof fetchSpotifyLibrarySnapshot;
 } = {}) {
@@ -324,7 +331,9 @@ export function createApiRoutes(options: {
         }
 
         const output = findOutputForTrack(trackId);
-        if (output) return serveFileWithRange(req, output.path);
+        if (output && shouldServeExistingOutputForStream(requestedJob)) {
+          return serveFileWithRange(req, output.path);
+        }
 
         const existing = requestedJob ?? jobs.findReusable(trackId);
         if (!existing) {

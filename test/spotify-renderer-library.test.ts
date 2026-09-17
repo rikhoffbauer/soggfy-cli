@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { collectRendererPages } from "../src/core/spotify-renderer-library";
+import { collectRendererLikedSongs, collectRendererPages } from "../src/core/spotify-renderer-library";
 
 test("renderer pagination continues after a short page when no total is advertised", async () => {
   const requests: number[] = [];
@@ -52,4 +52,47 @@ test("renderer library eventually accepts a genuinely local-only account", async
     return { items: [{ uri: "spotify:local:::only:1", isLocal: true }], totalLength: 0 };
   }, 3, 0, async () => {});
   expect(calls).toBe(3);
+});
+
+
+test("renderer liked songs prefer the canonical liked-songs pseudo-playlist", async () => {
+  let trackCalls = 0;
+  const playlistOffsets: number[] = [];
+  const result = await collectRendererLikedSongs(
+    async () => {
+      trackCalls += 1;
+      return { items: [{ uri: "spotify:local:::stale:1", isLocal: true }], totalLength: 0 };
+    },
+    async (_uri, offset) => {
+      playlistOffsets.push(offset);
+      return offset === 0
+        ? { items: [{ uri: "spotify:track:1111111111111111111111" }], totalLength: 2 }
+        : { items: [{ uri: "spotify:local:::canonical:1", isLocal: true }], totalLength: 2 };
+    },
+    "spotify:playlist:37i9dQZF1F5likedSongs",
+  );
+
+  expect(trackCalls).toBe(0);
+  expect(playlistOffsets).toEqual([0, 1]);
+  expect(result.totalCount).toBe(2);
+  expect(result.items).toHaveLength(2);
+});
+
+test("renderer liked songs fall back to LibraryAPI.getTracks when pseudo-playlist is unavailable", async () => {
+  let playlistCalls = 0;
+  const result = await collectRendererLikedSongs(
+    async (offset) => offset === 0
+      ? { items: [{ uri: "spotify:track:2222222222222222222222" }], totalLength: 1 }
+      : { items: [], totalLength: 1 },
+    async () => {
+      playlistCalls += 1;
+      throw new Error("playlist API unavailable");
+    },
+    "spotify:playlist:37i9dQZF1F5likedSongs",
+    { readinessAttempts: 1, readinessPollMs: 0, sleepImpl: async () => {} },
+  );
+
+  expect(playlistCalls).toBe(1);
+  expect(result.items).toHaveLength(1);
+  expect(result.totalCount).toBe(1);
 });

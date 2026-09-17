@@ -3,6 +3,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { streamGrowingFile } from "../growing-file";
+import { shouldServeExistingOutputForStream } from "../routes";
 
 const dirs: string[] = [];
 function tempPath() {
@@ -91,4 +92,12 @@ test("stream route attaches to an existing exact job and never creates one", asy
   expect(source).toContain("streamGrowingFile");
   expect(source).toContain('url.searchParams.get("job")');
   expect(source).not.toContain("stream-triggered job failed");
+});
+
+
+test("an exact active stream job takes precedence over an older completed output", () => {
+  expect(shouldServeExistingOutputForStream({ state: "capturing" })).toBe(false);
+  expect(shouldServeExistingOutputForStream({ state: "starting" })).toBe(false);
+  expect(shouldServeExistingOutputForStream({ state: "completed" })).toBe(true);
+  expect(shouldServeExistingOutputForStream(undefined)).toBe(true);
 });
