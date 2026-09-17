@@ -102,9 +102,10 @@ function normalizeTrack(value: unknown): SpotifyLibraryTrack | null {
   if (!item) return null;
   if (item.type && item.type !== "track") return null;
   const uri = typeof item.uri === "string" ? item.uri : "";
+  const local = item.isLocal === true || item.is_local === true || uri.startsWith("spotify:local:");
   const id = typeof item.id === "string" && SPOTIFY_ID.test(item.id)
     ? item.id
-    : spotifyIDFromURI(uri, "track");
+    : local && uri ? uri : spotifyIDFromURI(uri, "track");
   const title = typeof item.name === "string" ? item.name : "";
   if (!id || !title) return null;
   const artists = Array.isArray(item.artists)
@@ -121,7 +122,7 @@ function normalizeTrack(value: unknown): SpotifyLibraryTrack | null {
     album: typeof album?.name === "string" ? album.name : "Spotify",
     imageUrl: firstImage(album?.images),
     durationMs: Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined,
-    playable: item.is_playable !== false && item.isPlayable !== false,
+    playable: !local && item.is_playable !== false && item.isPlayable !== false,
   };
 }
 const MAX_RATE_LIMIT_RETRIES = 2;
@@ -202,10 +203,6 @@ function classifyWrappedTrack(
   const rawObject = object(raw);
   if (rawObject?.type && rawObject.type !== "track") {
     return { issue: { index, reason: "non-track" } };
-  }
-  if (rawObject?.isLocal === true ||
-      (typeof rawObject?.uri === "string" && rawObject.uri.startsWith("spotify:local:"))) {
-    return { issue: { index, reason: "unavailable" } };
   }
   const track = normalizeTrack(raw);
   return track ? { track } : { issue: { index, reason: "malformed" } };

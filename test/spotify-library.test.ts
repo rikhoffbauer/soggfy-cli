@@ -119,15 +119,16 @@ test("fetchSpotifyLibrarySnapshot retries a transient 429 using Retry-After", as
   expect(snapshot.account).toEqual({ id: "account", displayName: "Account" });
 });
 
-test("renderer local files are preserved as unavailable library issues", async () => {
+test("renderer local files remain visible as non-playable liked songs", async () => {
+  const localUri = "spotify:local:Artist:Local:Unavailable%20local:123";
   const snapshot = await fetchSpotifyLibrarySnapshot({
     rendererProvider: async () => ({
       account: { id: "desktop-user", displayName: "Desktop User" },
       likedSongs: {
         items: [{
-          type: "track", uri: "spotify:local:::unavailable:123", name: "Unavailable local",
+          type: "track", uri: localUri, name: "Unavailable local",
           isLocal: true, isPlayable: false, duration: { milliseconds: 123000 },
-          artists: [], album: { name: "Local", images: [] },
+          artists: [{ name: "Local Artist" }], album: { name: "Local", images: [] },
         }],
         totalCount: 1,
       },
@@ -135,8 +136,16 @@ test("renderer local files are preserved as unavailable library issues", async (
     }),
   });
 
-  expect(snapshot.likedSongs.tracks).toEqual([]);
-  expect(snapshot.likedSongs.issues).toEqual([{ index: 0, reason: "unavailable" }]);
+  expect(snapshot.likedSongs.tracks).toEqual([{
+    id: localUri,
+    uri: localUri,
+    title: "Unavailable local",
+    artists: ["Local Artist"],
+    album: "Local",
+    durationMs: 123000,
+    playable: false,
+  }]);
+  expect(snapshot.likedSongs.issues).toEqual([]);
   expect(snapshot.likedSongs.totalCount).toBe(1);
 });
 

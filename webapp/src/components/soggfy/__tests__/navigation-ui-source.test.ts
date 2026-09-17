@@ -10,7 +10,7 @@ const diagnostics = readFileSync(join(dir, "DiagnosticsPanel.tsx"), "utf8");
 const logs = readFileSync(join(dir, "LogViewer.tsx"), "utf8");
 const mobile = readFileSync(join(dir, "MobileNavigation.tsx"), "utf8");
 
-test("workspace has four real pages with active navigation instead of anchor scrolling", () => {
+test("workspace has five real pages with active navigation instead of anchor scrolling", () => {
   expect(app).toContain("WorkspacePage");
   expect(app).toContain("workspaceLocationFromHash");
   expect(app).toContain("activePage");
@@ -35,9 +35,9 @@ test("diagnostics and logs can consume the remaining page height", () => {
   expect(logs).toContain("flex min-h-0 flex-1 flex-col");
 });
 
-test("mobile navigation exposes the same four destinations", () => {
+test("mobile navigation exposes the same five destinations", () => {
   expect(app).toContain("MobileNavigation");
-  for (const page of ["Search", "Queue", "Downloads", "Diagnostics"]) expect(mobile).toContain(page);
+  for (const page of ["Search", "Spotify", "Queue", "Downloads", "Diagnostics"]) expect(mobile).toContain(page);
 });
 
 

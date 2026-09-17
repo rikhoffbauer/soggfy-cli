@@ -208,4 +208,12 @@ test("workspace hashes round-trip search tabs and details", async () => {
   expect(workspaceLocationFromHash(`#search?tab=artist&playlist=${playlist}`)).toEqual({ page: "search", searchTab: "playlist", detail: { type: "playlist", id: playlist } });
   expect(hashForWorkspaceLocation({ page: "search", searchTab: "album", detail: { type: "album", id: album } })).toBe(`#search?tab=album&album=${album}`);
   expect(hashForWorkspaceLocation({ page: "downloads" })).toBe("#downloads");
+  expect(workspaceLocationFromHash("#spotify?collection=liked")).toEqual({
+    page: "spotify", spotifyCollection: { type: "liked" },
+  });
+  expect(workspaceLocationFromHash(`#spotify?playlist=${playlist}`)).toEqual({
+    page: "spotify", spotifyCollection: { type: "playlist", id: playlist },
+  });
+  expect(hashForWorkspaceLocation({ page: "spotify", spotifyCollection: { type: "liked" } })).toBe("#spotify?collection=liked");
+  expect(hashForWorkspaceLocation({ page: "spotify", spotifyCollection: { type: "playlist", id: playlist } })).toBe(`#spotify?playlist=${playlist}`);
 });

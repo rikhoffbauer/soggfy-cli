@@ -2,13 +2,15 @@ import type { AlbumPage, DownloadJob, DownloadState, PlaylistPage, SearchResult 
 
 export type SearchFilter = "all" | "track" | "artist" | "playlist";
 
-export type WorkspacePage = "search" | "queue" | "downloads" | "diagnostics";
+export type WorkspacePage = "search" | "spotify" | "queue" | "downloads" | "diagnostics";
+export type SpotifyCollectionSelection = { type: "liked" } | { type: "playlist"; id: string };
 export type SearchTab = "track" | "album" | "playlist" | "artist";
 export type SearchDetail = { type: "album" | "playlist"; id: string };
 export interface WorkspaceLocation {
   page: WorkspacePage;
   searchTab?: SearchTab;
   detail?: SearchDetail;
+  spotifyCollection?: SpotifyCollectionSelection;
 }
 
 export interface SearchTabState {
@@ -25,7 +27,7 @@ export interface SearchSession {
 }
 
 const SEARCH_TABS: readonly SearchTab[] = ["track", "album", "playlist", "artist"];
-const WORKSPACE_PAGES: readonly WorkspacePage[] = ["search", "queue", "downloads", "diagnostics"];
+const WORKSPACE_PAGES: readonly WorkspacePage[] = ["search", "spotify", "queue", "downloads", "diagnostics"];
 
 function emptySearchTabState(): SearchTabState {
   return { items: [], loaded: false, loading: false, nextOffset: 0 };
@@ -37,9 +39,15 @@ export function workspaceLocationFromHash(hash: string): WorkspaceLocation {
   const page = WORKSPACE_PAGES.includes(pageValue as WorkspacePage)
     ? pageValue as WorkspacePage
     : "search";
+  const params = new URLSearchParams(query);
+  if (page === "spotify") {
+    const playlistId = params.get("playlist");
+    if (playlistId) return { page, spotifyCollection: { type: "playlist", id: playlistId } };
+    if (params.get("collection") === "liked") return { page, spotifyCollection: { type: "liked" } };
+    return { page };
+  }
   if (page !== "search") return { page };
 
-  const params = new URLSearchParams(query);
   const requestedTab = params.get("tab") as SearchTab | null;
   const searchTab = requestedTab && SEARCH_TABS.includes(requestedTab) ? requestedTab : "track";
   const albumId = params.get("album");
@@ -53,6 +61,13 @@ export function workspaceLocationFromHash(hash: string): WorkspaceLocation {
 }
 
 export function hashForWorkspaceLocation(location: WorkspaceLocation): string {
+  if (location.page === "spotify") {
+    const params = new URLSearchParams();
+    if (location.spotifyCollection?.type === "liked") params.set("collection", "liked");
+    if (location.spotifyCollection?.type === "playlist") params.set("playlist", location.spotifyCollection.id);
+    const query = params.toString();
+    return `#spotify${query ? `?${query}` : ""}`;
+  }
   if (location.page !== "search") return `#${location.page}`;
   const params = new URLSearchParams();
   const tab = location.detail?.type ?? location.searchTab ?? "track";

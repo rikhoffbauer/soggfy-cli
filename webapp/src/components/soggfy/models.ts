@@ -158,3 +158,42 @@ export interface AlbumPage {
   totalCount: number;
   nextOffset: number | null;
 }
+
+export interface SpotifyLibraryTrack {
+  id: string;
+  uri: string;
+  title: string;
+  artists: string[];
+  album: string;
+  imageUrl?: string;
+  durationMs?: number;
+  playable: boolean;
+}
+
+export interface SpotifyLibraryIssue {
+  index: number;
+  reason: "unavailable" | "non-track" | "malformed";
+}
+
+export interface SpotifyLibraryPlaylist {
+  id: string;
+  name: string;
+  description?: string;
+  owner?: string;
+  imageUrl?: string;
+  snapshotId?: string;
+  contentsAvailable: boolean;
+  tracks: SpotifyLibraryTrack[];
+  issues: SpotifyLibraryIssue[];
+  totalCount: number;
+}
+
+export interface SpotifyLibrarySnapshot {
+  account: { id: string; displayName: string };
+  likedSongs: {
+    tracks: SpotifyLibraryTrack[];
+    issues: SpotifyLibraryIssue[];
+    totalCount: number;
+  };
+  playlists: SpotifyLibraryPlaylist[];
+}

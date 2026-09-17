@@ -12,10 +12,12 @@ import type {
   JobsSnapshot,
   PlaylistPage,
   SearchResult,
+  SpotifyLibrarySnapshot,
 } from "./components/soggfy/models";
 import { PlayerBar } from "./components/soggfy/PlayerBar";
 import { PlaylistPanel } from "./components/soggfy/PlaylistPanel";
 import { SearchPanel } from "./components/soggfy/SearchPanel";
+import { SpotifyLibraryPage } from "./components/soggfy/SpotifyLibraryPage";
 import {
   createSearchSession,
   hashForWorkspaceLocation,
@@ -30,6 +32,7 @@ import {
   setActiveSearchTab,
   setSearchTabLoading,
   type SearchTab,
+  type SpotifyCollectionSelection,
   type WorkspacePage,
 } from "./components/soggfy/workspace-model";
 import logo from "./logo.png";
@@ -61,6 +64,13 @@ export function App() {
   );
   const [snapshot, setSnapshot] = useState<JobsSnapshot>(EMPTY_SNAPSHOT);
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
+  const [spotifyLibrary, setSpotifyLibrary] = useState<SpotifyLibrarySnapshot | null>(null);
+  const [spotifyLibraryLoading, setSpotifyLibraryLoading] = useState(false);
+  const [spotifyLibraryError, setSpotifyLibraryError] = useState<string | null>(null);
+  const [selectedSpotifyCollection, setSelectedSpotifyCollection] = useState<SpotifyCollectionSelection>(() => {
+    if (typeof window === "undefined") return { type: "liked" };
+    return workspaceLocationFromHash(window.location.hash).spotifyCollection ?? { type: "liked" };
+  });
   const [searchSession, setSearchSession] = useState(() => createSearchSession());
   const [playlistPage, setPlaylistPage] = useState<PlaylistPage | null>(null);
   const [albumPage, setAlbumPage] = useState<AlbumPage | null>(null);
@@ -76,6 +86,7 @@ export function App() {
   const albumRequestGeneration = useRef(0);
   const playlistRequestGeneration = useRef(0);
   const searchRequestGeneration = useRef(0);
+  const spotifyLibraryRequestGeneration = useRef(0);
   const appliedLocationHash = useRef<string | null>(null);
   const searchSessionRef = useRef(searchSession);
 
@@ -130,6 +141,36 @@ export function App() {
     const timer = window.setTimeout(() => setNotice(null), 4200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  const loadSpotifyLibrary = async () => {
+    const requestGeneration = ++spotifyLibraryRequestGeneration.current;
+    setSpotifyLibraryLoading(true);
+    setSpotifyLibraryError(null);
+    try {
+      const response = await fetch("/api/library");
+      const data = await response.json() as SpotifyLibrarySnapshot & { error?: string };
+      if (requestGeneration !== spotifyLibraryRequestGeneration.current) return;
+      if (!response.ok) throw new Error(data.error || "Spotify library request failed");
+      setSpotifyLibrary(data);
+      setSelectedSpotifyCollection((current) => {
+        if (current.type === "playlist" && !data.playlists.some((playlist) => playlist.id === current.id)) {
+          return { type: "liked" };
+        }
+        return current;
+      });
+    } catch (error) {
+      if (requestGeneration !== spotifyLibraryRequestGeneration.current) return;
+      setSpotifyLibraryError(error instanceof Error ? error.message : "Spotify library request failed");
+    } finally {
+      if (requestGeneration === spotifyLibraryRequestGeneration.current) setSpotifyLibraryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!health?.started || (health.readyInstances ?? 0) < 1) return;
+    if (spotifyLibrary || spotifyLibraryLoading || spotifyLibraryError) return;
+    void loadSpotifyLibrary();
+  }, [health?.started, health?.readyInstances, spotifyLibrary, spotifyLibraryLoading, spotifyLibraryError]);
 
   const { queue, library } = useMemo(() => partitionJobs(snapshot.jobs), [snapshot.jobs]);
   const jobsByTrack = useMemo(() => jobStateByTrack(snapshot.jobs), [snapshot.jobs]);
@@ -366,6 +407,22 @@ export function App() {
     }
   };
 
+  const queueSpotifyPlaylist = async (playlistId: string) => {
+    setSearchError(null);
+    try {
+      const response = await fetch("/api/playlist/queue-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlistId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "Failed to queue playlist");
+      setNotice(`Queued ${data.newlyQueued} new tracks; ${data.existing} already present${data.skipped ? `; ${data.skipped} skipped` : ""}.`);
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "Failed to queue playlist");
+    }
+  };
+
   const queuePlaylistAll = async () => {
     if (!playlistPage) return;
     setQueueAllLoading(true);
@@ -441,6 +498,11 @@ export function App() {
       searchRequestGeneration.current += 1;
       const location = workspaceLocationFromHash(hash);
       setActivePage(location.page);
+      if (location.page === "spotify") {
+        setSearchError(null);
+        setSelectedSpotifyCollection(location.spotifyCollection ?? { type: "liked" });
+        return;
+      }
       if (location.page !== "search") return;
 
       const tab = location.searchTab ?? "track";
@@ -487,9 +549,22 @@ export function App() {
     }
   };
 
+  const openSpotifyCollection = (selection: SpotifyCollectionSelection) => {
+    searchRequestGeneration.current += 1;
+    setSearchError(null);
+    setSelectedSpotifyCollection(selection);
+    setActivePage("spotify");
+    pushWorkspaceLocation({ page: "spotify", spotifyCollection: selection });
+  };
+
   const navigate = (page: WorkspacePage) => {
     searchRequestGeneration.current += 1;
     setActivePage(page);
+    if (page === "spotify") {
+      setSearchError(null);
+      pushWorkspaceLocation({ page, spotifyCollection: selectedSpotifyCollection });
+      return;
+    }
     pushWorkspaceLocation(page === "search"
       ? {
           page,
@@ -502,6 +577,7 @@ export function App() {
   };
 
   const ready = Boolean(health?.started && (health.readyInstances ?? 0) > 0);
+  const spotifyPageError = spotifyLibraryError ?? (activePage === "spotify" ? searchError : null);
 
   const searchPage = (
     <SearchPanel
@@ -558,6 +634,11 @@ export function App() {
         queueCount={queue.length}
         libraryCount={completedCount}
         health={health}
+        spotifyLibrary={spotifyLibrary}
+        spotifyLibraryLoading={spotifyLibraryLoading}
+        spotifyLibraryError={spotifyLibraryError}
+        selectedSpotifyCollection={selectedSpotifyCollection}
+        onOpenSpotifyCollection={openSpotifyCollection}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -592,6 +673,20 @@ export function App() {
           ) : null}
 
           {activePage === "search" ? searchPage : null}
+          {activePage === "spotify" ? (
+            <SpotifyLibraryPage
+              library={spotifyLibrary}
+              loading={spotifyLibraryLoading}
+              error={spotifyPageError}
+              selectedCollection={selectedSpotifyCollection}
+              jobsByTrack={jobsByTrack}
+              onRetry={() => void loadSpotifyLibrary()}
+              onPlayTrack={playTrack}
+              onQueueTrack={queueTrack}
+              onQueuePlaylist={(playlistId) => void queueSpotifyPlaylist(playlistId)}
+              onSelectCollection={openSpotifyCollection}
+            />
+          ) : null}
           {activePage === "queue" ? <QueuePage queue={queue} onAction={runJobAction} /> : null}
           {activePage === "downloads" ? <DownloadsPage library={library} onAction={runJobAction} onPlay={(job: DownloadJob) => setPlayerJobId(job.id)} /> : null}
           {activePage === "diagnostics" ? <DiagnosticsPanel health={health} instances={snapshot.instances} jobs={snapshot.jobs} /> : null}
