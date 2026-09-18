@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "kind": "typesafe-supervision-audit",
+  "contract": "single-instance-prefetch-supervision",
+  "startedAt": "2026-09-18T05:26:11.591Z",
+  "durationMs": 4269.4195,
+  "requestId": "req_01a0b2fac93172019904587811ac4700",
+  "model": "jev-1.13.0",
+  "usage": {
+    "input_tokens": 6581,
+    "output_tokens": 188
+  },
+  "provenance": {
+    "contractPath": "/Volumes/Repositories/soggfy-cli/docs/superpowers/supervision/2026-09-18-single-instance-prefetch.json",
+    "contractSha256": "1ca17125907eeaee87655b23c9f49351b6d6cb90bdb3d4fe5c69913a51688fbe",
+    "statePath": "/Volumes/ssd1/tmp/soggfy-action-guard-state.json",
+    "stateSha256": "427dfe25259af6512e0c8722e686b2cb46e4ece20b1af2a5b4dbb81db44eaa09",
+    "contexts": {
+      "spec": {
+        "path": "/Volumes/Repositories/soggfy-cli/docs/superpowers/specs/2026-09-18-single-instance-prefetch-design.md",
+        "sha256": "742393122d45dd808bba9ae7a84b083ba8c3dab59b558abff86210ea6cc3a988"
+      },
+      "plan": {
+        "path": "/Volumes/Repositories/soggfy-cli/docs/superpowers/plans/2026-09-18-single-instance-prefetch.md",
+        "sha256": "3d61c9dffdb80e4ef97c91415bd5c91a12d879933ea9d000f675b769475b297d"
+      }
+    }
+  },
+  "sets": [
+    "action_guard"
+  ],
+  "questionOrigins": {
+    "phase_alignment": {
+      "set": "action_guard",
+      "id": "phase_alignment"
+    },
+    "invariant_preservation": {
+      "set": "action_guard",
+      "id": "invariant_preservation"
+    },
+    "evidence_value": {
+      "set": "action_guard",
+      "id": "evidence_value"
+    },
+    "destructive_or_stateful_justification": {
+      "set": "action_guard",
+      "id": "destructive_or_stateful_justification"
+    }
+  },
+  "gates": {
+    "gateA": {
+      "decision": "PASS",
+      "missing": []
+    },
+    "gateB": {
+      "decision": "NO-GO",
+      "failures": [
+        "medianImprovementFraction=0.005766332685840339<0.1",
+        "notEveryPairedBatchRunImproved",
+        "invalidOrMisattributedOutputs=1>0"
+      ],
+      "unknown": [
+        "additionalObservedCaptureFailures",
+        "additionalObservedBufferingStalls"
+      ]
+    },
+    "productionPhases3To5Authorized": false
+  },
+  "answers": {
+    "phase_alignment": {
+      "type": "choice",
+      "choice": "aligned",
+      "confidence": 0.96,
+      "probabilities": {
+        "uncertain": 0,
+        "conflict": 0.02,
+        "aligned": 0.98
+      }
+    },
+    "invariant_preservation": {
+      "type": "choice",
+      "choice": "aligned",
+      "confidence": 0.98,
+      "probabilities": {
+        "uncertain": 0,
+        "conflict": 0.01,
+        "aligned": 0.99
+      }
+    },
+    "evidence_value": {
+      "type": "choice",
+      "choice": "high_value",
+      "confidence": 0.88,
+      "probabilities": {
+        "uncertain": 0,
+        "high_value": 0.92,
+        "low_value": 0.08
+      }
+    },
+    "destructive_or_stateful_justification": {
+      "type": "choice",
+      "choice": "justified",
+      "confidence": 0.97,
+      "probabilities": {
+        "justified": 0.97,
+        "uncertain": 0.01,
+        "not_applicable": 0.01,
+        "unjustified": 0.01
+      }
+    }
+  },
+  "normalized": {
+    "phase_alignment": {
+      "raw": {
+        "type": "choice",
+        "choice": "aligned",
+        "confidence": 0.96,
+        "probabilities": {
+          "uncertain": 0,
+          "conflict": 0.02,
+          "aligned": 0.98
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "aligned": 0.98,
+          "conflict": 0.02,
+          "uncertain": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "invariant_preservation": {
+      "raw": {
+        "type": "choice",
+        "choice": "aligned",
+        "confidence": 0.98,
+        "probabilities": {
+          "uncertain": 0,
+          "conflict": 0.01,
+          "aligned": 0.99
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "aligned": 0.99,
+          "conflict": 0.01,
+          "uncertain": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "evidence_value": {
+      "raw": {
+        "type": "choice",
+        "choice": "high_value",
+        "confidence": 0.88,
+        "probabilities": {
+          "uncertain": 0,
+          "high_value": 0.92,
+          "low_value": 0.08
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "high_value": 0.92,
+          "low_value": 0.08,
+          "uncertain": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "destructive_or_stateful_justification": {
+      "raw": {
+        "type": "choice",
+        "choice": "justified",
+        "confidence": 0.97,
+        "probabilities": {
+          "justified": 0.97,
+          "uncertain": 0.01,
+          "not_applicable": 0.01,
+          "unjustified": 0.01
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "justified": 0.97,
+          "unjustified": 0.01,
+          "not_applicable": 0.01,
+          "uncertain": 0.01
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    }
+  }
+}

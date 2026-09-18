@@ -5,7 +5,14 @@ const trackId = "4PTG3Z6ehGkBFwjybzWkR8";
 
 test("playback confirmation requires the exact target, playing state and advancing position", () => {
   const playing = { uri: `spotify:track:${trackId}`, is_ad: false, gated: false, state: "playing", position: 1.5 };
-  expect(parsePlaybackConfirmation(JSON.stringify(playing), trackId).confirmed).toBe(true);
+  const identified = parsePlaybackConfirmation(JSON.stringify({
+    ...playing,
+    fileId: "a".repeat(40),
+    fileBitrate: 160000,
+  }), trackId);
+  expect(identified.confirmed).toBe(true);
+  expect(identified.fileId).toBe("a".repeat(40));
+  expect(identified.fileBitrate).toBe(160000);
   expect(parsePlaybackConfirmation(`spotify:track:${trackId}`, trackId).confirmed).toBe(false);
   expect(parsePlaybackConfirmation(JSON.stringify({ ...playing, state: "paused" }), trackId).confirmed).toBe(false);
   expect(parsePlaybackConfirmation(JSON.stringify({ ...playing, position: 0 }), trackId).confirmed).toBe(false);

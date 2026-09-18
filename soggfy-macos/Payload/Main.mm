@@ -379,6 +379,14 @@ static void AudioWatchdog() {
         std::string status =
             StateManager::Instance().GetPlaybackStatus(track_id);
         if (status == "downloading") {
+          // Ogg capture has an explicit, stream-authenticated EOS signal in
+          // DecodeHook. Idle gaps can occur during accelerated/cached
+          // extraction and are not evidence that the stream ended. Let the
+          // Ogg path finalize only on EOS (or explicit cancel/finish); the
+          // caller's bounded capture timeout remains the failure safety net.
+          if (StateManager::Instance().OwnsWriter(track_id, "ogg")) {
+            continue;
+          }
           printf("[Soggfy-INFO] Watchdog: audio idle for %llums, finishing "
                  "track '%s'\n",
                  (unsigned long long)elapsed, track_id.c_str());
@@ -661,6 +669,21 @@ void StartIPCServer() {
                JsonEscape(CaptureBackendName(SelectedCaptureBackend())).c_str(),
                (unsigned long long)bytes, (unsigned long long)limit,
                JsonEscape(file).c_str());
+      SendResponse(client_fd, response);
+    } else if (req.rfind("set_decode_speed ", 0) == 0) {
+      double speed = 0.0;
+      char extra = 0;
+      const std::string args = req.substr(17);
+      if (sscanf(args.c_str(), "%lf %c", &speed, &extra) == 1 && SetCaptureDecodeSpeed(speed)) {
+        char response[96];
+        snprintf(response, sizeof(response), "decode speed %.3f", GetCaptureDecodeSpeed());
+        SendResponse(client_fd, response);
+      } else {
+        SendResponse(client_fd, "error decode speed must be between 1 and 64");
+      }
+    } else if (req == "get_decode_speed") {
+      char response[64];
+      snprintf(response, sizeof(response), "%.3f", GetCaptureDecodeSpeed());
       SendResponse(client_fd, response);
     } else if (req.rfind("get_status ", 0) == 0) {
       std::string track = req.substr(11);

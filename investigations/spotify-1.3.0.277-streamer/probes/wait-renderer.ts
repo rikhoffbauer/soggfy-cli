@@ -28,10 +28,14 @@ while (performance.now() - started < timeoutMs) {
       });
       const expression = `(()=>{
         const REQUIRED=${JSON.stringify(required)};
-        const root=document.querySelector('[data-testid="root"]')||document.body?.firstElementChild;
-        if(!root)return {ready:false,reason:'no-root'};
-        const fk=Object.getOwnPropertyNames(root).find(k=>k.startsWith('__reactFiber$'));
-        let f=fk?root[fk]:null;if(!f)return {ready:false,reason:'no-fiber'};
+        const preferred=document.querySelector('[data-testid="root"]')||document.body?.firstElementChild;
+        const nodes=preferred?[preferred,...document.querySelectorAll('*')]:[...document.querySelectorAll('*')];
+        let f=null;
+        for(const node of nodes){
+          const fk=Object.getOwnPropertyNames(node).find(k=>k.startsWith('__reactFiber$'));
+          if(fk&&node[fk]){f=node[fk];break}
+        }
+        if(!f)return {ready:false,reason:'no-fiber'};
         while(f?.return)f=f.return;
         const stack=[f];let registry=null;
         while(stack.length){

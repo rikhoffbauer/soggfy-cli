@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0",
-    "@types/bun": "latest",
+    "@types/bun": "1.4.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/readdir-glob": "^1.1.5",

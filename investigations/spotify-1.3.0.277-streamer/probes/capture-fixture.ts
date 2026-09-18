@@ -2,9 +2,14 @@ import { sendIPC } from "../../../src/core/ipc.ts";
 
 const trackId = process.argv[2];
 const expectedFileId = process.argv[3] || undefined;
+const decodeSpeed = Number(process.argv[4] ?? "12");
 const socketPath = process.env.SOGGFY_INVESTIGATION_SOCKET ?? "/tmp/soggfy130.sock";
 const debugPort = Number(process.env.SOGGFY_INVESTIGATION_CDP ?? "9231");
+const maxDecodeSpeed = process.env.SOGGFY_INVESTIGATION_ALLOW_HIGH_DECODE_SPEED === "1" ? 256 : 64;
 if (!trackId) throw new Error("usage: bun capture-fixture.ts <trackId>");
+if (!Number.isFinite(decodeSpeed) || decodeSpeed < 1 || decodeSpeed > maxDecodeSpeed) {
+  throw new Error(`decode speed must be between 1 and ${maxDecodeSpeed}`);
+}
 
 type CdpTarget = { type?: string; webSocketDebuggerUrl?: string };
 const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json() as CdpTarget[];
@@ -42,10 +47,16 @@ async function evaluate(expression: string) {
 }
 
 const registryPrelude = String.raw`
-const root=document.querySelector('[data-testid="root"]')||document.body?.firstElementChild;
-const fk=root&&Object.getOwnPropertyNames(root).find(k=>k.startsWith('__reactFiber$'));
-let f=fk?root[fk]:null;while(f?.return)f=f.return;
-const stack=f?[f]:[];let registry=null;
+const preferred=document.querySelector('[data-testid="root"]')||document.body?.firstElementChild;
+const nodes=preferred?[preferred,...document.querySelectorAll('*')]:[...document.querySelectorAll('*')];
+let f=null;
+for(const node of nodes){
+  const fk=Object.getOwnPropertyNames(node).find(k=>k.startsWith('__reactFiber$'));
+  if(fk&&node[fk]){f=node[fk];break}
+}
+if(!f)throw new Error('no React fiber');
+while(f?.return)f=f.return;
+const stack=[f];let registry=null;
 while(stack.length){
   const c=stack.pop(),v=c?.memoizedProps?.value;
   if(v&&v._map instanceof Map&&typeof v.resolve==='function'){
@@ -87,19 +98,24 @@ async function targetFileIds() {
 }
 
 await sendIPC(socketPath, `reset_track ${trackId}`).catch(() => "");
+const speedResponse = await sendIPC(socketPath, `set_decode_speed ${decodeSpeed}`);
+if (!speedResponse.startsWith("decode speed ")) throw new Error(`failed to set decode speed: ${speedResponse}`);
 await sendIPC(socketPath, `set_track ${trackId}`);
 const before = await rendererSnapshot();
 const candidates = await targetFileIds();
 const candidateIds = new Set(candidates.map(x => x.fileId));
 const startedAt = performance.now();
+const playRequestedWallMs = Date.now();
 const playResponse = await sendIPC(socketPath, `play spotify:track:${trackId}`, { retries: 1, timeoutMs: 15_000 });
 if (playResponse !== "ok") throw new Error(`play failed: ${playResponse}`);
 
 let identity: any = null;
+let identityObservedWallMs: number | null = null;
 for (let i = 0; i < 100; i++) {
   const snapshot = await rendererSnapshot().catch(() => null);
   if (snapshot?.uri === `spotify:track:${trackId}` && candidateIds.has(snapshot.fileId)) {
     identity = snapshot;
+    identityObservedWallMs = Date.now();
     break;
   }
   await Bun.sleep(100);
@@ -116,7 +132,12 @@ for (let i = 0; i < 400; i++) {
   await Bun.sleep(150);
 }
 const elapsedMs = performance.now() - startedAt;
-if (status !== "completed") throw new Error(`capture did not complete: ${status || "<empty>"}`);
+const completedWallMs = Date.now();
+if (status !== "completed") {
+  await sendIPC(socketPath, "pause", { retries: 1, timeoutMs: 15_000 }).catch(() => "");
+  await sendIPC(socketPath, "set_decode_speed 12").catch(() => "");
+  throw new Error(`capture did not complete: ${status || "<empty>"}`);
+}
 
 const metricsRaw = await sendIPC(socketPath, `get_metrics ${trackId}`);
 const metrics = JSON.parse(metricsRaw);
@@ -126,6 +147,7 @@ const fileName = metrics.fileName as string;
 const bytes = new Uint8Array(await Bun.file(fileName).arrayBuffer());
 const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
 const sha256 = [...sha].map(v => v.toString(16).padStart(2, "0")).join("");
+await sendIPC(socketPath, "set_decode_speed 12").catch(() => "");
 
 console.log(JSON.stringify({
   trackId,
@@ -136,6 +158,10 @@ console.log(JSON.stringify({
   identity,
   after,
   elapsedMs,
+  playRequestedWallMs,
+  identityObservedWallMs,
+  completedWallMs,
+  decodeSpeed,
   metrics,
   output: { fileName, bytes: bytes.length, sha256 },
 }, null, 2));

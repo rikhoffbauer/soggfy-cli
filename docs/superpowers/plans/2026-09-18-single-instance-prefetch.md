@@ -1,11 +1,13 @@
 # Single-instance prefetch implementation plan
 
-Date: 2026-09-18. Status: ready to execute evidence phases; production phases conditional.
+Date: 2026-09-18. Status: **completed**. Gate B is GO; phases 3–6 implemented and live-accepted for exact Spotify 1.3.0.277 with prefetch default-off.
 Specification: [single-instance prefetch design](../specs/2026-09-18-single-instance-prefetch-design.md).
+Measured outcome: `investigations/spotify-1.3.0.277-streamer/RESULTS.md`.
+Derived semantic supervision contract (non-normative): [TypeSafe contract](../supervision/2026-09-18-single-instance-prefetch.json) and [usage](../supervision/README.md).
 
 ## Execution contract
 
-Complete phases 1–2 before modifying production scheduling. A failed performance gate ends the production branch with documented findings. This plan does not authorize an unbounded search for parallel native extraction. Preserve current dirty investigation files and unrelated edits; inspect current diffs before each change. Keep HANDOVER.md current at phase boundaries. Do not claim CLI playlist acceleration: its one-at-a-time submission is explicitly outside the initial increment.
+Phases 1–2 established the deterministic performance/correctness gate before production scheduling changes. The canonical Gate B run passed, authorizing the implementation below. This plan does not authorize an unbounded search for parallel native extraction. Preserve current dirty investigation files and unrelated edits; inspect current diffs before each change. Keep HANDOVER.md current at phase boundaries. Do not claim CLI playlist acceleration: its one-at-a-time submission is explicitly outside the initial increment.
 
 ## 1. Make the investigation reproducible and restore a known environment
 
@@ -111,3 +113,7 @@ Review against all six spec criteria. Fix concrete failures, rerun affected chec
 - CLI batch lookahead using the same adapter/controller with explicit batch ownership, bounded submission, ordered output and cancellation of outstanding jobs on CLI failure/disconnect.
 - Parallel native extraction only after a new processing entry point passes independent identity, full-output and cancellation experiments.
 - Wider build support, default-on rollout or configurable concurrency only after additional compatibility/performance evidence.
+
+## Completion record
+
+Gate B passed with a 60.043% median fixed-batch improvement and 3/3 improved pairs. Phases 3–5 are implemented. Phase 6 live acceptance verified exact canonical output hashes, two-slot lookahead, exact-variant 16x handoff, cancellation, priority interruption/requeue, daemon restart, and fail-closed renderer loss. `SOGGFY_PREFETCH` remains disabled by default and registry-supported only for exact 1.3.0.277.

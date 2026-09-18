@@ -3,6 +3,8 @@ export interface PlaybackConfirmation {
   isAd: boolean;
   gated: boolean;
   uri: string;
+  fileId?: string;
+  fileBitrate?: number;
 }
 
 export function parsePlaybackConfirmation(response: string, trackId: string): PlaybackConfirmation {
@@ -11,12 +13,38 @@ export function parsePlaybackConfirmation(response: string, trackId: string): Pl
 
   if (raw.startsWith("{")) {
     try {
-      const parsed = JSON.parse(raw) as { uri?: unknown; is_ad?: unknown; gated?: unknown; state?: unknown; position?: unknown };
+      const parsed = JSON.parse(raw) as {
+        uri?: unknown;
+        is_ad?: unknown;
+        gated?: unknown;
+        state?: unknown;
+        position?: unknown;
+        fileId?: unknown;
+        file_id?: unknown;
+        fileBitrate?: unknown;
+        file_bitrate?: unknown;
+      };
       const uri = typeof parsed.uri === "string" ? parsed.uri : "";
       const isAd = parsed.is_ad === true;
       const gated = parsed.gated === true;
       const advancing = parsed.state === "playing" && typeof parsed.position === "number" && Number.isFinite(parsed.position) && parsed.position > 0.1;
-      return { confirmed: !isAd && !gated && uri === `spotify:track:${trackId}` && advancing, isAd, gated, uri };
+      const fileIdValue = parsed.fileId ?? parsed.file_id;
+      const fileBitrateValue = parsed.fileBitrate ?? parsed.file_bitrate;
+      const fileId = typeof fileIdValue === "string" && /^[0-9a-f]{40}$/i.test(fileIdValue)
+        ? fileIdValue
+        : undefined;
+      const fileBitrateNumber = Number(fileBitrateValue);
+      const fileBitrate = Number.isFinite(fileBitrateNumber) && fileBitrateNumber > 0
+        ? fileBitrateNumber
+        : undefined;
+      return {
+        confirmed: !isAd && !gated && uri === `spotify:track:${trackId}` && advancing,
+        isAd,
+        gated,
+        uri,
+        fileId,
+        fileBitrate,
+      };
     } catch {
       return { confirmed: false, isAd: false, gated: false, uri: "" };
     }

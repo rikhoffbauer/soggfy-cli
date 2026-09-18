@@ -15,4 +15,6 @@ void ResetOggCaptureState(const std::string& trackId);
 void DiscardPendingOggCapture();
 void SyncSharedCaptureStateNow();
 void MarkAudioActivity();
+bool SetCaptureDecodeSpeed(double speed);
+double GetCaptureDecodeSpeed();
 extern std::atomic<bool> g_decoder_hooks_ready;

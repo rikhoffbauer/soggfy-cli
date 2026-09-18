@@ -187,6 +187,12 @@ Important endpoints:
 
 A completed job contains the validated capture metadata and the final MP3/Ogg/WAV output path. Failed or cancelled jobs remain explicit terminal records.
 
+## Optional queued prefetch
+
+Set `SOGGFY_PREFETCH=1` before starting/restarting the daemon to enable two-slot cache warming for already queued web/API jobs on exact registry-validated builds. It is **off by default** and currently prefetch-validated only for Spotify **1.3.0.277 arm64**. Capture remains singular and sequential; cached protected bytes are not exposed as completed downloads. The scheduler verifies the active session's exact selected variant, destroys speculative ownership before playback, and enables the measured 16x extraction path only after the played file ID matches the prefetched variant. Renderer/cleanup uncertainty disables speculation for that instance generation while normal capture continues.
+
+The standalone CLI submission loop is unchanged and has no promised batch acceleration from this feature.
+
 ## Data locations
 
 | Path | Purpose |

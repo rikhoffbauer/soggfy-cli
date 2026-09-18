@@ -12,6 +12,7 @@ export interface SpotifyCompatibilityChecks {
   capture?: boolean;
   mediaValidation?: boolean;
   audioFixture?: boolean;
+  prefetch?: boolean;
   headless?: boolean;
 }
 
@@ -64,6 +65,17 @@ export function isSpotifyVersionSupported(
   registry: SpotifyCompatibilityRegistry = SPOTIFY_COMPATIBILITY_REGISTRY,
 ): boolean {
   return supportedSpotifyVersions(registry).includes(version);
+}
+
+export function isSpotifyPrefetchSupported(
+  version: string,
+  registry: SpotifyCompatibilityRegistry = SPOTIFY_COMPATIBILITY_REGISTRY,
+): boolean {
+  return registry.versions.some((entry) =>
+    entry.architecture === "arm64"
+    && entry.status === "supported"
+    && entry.version === version
+    && entry.checks.prefetch === true);
 }
 export function supportedSpotifySpan(
   registry: SpotifyCompatibilityRegistry = SPOTIFY_COMPATIBILITY_REGISTRY,

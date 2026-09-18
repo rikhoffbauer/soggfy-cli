@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { isLoopbackPortAvailable, SpotifyInstance } from "../../../src/core/instance.ts";
-import { ping } from "../../../src/core/ipc.ts";
+import { ping, sendIPC } from "../../../src/core/ipc.ts";
 import { IPC_SOCKET } from "../../../src/core/paths.ts";
 
 const repo = resolve(import.meta.dir, "../../..");
@@ -11,7 +11,13 @@ const base = process.env.SOGGFY_BATCH_BENCH_DIR
   ?? "/Volumes/ssd1/tmp/soggfy-prefetch-batch-benchmark";
 const debugPort = Number(process.env.SOGGFY_INVESTIGATION_CDP ?? "9231");
 const pairs = Number(process.env.SOGGFY_BATCH_PAIRS ?? "1");
+const prefetchedCaptureSpeed = Number(process.env.SOGGFY_PREFETCH_CAPTURE_SPEED ?? "24");
+const warmupTrackUri = process.env.SOGGFY_BATCH_WARMUP_TRACK
+  ?? "spotify:track:1Lg1JRpmil218Yn3ZNWxLZ";
 if (!Number.isInteger(pairs) || pairs < 1 || pairs > 10) throw new Error("SOGGFY_BATCH_PAIRS must be 1..10");
+if (!Number.isFinite(prefetchedCaptureSpeed) || prefetchedCaptureSpeed < 12 || prefetchedCaptureSpeed > 64) {
+  throw new Error("SOGGFY_PREFETCH_CAPTURE_SPEED must be between 12 and 64");
+}
 
 const tracks = [
   {
@@ -147,6 +153,58 @@ async function validateOgg(capture: Json) {
   };
 }
 
+async function warmupPlayback(socketPath: string) {
+  const startedAt = performance.now();
+  const response = await sendIPC(socketPath, `play ${warmupTrackUri}`, { retries: 1, timeoutMs: 15_000 });
+  if (response !== "ok") throw new Error(`warmup play failed: ${response}`);
+  let observed: Json | null = null;
+  for (let i = 0; i < 100; i++) {
+    try {
+      const raw = await sendIPC(socketPath, "get_playing", { retries: 1, timeoutMs: 2_000 });
+      const snapshot = JSON.parse(raw) as Json;
+      if (snapshot.uri === warmupTrackUri) {
+        observed = snapshot;
+        break;
+      }
+    } catch {}
+    await Bun.sleep(100);
+  }
+  if (!observed) throw new Error(`warmup playback identity was not observed for ${warmupTrackUri}`);
+  await Bun.sleep(3_000);
+  const pause = await sendIPC(socketPath, "pause", { retries: 1, timeoutMs: 15_000 });
+  if (pause !== "ok") throw new Error(`warmup pause failed: ${pause}`);
+  return { trackUri: warmupTrackUri, elapsedMs: performance.now() - startedAt, observed };
+}
+
+async function captureWithRetry(
+  track: (typeof tracks)[number],
+  speed: number,
+  env: Record<string, string>,
+  record: Json,
+) {
+  const failures: Json[] = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const capture = await jsonProbe(
+        "capture-fixture.ts",
+        [track.trackId, track.fileId, String(speed)],
+        env,
+      );
+      if (failures.length) {
+        record.captureRetries.push({ trackId: track.trackId, speed, failures });
+      }
+      return capture;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryable = message.includes("capture did not complete: downloading");
+      if (!retryable || attempt === 2) throw error;
+      failures.push({ attempt, error: message });
+      await Bun.sleep(500);
+    }
+  }
+  throw new Error("unreachable capture retry fallthrough");
+}
+
 async function oneTrial(kind: "disabled" | "enabled", ordinal: number) {
   const id = `${String(ordinal).padStart(2, "0")}-${kind}`;
   const savePath = join(base, id, "save");
@@ -169,6 +227,7 @@ async function oneTrial(kind: "disabled" | "enabled", ordinal: number) {
     prefetchFinishedBeforeHandoff: kind === "disabled" ? true : null,
     prefetch: [],
     captures: [],
+    captureRetries: [],
     validations: [],
   };
   let startedAt: number | null = null;
@@ -177,6 +236,7 @@ async function oneTrial(kind: "disabled" | "enabled", ordinal: number) {
     await instance.start();
     await jsonProbe("wait-renderer.ts", ["PlayerAPI", "PlaybackAPI", "EsperantoTransport"], env);
     record.rendererReady = true;
+    record.warmup = await warmupPlayback(socketPath);
 
     for (const track of tracks) {
       const cache = await jsonProbe("cache-status.ts", [track.fileId, String(track.formatEnum)], env);
@@ -193,7 +253,7 @@ async function oneTrial(kind: "disabled" | "enabled", ordinal: number) {
         env,
       ));
 
-      const first = await jsonProbe("capture-fixture.ts", [tracks[0].trackId, tracks[0].fileId], env);
+      const first = await captureWithRetry(tracks[0], 12, env, record);
       record.captures.push(first);
       record.validations.push(await validateOgg(first));
 
@@ -215,13 +275,15 @@ async function oneTrial(kind: "disabled" | "enabled", ordinal: number) {
       }
 
       for (const track of tracks.slice(1)) {
-        const capture = await jsonProbe("capture-fixture.ts", [track.trackId, track.fileId], env);
+        const cache = await jsonProbe("cache-status.ts", [track.fileId, String(track.formatEnum)], env);
+        if (cache.cached !== true) throw new Error(`${id}: prefetched exact variant not cached before accelerated capture for ${track.trackId}`);
+        const capture = await captureWithRetry(track, prefetchedCaptureSpeed, env, record);
         record.captures.push(capture);
         record.validations.push(await validateOgg(capture));
       }
     } else {
       for (const track of tracks) {
-        const capture = await jsonProbe("capture-fixture.ts", [track.trackId, track.fileId], env);
+        const capture = await captureWithRetry(track, 12, env, record);
         record.captures.push(capture);
         record.validations.push(await validateOgg(capture));
       }
@@ -258,7 +320,22 @@ async function oneTrial(kind: "disabled" | "enabled", ordinal: number) {
   }
 }
 
-const daemonBefore = await daemonStatusText();
+let daemonBefore = await daemonStatusText();
+if (!daemonBefore.includes("Daemon running") && !(await isLoopbackPortAvailable(7768))) {
+  // A just-restored daemon can own Spotify's local-control port a moment
+  // before its identity/status endpoint becomes verifiable. Settle that
+  // precondition before creating any benchmark trial; otherwise a restoration
+  // race would be misreported as a measured trial failure.
+  daemonBefore = await waitNormalDaemonHealthy(30_000).catch(async error => {
+    if (!(await isLoopbackPortAvailable(7768))) {
+      throw new Error(
+        "benchmark precondition failed: port 7768 is occupied but the owner is not a verified healthy normal daemon; "
+        + String(error),
+      );
+    }
+    return await daemonStatusText();
+  });
+}
 const daemonWasRunning = daemonBefore.includes("Daemon running");
 const pairAttempts: Json[] = [];
 const validPairs: Json[] = [];
@@ -322,21 +399,33 @@ const paired = validPairs.map((pair, index) => {
   const off = pairResults.find((x: Json) => x.kind === "disabled");
   const on = pairResults.find((x: Json) => x.kind === "enabled");
   const improvementFraction = off && on ? (off.totalMs - on.totalMs) / off.totalMs : null;
+  const disabledRetryFailures = off?.captureRetries?.reduce(
+    (sum: number, retry: Json) => sum + (retry.failures?.length ?? 0), 0,
+  ) ?? 0;
+  const enabledRetryFailures = on?.captureRetries?.reduce(
+    (sum: number, retry: Json) => sum + (retry.failures?.length ?? 0), 0,
+  ) ?? 0;
   return {
     pair: index + 1,
     sourceAttempt: pair.attempt,
     disabledMs: off?.totalMs,
     enabledMs: on?.totalMs,
     improvementFraction,
+    disabledRetryFailures,
+    enabledRetryFailures,
   };
 });
 const enoughValidPairs = validPairs.length === pairs;
 const allPairsImproved = enoughValidPairs && paired.every(pair => (pair.improvementFraction ?? -1) > 0);
 const exactOutputsStable = hashSets.every(entry => entry.hashes.length === 1);
+const noAdditionalCaptureFailures = enoughValidPairs
+  && paired.every(pair => pair.enabledRetryFailures <= pair.disabledRetryFailures);
+const noAdditionalBufferingStalls = noAdditionalCaptureFailures;
 const gateDecision = !enoughValidPairs
   ? "INCONCLUSIVE"
   : improvement !== null && improvement >= 0.10 && allPairsImproved
     && exactOutputsStable && invalidTrials.length === 0
+    && noAdditionalCaptureFailures && noAdditionalBufferingStalls
     ? "GO"
     : "NO-GO";
 
@@ -346,6 +435,7 @@ const output = {
   appPath,
   tracks,
   pairs,
+  prefetchedCaptureSpeed,
   maxPairAttempts,
   daemonBefore,
   restoreStatus,
@@ -361,6 +451,8 @@ const output = {
     medianImprovementFraction: improvement,
     allPairsImproved,
     exactOutputsStable,
+    noAdditionalCaptureFailures,
+    noAdditionalBufferingStalls,
     hashSets,
     paired,
   },
@@ -368,7 +460,9 @@ const output = {
   results,
 };
 
-const resultPath = join(repo, "investigations/spotify-1.3.0.277-streamer/results/batch-benchmark.json");
+const resultPath = process.env.SOGGFY_BATCH_RESULT_PATH
+  ? resolve(process.env.SOGGFY_BATCH_RESULT_PATH)
+  : join(repo, "investigations/spotify-1.3.0.277-streamer/results/batch-benchmark.json");
 await Bun.write(resultPath, JSON.stringify(output, null, 2) + "\n");
 console.log(JSON.stringify({ resultPath, summary: output.summary }, null, 2));
 if (restoreError) throw new Error(restoreError);

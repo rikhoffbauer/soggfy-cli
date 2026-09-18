@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "contract": "docs/superpowers/supervision/2026-09-18-single-instance-prefetch.json",
+  "updatedAt": "2026-09-18",
+  "currentPhase": "completed-go-closure",
+  "epistemicLedger": {
+    "deterministic_facts": [
+      "Three valid paired canonical Gate B batch runs exist.",
+      "Median disabled total = 114969.109375 ms.",
+      "Median enabled total = 45938.37608399999 ms.",
+      "Median improvement fraction = 0.6004285295960614.",
+      "All three valid paired batch runs improved.",
+      "The canonical Gate B run contains zero invalid or misattributed trials.",
+      "Exact output hashes are stable across the canonical trials.",
+      "Enabled trials added zero observed capture failures and zero observed buffering stalls.",
+      "Gate B result is GO under the deterministic 10%/every-pair/no-invalid-output/no-additional-failure policy.",
+      "Production phases 3-5 were authorized and implemented with SOGGFY_PREFETCH default-off.",
+      "Prefetch capability is registry-backed separately from capture compatibility and is enabled only for exact Spotify 1.3.0.277 arm64.",
+      "Integrated production acceptance matched all three canonical Ogg SHA-256 fixtures exactly and validated full media output.",
+      "Both queued prefetched captures enabled 16x only after exact renderer-selected fileId equality and restored 12x afterward.",
+      "Lifecycle acceptance covered active speculative cancellation, priority interruption/requeue without spending an attempt, daemon restart, and renderer loss.",
+      "Renderer loss surfaced cleanup-uncertain, disabled speculation for that generation, and did not prevent the authoritative active baseline capture from completing.",
+      "Final repository verification passed: 452 tests / 1341 expectations / 96 files, root and web TypeScript checks, native fixtures, payload build, release build, web production build, docs build, and git diff --check.",
+      "The normal daemon has been restored with SOGGFY_PREFETCH unset; daemon IPC and HTTP are responsive.",
+      "The restored normal runtime is exact Spotify 1.2.99.317 at ~/.soggfy/workspace/PatchedSpotify.app and does not advertise or log prefetch enablement."
+    ],
+    "direct_observations": [
+      "Final normal daemon listener is responsive on 127.0.0.1:8085.",
+      "Final normal Spotify IPC listener is owned by the daemon child using ~/.soggfy/workspace/profiles/cli_instance.",
+      "No process using the isolated /Volumes/ssd1/tmp/soggfy-prefetch-live-home path remained after restoration.",
+      "The final normal API job queue was empty and the instance reported Ready.",
+      "The final normal instance logs contain no Prefetch enabled entry."
+    ],
+    "provenance_limits": [
+      "Historical no-go audit files are retained as evidence of earlier provisional measurements; they do not describe the canonical Gate B result.",
+      "The normal restored executable SHA-256 is 2436057783e94b5c5d8aca5971a1bd46d7b6dee07b4b4cf0e79256551fc75610 at final closure; version/path/process identity, not an older historical hash, is the current runtime identity.",
+      "The isolated live acceptance summary intentionally contains no credentials, signed CDN URLs, or protected media payloads."
+    ],
+    "contradicted_or_retired": [
+      "The earlier provisional NO-GO state based on ~0.58% median improvement is superseded by the canonical three-pair Gate B run.",
+      "The earlier claim that production phases 3-5 were unauthorized is retired because the canonical deterministic gate is GO."
+    ]
+  },
+  "gateA": {
+    "investigation_documented": true,
+    "instrumentation_reviewed": true,
+    "renderer_services_ready": true,
+    "process_ownership_verified": true,
+    "isolated_exact_version_verified": true,
+    "normal_daemon_restoration_verified": true,
+    "result": "PASS"
+  },
+  "gateB": {
+    "validPairedBatchRuns": 3,
+    "medianImprovementFraction": 0.6004285295960614,
+    "everyPairedBatchRunImproved": true,
+    "invalidOrMisattributedOutputs": 0,
+    "exactOutputsStable": true,
+    "additionalObservedCaptureFailures": 0,
+    "additionalObservedBufferingStalls": 0,
+    "decision": "GO"
+  },
+  "implementation": {
+    "defaultOff": true,
+    "exactPrefetchSupportedVersions": [
+      "1.3.0.277"
+    ],
+    "lookahead": 2,
+    "singleCaptureOwnerPreserved": true,
+    "exactVariantHandoffRequired": true,
+    "rendererLossFailsClosed": true,
+    "standaloneCliBatchAccelerationClaimed": false
+  },
+  "verification": {
+    "testsPassed": 452,
+    "expectations": 1341,
+    "testFiles": 96,
+    "rootTypecheck": true,
+    "webTypecheck": true,
+    "nativeFixtures": true,
+    "payloadBuild": true,
+    "releaseBuild": true,
+    "webProductionBuild": true,
+    "docsBuild": true,
+    "gitDiffCheck": true,
+    "liveAcceptance": "investigations/spotify-1.3.0.277-streamer/results/production-live-acceptance-20260918.json"
+  },
+  "normalRestoration": {
+    "version": "1.2.99.317",
+    "appPath": "~/.soggfy/workspace/PatchedSpotify.app",
+    "executableSha256": "2436057783e94b5c5d8aca5971a1bd46d7b6dee07b4b4cf0e79256551fc75610",
+    "httpOrigin": "http://127.0.0.1:8085",
+    "daemonResponsive": true,
+    "spotifyIpcResponsive": true,
+    "webApiResponsive": true,
+    "prefetchEnabled": false,
+    "isolatedProcessesRemaining": false
+  },
+  "authorizedNextWork": [
+    "Release/review the default-off exact-build prefetch implementation.",
+    "Validate and record checks.prefetch=true separately before enabling another Spotify version.",
+    "Treat standalone CLI batch lookahead or parallel native extraction as separate future designs."
+  ],
+  "forbiddenUnderCurrentPlan": [
+    "Enable prefetch on capture-supported builds that lack checks.prefetch=true.",
+    "Claim concurrent native extraction or universal Spotify-version support.",
+    "Claim standalone CLI playlist acceleration from this increment."
+  ]
+}

@@ -17,6 +17,7 @@
     "test:webapp": "cd webapp && bun test src/server/__tests__",
     "typecheck:webapp": "cd webapp && bun run typecheck",
     "doctor": "bun run scripts/doctor.ts",
+    "supervise": "bun run scripts/supervise.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
@@ -27,7 +28,8 @@
     "node-id3": "^0.2.6"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.1",
+    "@typesafe-ai/sdk": "^0.6.0",
     "typescript": "^6.0.3",
     "vitepress": "^1.6.4"
   }

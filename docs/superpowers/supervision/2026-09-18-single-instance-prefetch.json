@@ -1,0 +1,322 @@
+{
+  "version": 1,
+  "name": "single-instance-prefetch-supervision",
+  "sources": {
+    "spec": "docs/superpowers/specs/2026-09-18-single-instance-prefetch-design.md",
+    "plan": "docs/superpowers/plans/2026-09-18-single-instance-prefetch.md"
+  },
+  "purpose": "Stable semantic supervision contract derived from the single-instance prefetch spec/plan. The prose spec and plan remain authoritative if this derived contract conflicts with them.",
+  "typesafe": {
+    "model": "jev-latest",
+    "timeoutMs": 60000,
+    "rules": [
+      "Pass only evidence relevant to the selected question set.",
+      "Use explicit insufficient_evidence/uncertain choices whenever evidence may genuinely be absent.",
+      "Treat probabilities as semantic signals, not calibrated correctness probabilities.",
+      "Do not use TypeSafe for exact numeric thresholds, hashes, exit codes, process identity, or other deterministically checkable facts.",
+      "Phase transitions are authorized by deterministic policy; TypeSafe is an independent semantic verifier."
+    ]
+  },
+  "epistemicTypes": [
+    "user_requirement",
+    "spec_requirement",
+    "direct_observation",
+    "deterministic_fact",
+    "tool_result",
+    "derived_claim",
+    "hypothesis",
+    "assumption",
+    "contradicted",
+    "unverified"
+  ],
+  "invariants": {
+    "single_spotify_instance": "Production scope uses one authenticated patched Spotify process.",
+    "sequential_capture_authority": "The existing capture worker remains singular and authoritative; prefetch never performs concurrent playback capture.",
+    "exact_variant_identity": "Requested/relinked track, predicted exact variant/fileId, observed playback fileId, and validated output must not be conflated.",
+    "queue_authority": "The existing priority queue remains authoritative; speculative work does not dequeue, promote, finish, or create jobs.",
+    "bounded_speculation": "At most two speculative acquisitions and the next two distinct eligible queued variants.",
+    "priority_not_blocked": "Priority playback/capture is never delayed waiting for prefetch.",
+    "bounded_cleanup": "Every acquisition exit cancels delivery and destroys its streamer with bounded cleanup; cleanup uncertainty disables new speculation.",
+    "honest_progress": "Cache/prefetch state is subordinate metadata and never implies export completion or playable output.",
+    "protected_data_boundary": "Do not expose signed URLs, credentials, cookies, tokens, raw protected media, or streamer handles.",
+    "default_off": "Production prefetch, if authorized by the gate, starts opt-in/default-off.",
+    "cli_scope": "Standalone CLI and its sequential batch submission remain behaviorally unchanged in this increment; do not claim CLI playlist acceleration.",
+    "no_unbounded_parallel_extraction_search": "A failed prefetch performance gate does not authorize an unbounded search for a different parallel-native-extraction path.",
+    "owned_process_cleanup_only": "Never kill processes by broad name matching; act only on proven investigation/daemon ownership.",
+    "restore_normal_environment": "Investigation runs restore the user's normal daemon and verify IPC, HTTP, and owned Spotify health."
+  },
+  "questionSets": {
+    "plan_preflight": {
+      "requirements_covered": {
+        "type": "choice",
+        "instructions": "Does the proposed plan explicitly cover all material goals, constraints, preservation requirements, verification obligations, and phase conditions from the supplied spec/plan state?",
+        "criteria": {
+          "satisfied": "All material requirements relevant to this phase are represented by implementation, evidence-gathering, or verification steps.",
+          "violated": "At least one material requirement is omitted, contradicted, or silently bypassed.",
+          "insufficient_evidence": "The supplied task/spec/plan state is too incomplete to judge coverage."
+        }
+      },
+      "scope_respected": {
+        "type": "choice",
+        "instructions": "Does the proposed plan remain within the authorized scope and non-goals for the current phase?",
+        "criteria": {
+          "satisfied": "The plan stays within the current phase and does not introduce excluded/not-yet-authorized production scope, CLI acceleration claims, extra processes/accounts, decoder redesign, or unbounded parallel-extraction research.",
+          "violated": "The plan materially enters excluded or not-yet-authorized scope.",
+          "insufficient_evidence": "The proposed plan or current phase is not specific enough to judge."
+        }
+      },
+      "verification_matches_claims": {
+        "type": "choice",
+        "instructions": "Is the proposed verification strong enough for the claims the plan expects to make?",
+        "criteria": {
+          "satisfied": "Verification directly exercises the behavior needed to support the intended claims, including live checks where the spec requires live evidence.",
+          "violated": "The plan relies on weaker evidence such as mocks, unit tests, or indirect health signals for claims that require direct/live evidence.",
+          "insufficient_evidence": "The intended claims or verification plan is not clear enough to compare."
+        }
+      },
+      "preservation_requirements_live": {
+        "type": "choice",
+        "instructions": "Are the spec's important preservation requirements and invariants still active in the plan rather than shadowed by the immediate optimization goal?",
+        "criteria": {
+          "satisfied": "Single capture, queue authority, identity, bounded resources, cleanup, honest progress, CLI scope, and normal-environment restoration are represented where relevant.",
+          "violated": "One or more relevant preservation requirements have effectively disappeared from the plan.",
+          "insufficient_evidence": "The plan lacks enough detail to tell."
+        }
+      }
+    },
+    "action_guard": {
+      "phase_alignment": {
+        "type": "choice",
+        "instructions": "Is this proposed action authorized by the current plan phase and deterministic gate state?",
+        "criteria": {
+          "aligned": "The action belongs to the current authorized phase and does not cross a gated boundary.",
+          "conflict": "The action enters a later/forbidden phase, implements production prefetch before authorization, or continues production work after a NO-GO.",
+          "uncertain": "Current phase or deterministic gate state is not supplied clearly enough."
+        }
+      },
+      "invariant_preservation": {
+        "type": "choice",
+        "instructions": "Does this proposed action preserve the material invariants relevant to it?",
+        "criteria": {
+          "aligned": "The action advances the task without violating applicable single-instance/single-capture authority, exact identity, queue authority, resource bounds, cleanup, progress semantics, data boundaries, CLI scope, or ownership/restoration requirements.",
+          "conflict": "The action directly violates or creates a substantial unaddressed risk to at least one applicable invariant.",
+          "uncertain": "The action's consequences or relevant invariants are insufficiently described."
+        }
+      },
+      "evidence_value": {
+        "type": "choice",
+        "instructions": "Is this proposed action likely to reduce material uncertainty or satisfy a concrete requirement rather than merely create activity?",
+        "criteria": {
+          "high_value": "It directly tests a live hypothesis, fills a known evidence gap, satisfies a required implementation step, or verifies a required postcondition.",
+          "low_value": "It mostly repeats existing evidence, changes unrelated code, or does not materially advance the current gate/requirement.",
+          "uncertain": "The purpose or current evidence gaps are not clear enough."
+        }
+      },
+      "destructive_or_stateful_justification": {
+        "type": "choice",
+        "instructions": "For a state-changing, destructive, process-control, or environment-changing action, is its scope and ownership adequately justified by the supplied evidence?",
+        "criteria": {
+          "justified": "The exact owned target and required effect are established and the action is appropriately bounded.",
+          "unjustified": "Ownership/target is ambiguous, the operation is broader than necessary, or restoration is not accounted for.",
+          "not_applicable": "The action is not materially destructive/stateful.",
+          "uncertain": "The supplied state is insufficient to establish ownership or consequences."
+        }
+      }
+    },
+    "result_interpretation": {
+      "step_contract_satisfied": {
+        "type": "choice",
+        "instructions": "Do the observed results actually satisfy the material postconditions of the step contract?",
+        "criteria": {
+          "satisfied": "Every material postcondition is directly supported by the observations.",
+          "partial": "Some intended effects are demonstrated but at least one material postcondition remains unmet or unverified.",
+          "violated": "The main intended postcondition is contradicted or failed.",
+          "insufficient_evidence": "Observations are too incomplete to judge."
+        }
+      },
+      "interpretation_grounded": {
+        "type": "choice",
+        "instructions": "Is the agent's interpretation of the tool results tightly supported by those observations without promoting assumptions or hypotheses into facts?",
+        "criteria": {
+          "grounded": "The interpretation matches the observed scope and uncertainty.",
+          "overclaim": "It asserts more than the observations establish, ignores contradictory evidence, or treats a hypothesis/assumption as verified.",
+          "underclaim": "It materially understates direct evidence in a way that would misdirect subsequent work.",
+          "insufficient_evidence": "The interpretation or observations are missing."
+        }
+      },
+      "claim_scope_matches_evidence": {
+        "type": "choice",
+        "instructions": "Does the proposed factual claim stay within the exact version, runtime, population, timing, and behavior actually supported by the supplied evidence?",
+        "criteria": {
+          "matched": "The claim is scoped no broader than the evidence.",
+          "overgeneralized": "The claim widens version/runtime/behavior or causal scope beyond what was tested or observed.",
+          "contradicted": "The evidence directly conflicts with the claim.",
+          "insufficient_evidence": "The relationship cannot be judged from the supplied evidence."
+        }
+      },
+      "next_evidence_gap": {
+        "type": "choice",
+        "instructions": "What kind of evidence gap remains most materially unresolved after this step?",
+        "criteria": {
+          "none": "The step's intended evidence objective is adequately resolved.",
+          "direct_reproduction": "The original/live behavior still needs direct exercise.",
+          "identity_or_attribution": "Track/file/variant/process ownership or attribution remains uncertain.",
+          "lifecycle_or_cleanup": "Cancellation, cleanup, restart, resource ownership, or late-callback behavior remains uncertain.",
+          "performance": "The relevant performance/usefulness metric remains insufficiently measured.",
+          "correctness": "Output validity/completeness/behavioral correctness remains insufficiently demonstrated.",
+          "reproducibility": "Exact environment, fingerprints, commands, or provenance remain insufficiently recorded.",
+          "other": "A material evidence gap remains but does not fit the listed categories."
+        }
+      }
+    },
+    "trajectory_audit": {
+      "plan_still_valid": {
+        "type": "choice",
+        "instructions": "Given the current evidence, is the active plan still an appropriate route to the stated goal?",
+        "criteria": {
+          "valid": "New evidence is consistent with the plan's assumptions and next steps.",
+          "replan": "New evidence materially invalidates the plan's hypothesis, phase, or expected route.",
+          "uncertain": "There is not enough current evidence to judge."
+        }
+      },
+      "semantic_progress": {
+        "type": "choice",
+        "instructions": "Across the recent actions, is the agent reducing important uncertainty or satisfying requirements rather than only producing activity?",
+        "criteria": {
+          "progressing": "Recent work closes requirements, discriminates hypotheses, or materially improves verified state.",
+          "stalled": "Recent work yields little new evidence or repeatedly reaches the same unresolved state.",
+          "regressing": "Recent work loses previously satisfied requirements/evidence or moves away from the authorized goal.",
+          "uncertain": "The recent trajectory is too incomplete to assess."
+        }
+      },
+      "thrashing": {
+        "type": "choice",
+        "instructions": "Does the recent trajectory show repeated variants of the same unsuccessful strategy without a meaningful new hypothesis or discriminating experiment?",
+        "criteria": {
+          "no": "Iterations are producing new information or intentionally converging.",
+          "yes": "The agent is cycling/retrying locally without meaningful information gain.",
+          "uncertain": "Too few or insufficiently described actions are supplied."
+        }
+      },
+      "requirement_shadowing": {
+        "type": "choice",
+        "instructions": "Has concentration on the current subproblem caused any still-relevant spec requirement or invariant to disappear from the active reasoning/plan?",
+        "criteria": {
+          "no": "Relevant requirements remain represented and checked.",
+          "yes": "At least one material requirement/invariant is no longer being accounted for.",
+          "uncertain": "Current requirement status or active plan is incomplete."
+        }
+      },
+      "stale_beliefs": {
+        "type": "choice",
+        "instructions": "Are any active hypotheses, assumptions, or derived claims being used despite newer evidence contradicting or superseding them?",
+        "criteria": {
+          "none": "Active beliefs remain compatible with current evidence or are explicitly marked uncertain.",
+          "present": "At least one active premise should be retired, downgraded, or reclassified.",
+          "uncertain": "The belief/evidence ledger is incomplete."
+        }
+      }
+    },
+    "closure_audit": {
+      "correct_identity": {
+        "type": "choice",
+        "instructions": "Does the supplied final evidence adequately establish the spec's correct-identity criterion at the scope being claimed?",
+        "criteria": {
+          "satisfied": "Requested/relinked track, exact selected variant/fileId, observed playback identity, and validated output agree wherever required.",
+          "violated": "There is an identity mismatch, misattribution, or unsupported identity assumption.",
+          "insufficient_evidence": "Required identity observations are missing."
+        }
+      },
+      "lifecycle_safety": {
+        "type": "choice",
+        "instructions": "Does the supplied final evidence adequately establish lifecycle safety for the scope being claimed?",
+        "criteria": {
+          "satisfied": "Cancellation, handoff, cleanup, restart/ownership behavior, and single-owner capture are demonstrated to the required scope.",
+          "violated": "A lifecycle invariant is broken or unsafe behavior is observed.",
+          "insufficient_evidence": "Required lifecycle behavior has not been directly demonstrated."
+        }
+      },
+      "bounded_resources": {
+        "type": "choice",
+        "instructions": "Does the supplied final evidence adequately establish the spec's bounded-resource criterion for the scope being claimed?",
+        "criteria": {
+          "satisfied": "Speculation/lookahead, memory/payload handling, timeouts, and cleanup remain within the specified bounds.",
+          "violated": "An applicable resource bound is exceeded or unbounded behavior is introduced.",
+          "insufficient_evidence": "Resource-bound behavior has not been adequately demonstrated."
+        }
+      },
+      "honest_behavior": {
+        "type": "choice",
+        "instructions": "Does the supplied final behavior and documentation preserve truthful distinction between cache/prefetch progress and completed playable exports, with explicit failures/fallbacks?",
+        "criteria": {
+          "satisfied": "Observable state and documentation do not imply success/completion beyond what actually occurred.",
+          "violated": "Cache/prefetch state is presented as completed media, failures are hidden, or claims exceed observed behavior.",
+          "insufficient_evidence": "Relevant observable behavior/documentation is missing."
+        }
+      },
+      "reproducibility": {
+        "type": "choice",
+        "instructions": "Is the final evidence sufficiently reproducible for the scope being claimed?",
+        "criteria": {
+          "satisfied": "Exact build/runtime provenance, probes/commands, machine-readable results, invalid trials, tests, and environment restoration are recorded with limitations made explicit.",
+          "violated": "Recorded provenance is materially misleading or required evidence was silently discarded.",
+          "insufficient_evidence": "Important provenance, commands, results, or restoration evidence is missing."
+        }
+      },
+      "final_claims_grounded": {
+        "type": "choice",
+        "instructions": "Are the proposed final claims and handover conclusions all supported at their stated scope by the supplied evidence and deterministic gate result?",
+        "criteria": {
+          "grounded": "Claims accurately reflect what was demonstrated, including NO-GO/INCONCLUSIVE outcomes and limitations.",
+          "overclaim": "At least one material claim exceeds, contradicts, or obscures the evidence/gate result.",
+          "incomplete": "The claims omit a material failure, limitation, unresolved assumption, or required handover fact.",
+          "insufficient_evidence": "The final claims or evidence are not complete enough to judge."
+        }
+      }
+    }
+  },
+  "deterministicPolicies": {
+    "gateA": {
+      "requiredTrue": [
+        "investigation_documented",
+        "instrumentation_reviewed",
+        "renderer_services_ready",
+        "process_ownership_verified",
+        "isolated_exact_version_verified",
+        "normal_daemon_restoration_verified"
+      ],
+      "result": "PASS only when every required field is true; otherwise BLOCKED/INCOMPLETE."
+    },
+    "gateB": {
+      "required": {
+        "minimumValidPairedBatchRuns": 3,
+        "minimumMedianImprovementFraction": 0.1,
+        "everyPairedBatchRunMustImprove": true,
+        "invalidOrMisattributedOutputsAllowed": 0,
+        "exactOutputsMustBeStable": true,
+        "additionalObservedCaptureFailuresAllowed": 0,
+        "additionalObservedBufferingStallsAllowed": 0
+      },
+      "outcomes": {
+        "GO": "All requirements pass.",
+        "NO_GO": "Enough valid evidence exists and at least one acceptance requirement fails.",
+        "INCONCLUSIVE": "There is not enough valid evidence to apply the gate reliably."
+      }
+    },
+    "phaseAuthorization": {
+      "phase1": "Authorized while preserving unrelated changes and ownership safety.",
+      "phase2": "Authorized after Gate A readiness.",
+      "phases3To5": "Authorized only when Gate A == PASS and Gate B == GO.",
+      "noGo": "If Gate B == NO_GO, phases 3-5 are forbidden; publish findings, restore environment, verify changed investigation/instrumentation work, update HANDOVER, and stop production prefetch implementation.",
+      "phase6AfterGo": "Run full integrated verification/live acceptance after authorized production implementation.",
+      "phase6AfterNoGo": "Run closure verification appropriate to phases 1-2, document the NO-GO, update HANDOVER, and do not run production-prefetch live acceptance that presupposes phases 3-5."
+    }
+  },
+  "batchUsage": {
+    "before_plan_execution": "plan_preflight",
+    "before_risky_or_stateful_action": "action_guard",
+    "after_meaningful_tool_or_test_result": "result_interpretation",
+    "every_few_material_actions_or_when_stuck": "trajectory_audit",
+    "before_phase_transition_or_final_claim": "closure_audit"
+  }
+}

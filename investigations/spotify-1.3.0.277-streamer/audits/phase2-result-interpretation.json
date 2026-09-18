@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "kind": "typesafe-supervision-audit",
+  "contract": "single-instance-prefetch-supervision",
+  "startedAt": "2026-09-18T06:10:59.183Z",
+  "durationMs": 7788.50925,
+  "requestId": "req_01a0b323d9bc7447b9347772ab98aecf",
+  "model": "jev-1.13.0",
+  "usage": {
+    "input_tokens": 12422,
+    "output_tokens": 275
+  },
+  "provenance": {
+    "contractPath": "/Volumes/Repositories/soggfy-cli/docs/superpowers/supervision/2026-09-18-single-instance-prefetch.json",
+    "contractSha256": "1ca17125907eeaee87655b23c9f49351b6d6cb90bdb3d4fe5c69913a51688fbe",
+    "statePath": "/Volumes/ssd1/tmp/soggfy-result-interpretation-state.json",
+    "stateSha256": "b5a033f19a70940a064070f1ef823cd8efea22c6364c448dbfc175596b2b9bbc",
+    "contexts": {
+      "phase2_result": {
+        "path": "/Volumes/Repositories/soggfy-cli/investigations/spotify-1.3.0.277-streamer/results/phase2-live-probes-20260918.json",
+        "sha256": "8461577584bb93ee274e307c89af56701b99e69f4a1236b3a72d67c24223202b"
+      },
+      "results_summary": {
+        "path": "/Volumes/Repositories/soggfy-cli/investigations/spotify-1.3.0.277-streamer/RESULTS.md",
+        "sha256": "a71e5baf74f50195669f9cd64995d47536de3d1df81de4deff75d84882d69de1"
+      },
+      "spec": {
+        "path": "/Volumes/Repositories/soggfy-cli/docs/superpowers/specs/2026-09-18-single-instance-prefetch-design.md",
+        "sha256": "b60f85213b3e6dd9109875ecbff38af18a6093b41b6baacb5362da391733d0d7"
+      }
+    }
+  },
+  "sets": [
+    "result_interpretation"
+  ],
+  "questionOrigins": {
+    "step_contract_satisfied": {
+      "set": "result_interpretation",
+      "id": "step_contract_satisfied"
+    },
+    "interpretation_grounded": {
+      "set": "result_interpretation",
+      "id": "interpretation_grounded"
+    },
+    "claim_scope_matches_evidence": {
+      "set": "result_interpretation",
+      "id": "claim_scope_matches_evidence"
+    },
+    "next_evidence_gap": {
+      "set": "result_interpretation",
+      "id": "next_evidence_gap"
+    }
+  },
+  "gates": {
+    "gateA": {
+      "decision": "PASS",
+      "missing": []
+    },
+    "gateB": {
+      "decision": "NO-GO",
+      "failures": [
+        "medianImprovementFraction=0.005766332685840339<0.1",
+        "notEveryPairedBatchRunImproved",
+        "invalidOrMisattributedOutputs=1>0"
+      ],
+      "unknown": [
+        "additionalObservedCaptureFailures",
+        "additionalObservedBufferingStalls"
+      ]
+    },
+    "productionPhases3To5Authorized": false
+  },
+  "answers": {
+    "step_contract_satisfied": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.95,
+      "probabilities": {
+        "partial": 0.04,
+        "satisfied": 0.96,
+        "insufficient_evidence": 0,
+        "violated": 0
+      }
+    },
+    "interpretation_grounded": {
+      "type": "choice",
+      "choice": "grounded",
+      "confidence": 0.99,
+      "probabilities": {
+        "overclaim": 0,
+        "insufficient_evidence": 0,
+        "grounded": 1,
+        "underclaim": 0
+      }
+    },
+    "claim_scope_matches_evidence": {
+      "type": "choice",
+      "choice": "matched",
+      "confidence": 0.65,
+      "probabilities": {
+        "matched": 0.74,
+        "insufficient_evidence": 0.22,
+        "overgeneralized": 0.03,
+        "contradicted": 0.01
+      }
+    },
+    "next_evidence_gap": {
+      "type": "choice",
+      "choice": "performance",
+      "confidence": 0.69,
+      "probabilities": {
+        "lifecycle_or_cleanup": 0,
+        "reproducibility": 0.08,
+        "none": 0.12,
+        "direct_reproduction": 0.01,
+        "performance": 0.74,
+        "identity_or_attribution": 0.05,
+        "other": 0,
+        "correctness": 0
+      }
+    }
+  },
+  "normalized": {
+    "step_contract_satisfied": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.95,
+        "probabilities": {
+          "partial": 0.04,
+          "satisfied": 0.96,
+          "insufficient_evidence": 0,
+          "violated": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 0.96,
+          "partial": 0.04,
+          "violated": 0,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "interpretation_grounded": {
+      "raw": {
+        "type": "choice",
+        "choice": "grounded",
+        "confidence": 0.99,
+        "probabilities": {
+          "overclaim": 0,
+          "insufficient_evidence": 0,
+          "grounded": 1,
+          "underclaim": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "grounded": 1,
+          "overclaim": 0,
+          "underclaim": 0,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "claim_scope_matches_evidence": {
+      "raw": {
+        "type": "choice",
+        "choice": "matched",
+        "confidence": 0.65,
+        "probabilities": {
+          "matched": 0.74,
+          "insufficient_evidence": 0.22,
+          "overgeneralized": 0.03,
+          "contradicted": 0.01
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "matched": 0.74,
+          "overgeneralized": 0.03,
+          "contradicted": 0.01,
+          "insufficient_evidence": 0.22
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "next_evidence_gap": {
+      "raw": {
+        "type": "choice",
+        "choice": "performance",
+        "confidence": 0.69,
+        "probabilities": {
+          "lifecycle_or_cleanup": 0,
+          "reproducibility": 0.08,
+          "none": 0.12,
+          "direct_reproduction": 0.01,
+          "performance": 0.74,
+          "identity_or_attribution": 0.05,
+          "other": 0,
+          "correctness": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 0.9999999999999999,
+        "normalized": {
+          "none": 0.12000000000000001,
+          "direct_reproduction": 0.010000000000000002,
+          "identity_or_attribution": 0.05000000000000001,
+          "lifecycle_or_cleanup": 0,
+          "performance": 0.7400000000000001,
+          "correctness": 0,
+          "reproducibility": 0.08000000000000002,
+          "other": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    }
+  }
+}

@@ -1,0 +1,201 @@
+{
+  "version": 1,
+  "kind": "typesafe-supervision-audit",
+  "contract": "single-instance-prefetch-supervision",
+  "startedAt": "2026-09-18T05:25:16.541Z",
+  "durationMs": 883.9559169999999,
+  "requestId": "req_01a0b2f9e7387b03aeae2835db853208",
+  "model": "jev-1.13.0",
+  "usage": {
+    "input_tokens": 6331,
+    "output_tokens": 203
+  },
+  "provenance": {
+    "contractPath": "/Volumes/Repositories/soggfy-cli/docs/superpowers/supervision/2026-09-18-single-instance-prefetch.json",
+    "contractSha256": "1ca17125907eeaee87655b23c9f49351b6d6cb90bdb3d4fe5c69913a51688fbe",
+    "statePath": "/Volumes/Repositories/soggfy-cli/investigations/spotify-1.3.0.277-streamer/supervision-state.json",
+    "stateSha256": "e7664e2d6ae58aa1a0b59b4b0653069e9c7e95925ed6e41a8a8514bade7abfff",
+    "contexts": {
+      "spec": {
+        "path": "/Volumes/Repositories/soggfy-cli/docs/superpowers/specs/2026-09-18-single-instance-prefetch-design.md",
+        "sha256": "742393122d45dd808bba9ae7a84b083ba8c3dab59b558abff86210ea6cc3a988"
+      },
+      "plan": {
+        "path": "/Volumes/Repositories/soggfy-cli/docs/superpowers/plans/2026-09-18-single-instance-prefetch.md",
+        "sha256": "3d61c9dffdb80e4ef97c91415bd5c91a12d879933ea9d000f675b769475b297d"
+      }
+    }
+  },
+  "sets": [
+    "plan_preflight"
+  ],
+  "questionOrigins": {
+    "requirements_covered": {
+      "set": "plan_preflight",
+      "id": "requirements_covered"
+    },
+    "scope_respected": {
+      "set": "plan_preflight",
+      "id": "scope_respected"
+    },
+    "verification_matches_claims": {
+      "set": "plan_preflight",
+      "id": "verification_matches_claims"
+    },
+    "preservation_requirements_live": {
+      "set": "plan_preflight",
+      "id": "preservation_requirements_live"
+    }
+  },
+  "gates": {
+    "gateA": {
+      "decision": "PASS",
+      "missing": []
+    },
+    "gateB": {
+      "decision": "NO-GO",
+      "failures": [
+        "medianImprovementFraction=0.005766332685840339<0.1",
+        "notEveryPairedBatchRunImproved",
+        "invalidOrMisattributedOutputs=1>0"
+      ],
+      "unknown": [
+        "additionalObservedCaptureFailures",
+        "additionalObservedBufferingStalls"
+      ]
+    },
+    "productionPhases3To5Authorized": false
+  },
+  "answers": {
+    "requirements_covered": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.63,
+      "probabilities": {
+        "satisfied": 0.75,
+        "insufficient_evidence": 0.01,
+        "violated": 0.24
+      }
+    },
+    "scope_respected": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.84,
+      "probabilities": {
+        "satisfied": 0.89,
+        "insufficient_evidence": 0,
+        "violated": 0.11
+      }
+    },
+    "verification_matches_claims": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.81,
+      "probabilities": {
+        "satisfied": 0.87,
+        "insufficient_evidence": 0.02,
+        "violated": 0.11
+      }
+    },
+    "preservation_requirements_live": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 1,
+      "probabilities": {
+        "satisfied": 1,
+        "insufficient_evidence": 0,
+        "violated": 0
+      }
+    }
+  },
+  "normalized": {
+    "requirements_covered": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.63,
+        "probabilities": {
+          "satisfied": 0.75,
+          "insufficient_evidence": 0.01,
+          "violated": 0.24
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 0.75,
+          "violated": 0.24,
+          "insufficient_evidence": 0.01
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "scope_respected": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.84,
+        "probabilities": {
+          "satisfied": 0.89,
+          "insufficient_evidence": 0,
+          "violated": 0.11
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 0.89,
+          "violated": 0.11,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "verification_matches_claims": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.81,
+        "probabilities": {
+          "satisfied": 0.87,
+          "insufficient_evidence": 0.02,
+          "violated": 0.11
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 0.87,
+          "violated": 0.11,
+          "insufficient_evidence": 0.02
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "preservation_requirements_live": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "satisfied": 1,
+          "insufficient_evidence": 0,
+          "violated": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 1,
+          "violated": 0,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    }
+  }
+}

@@ -4,7 +4,8 @@ import { extname, join } from "path";
 import { cloneSpotifyLoginState, resetSpotifyTransientRuntimeState, terminateProcessTree } from "../../../src/core/spotify-runtime";
 import { sendIPC as sendIpcCommand } from "../../../src/core/ipc";
 import { getDaemonSpotifyInstance } from "../../../src/core/daemon-runtime";
-import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion } from "../../../src/core/capture-control";
+import { parsePlaybackConfirmation, requestTrackPlayback, waitForTrackCompletion, type PlaybackConfirmation } from "../../../src/core/capture-control";
+import type { PrefetchVariant } from "../../../src/core/spotify-prefetch";
 import { captureMaxWaitMs, captureMonitorDecision, PlaybackProgressMonitor } from "../../../src/core/capture-monitor";
 import { BestEffortCaptureTraceRecorder } from "../../../src/core/capture-trace";
 import { migrateOfficialSpotifyAuthOnce } from "../../../src/core/auth-migration";
@@ -88,6 +89,7 @@ export class SpotifyInstance {
   logs: string[] = [];
   lastHeartbeatAt?: string;
   lastError?: string;
+  generation = 0;
 
   constructor(id: number) {
     this.id = id;
@@ -125,6 +127,7 @@ export class SpotifyInstance {
       statusText: this.statusText,
       lastHeartbeatAt: this.lastHeartbeatAt,
       lastError: this.lastError,
+      generation: this.generation,
       logs: this.logs,
     };
   }
@@ -197,6 +200,7 @@ export class SpotifyInstance {
       }
       this.isReady = true;
       this.statusText = "Ready";
+      this.generation += 1;
       this.log("Attached to daemon-owned Spotify instance.");
       return;
     }
@@ -291,6 +295,7 @@ export class SpotifyInstance {
 
     this.isReady = true;
     this.statusText = "Ready";
+    this.generation += 1;
     this.log("Instance ready.");
   }
 
@@ -377,7 +382,14 @@ export class SpotifyInstance {
     await this.start();
   }
 
-  async downloadJob(job: DownloadJob): Promise<DownloadJob> {
+  async downloadJob(
+    job: DownloadJob,
+    options: {
+      prefetchedVariant?: PrefetchVariant;
+      onPlaybackConfirmed?: (confirmation: PlaybackConfirmation) => Promise<string | undefined> | string | undefined;
+      onVariantMismatch?: (confirmation: PlaybackConfirmation, expected: PrefetchVariant) => Promise<void> | void;
+    } = {},
+  ): Promise<DownloadJob> {
     const trackId = job.trackId;
     const trace = new BestEffortCaptureTraceRecorder(trackId, {
       onError: (error) => jobs.log(
@@ -410,6 +422,7 @@ export class SpotifyInstance {
     this.currentTrack = trackId;
     this.currentJobId = job.id;
     jobs.transition(job, "assigned", { instanceId: this.id, attempts: job.attempts + 1 });
+    let prefetchedDecodeSpeedEnabled = false;
 
     try {
       this.statusText = `Starting: ${trackId}`;
@@ -444,6 +457,7 @@ export class SpotifyInstance {
       // Wait for the target track to actually start playing (not an ad).
       // The dylib gates capture via PlaybackStateChanged notifications.
       let trackConfirmed = false;
+      let confirmedPlayback: PlaybackConfirmation | undefined;
       for (let i = 0; i < 30; i++) {
         assertJobActive(job);
         await new Promise((r) => setTimeout(r, 500));
@@ -455,6 +469,7 @@ export class SpotifyInstance {
             if (i % 4 === 0) jobs.log(job, `waiting: ad playing (${playing.uri})`);
           } else if (playing.confirmed) {
             trackConfirmed = true;
+            confirmedPlayback = playing;
             jobs.log(job, "target track confirmed playing");
             break;
           }
@@ -465,6 +480,35 @@ export class SpotifyInstance {
         trace.record({ type: "timeout", prerequisite: "target playback confirmation", elapsedMs: 15_000 });
         await tracedSend("pause").catch(() => undefined);
         throw new Error(`target track ${trackId} was not confirmed playing; trace: ${trace.path ?? "unavailable"}`);
+      }
+
+      const rendererSelectedFileId = confirmedPlayback
+        ? await options.onPlaybackConfirmed?.(confirmedPlayback)
+        : undefined;
+      const selectedFileId = rendererSelectedFileId ?? confirmedPlayback?.fileId;
+      if (options.prefetchedVariant) {
+        if (selectedFileId === options.prefetchedVariant.fileId) {
+          const response = await tracedSend("set_decode_speed 16", 1);
+          if (!response.startsWith("decode speed ")) {
+            throw new Error(`failed to enable prefetched decode speed: ${response}`);
+          }
+          prefetchedDecodeSpeedEnabled = true;
+          jobs.log(job, "prefetched exact variant confirmed; using 16x sequential extraction");
+        } else {
+          jobs.patch(job, {
+            prefetch: {
+              state: "missed",
+              reason: "variant-mismatch",
+              updatedAt: new Date().toISOString(),
+            },
+          }, "prefetch miss: selected playback variant differed from prefetched variant");
+          await options.onVariantMismatch?.(confirmedPlayback ?? {
+            confirmed: true,
+            isAd: false,
+            gated: false,
+            uri: `spotify:track:${trackId}`,
+          }, options.prefetchedVariant);
+        }
       }
 
       trace.record({ type: "phase", phase: "awaiting_capture" });
@@ -602,6 +646,9 @@ export class SpotifyInstance {
       await tracedSend("pause").catch(() => undefined);
       throw err;
     } finally {
+      if (prefetchedDecodeSpeedEnabled) {
+        await tracedSend("set_decode_speed 12", 1).catch(() => undefined);
+      }
       this.statusText = "Ready";
       this.currentTrack = null;
       this.currentJobId = null;

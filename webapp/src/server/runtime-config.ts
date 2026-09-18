@@ -23,7 +23,24 @@ export function intFromEnv(value: string | undefined, fallback: number): number 
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+export function strictBooleanEnv(name: string, value: string | undefined, fallback = false): boolean {
+  if (value === undefined || value === "") return fallback;
+  if (value === "1") return true;
+  if (value === "0") return false;
+  throw new Error(`${name} must be exactly 0 or 1`);
+}
+
+export type PrefetchMode = "on" | "off";
+
+export function prefetchModeFromEnv(value: string | undefined): PrefetchMode {
+  if (value === undefined || value === "") return "off";
+  if (value === "1") return "on";
+  if (value === "0") return "off";
+  throw new Error("SOGGFY_PREFETCH must be exactly 0 or 1 when set");
+}
+
 export const USE_DAEMON_INSTANCE = process.env.SOGGFY_USE_DAEMON_INSTANCE === "1";
+export const PREFETCH_MODE = prefetchModeFromEnv(process.env.SOGGFY_PREFETCH);
 export const POOL_SIZE = USE_DAEMON_INSTANCE ? 1 : Math.max(1, intFromEnv(process.env.SOGGFY_POOL_SIZE, 1));
 export const SOGGFY_HIDDEN = process.env.SOGGFY_HIDDEN !== "0";
 export const MAX_ATTEMPTS = Math.max(1, intFromEnv(process.env.SOGGFY_MAX_ATTEMPTS, 3));

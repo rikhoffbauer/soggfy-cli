@@ -152,6 +152,10 @@ function stateDetail(job: DownloadJob) {
   if (job.state === "capturing" && job.durationMs) return `Capturing · ${Math.round(job.durationMs / 1000)} s source`;
   if (job.state === "transcoding") return `Encoding ${job.outputFormat || "mp3"}`;
   if (job.state === "finalizing") return "Validating captured stream";
+  if (job.state === "queued" && job.prefetch?.state === "cached") return "Cached; waiting to capture";
+  if (job.state === "queued" && job.prefetch?.state === "prefetching") return "Prefetching exact Spotify variant";
+  if (job.state === "queued" && job.prefetch?.state === "resolving") return "Resolving prefetch variant";
+  if (job.state === "queued" && job.prefetch?.state === "missed") return "Prefetch missed; normal capture pending";
   if (job.state === "queued") return "Waiting for capture instance";
   return stateLabel(job.state);
 }

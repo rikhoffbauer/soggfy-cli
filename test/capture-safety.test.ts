@@ -53,3 +53,36 @@ test("get_playing cannot block the IPC server indefinitely on the main queue", (
   expect(section).toContain("std::chrono::milliseconds(750)");
   expect(section).toContain('state_value = @"unknown"');
 });
+
+
+test("native source investigation tracing remains opt-in and bounded", () => {
+  const decodeSource = Bun.file(new URL("../soggfy-macos/Payload/DecodeHook.mm", import.meta.url));
+  return decodeSource.text().then((source) => {
+    expect(source).toContain('getenv("SOGGFY_INVESTIGATE_OGG_CONTEXT")');
+    expect(source).toContain("kMaxInvestigationStreams = 16");
+    expect(source).toContain("kMaxInvestigationDecoders = 32");
+    expect(source).toContain("kMaxProductionDecodeSpeed = 64.0");
+    expect(source).toContain("kMaxInvestigationDecodeSpeed = 256.0");
+    expect(source).toContain('getenv("SOGGFY_INVESTIGATION_ALLOW_HIGH_DECODE_SPEED")');
+    expect(source).toContain('getenv("SOGGFY_INVESTIGATE_DECODE_INPUT")');
+    expect(source).toContain('getenv("SOGGFY_INVESTIGATE_NATIVE_SOURCE")');
+    expect(source).toContain("kMaxInvestigationNativeSources = 16");
+    expect(source).toContain("0x11f029c");
+    expect(source).toContain("0x11f05ec");
+    expect(source).toContain("0x11f0974");
+    expect(source).toContain("0x11ee890");
+    expect(source).toContain("source_late_peek");
+    expect(source).toContain("source_late_consume");
+    expect(source).toContain("kMaxInvestigationDecodeInputBytes");
+    expect(source).toContain("64ULL * 1024ULL * 1024ULL");
+    expect(source).toContain("InvestigationCaptureDecodeInput(");
+    expect(source).toContain("InvestigationResetDecodeInput()");
+    expect(source).toContain("decoderPtr, x3, encodedRead");
+    expect(source).toContain("kSpotify130277OggStateOffset = 0x88");
+    expect(source).toContain('firstDecoderCall ? "decode_first"');
+    expect(source).toContain('eosSeenInCall ? "decode_eos_return" : "decode_progress"');
+    expect(source).toContain("firstStackCount = backtrace(firstStack, 16)");
+    expect(source).toContain('(snapshot.calls % 128) == 0');
+    expect(source).toContain('(it->second.pages % 128) == 0');
+  });
+});

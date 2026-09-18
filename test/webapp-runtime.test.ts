@@ -45,7 +45,7 @@ test("webapp jobs canonicalize unavailable track IDs before queueing", () => {
 });
 
 test("webapp download jobs never blindly replay a successfully requested track", () => {
-  const start = instanceSource.indexOf("  async downloadJob(job: DownloadJob)");
+  const start = instanceSource.indexOf("  async downloadJob(");
   const end = instanceSource.indexOf("  private refreshCapturedBytes", start);
   const downloadJob = instanceSource.slice(start, end);
   expect(downloadJob).toContain("requestTrackPlayback");
@@ -54,7 +54,7 @@ test("webapp download jobs never blindly replay a successfully requested track",
 });
 
 test("webapp capture coordinator records replay evidence and trusts byte progress", () => {
-  const start = instanceSource.indexOf("  async downloadJob(job: DownloadJob)");
+  const start = instanceSource.indexOf("  async downloadJob(");
   const end = instanceSource.indexOf("  private refreshCapturedBytes", start);
   const downloadJob = instanceSource.slice(start, end);
   expect(downloadJob).toContain("new BestEffortCaptureTraceRecorder(trackId");
@@ -98,9 +98,17 @@ test("standalone web Spotify instances reset transient save state before cloning
 
 
 test("webapp capture tracing is best-effort and cannot block IPC", () => {
-  const start = instanceSource.indexOf("  async downloadJob(job: DownloadJob)");
+  const start = instanceSource.indexOf("  async downloadJob(");
   const end = instanceSource.indexOf("  private refreshCapturedBytes", start);
   const downloadJob = instanceSource.slice(start, end);
   expect(downloadJob).toContain("BestEffortCaptureTraceRecorder");
   expect(downloadJob).not.toContain("new CaptureTraceRecorder(trackId)");
+});
+
+
+test("webapp only resets decode speed after a prefetched capture actually enabled 16x", async () => {
+  const source = await Bun.file(new URL("../webapp/src/server/spotify-instance.ts", import.meta.url)).text();
+  expect(source).toContain("let prefetchedDecodeSpeedEnabled = false");
+  expect(source).toContain("prefetchedDecodeSpeedEnabled = true");
+  expect(source).toContain("if (prefetchedDecodeSpeedEnabled)");
 });

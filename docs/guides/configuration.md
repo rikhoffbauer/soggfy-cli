@@ -18,6 +18,7 @@ Soggfy intentionally has a small configuration surface. Runtime state defaults t
 | `SOGGFY_MAX_ATTEMPTS` | `3` | Job attempt limit. |
 | `SOGGFY_MUTE_OUTPUT` | `1` | Mute audible Spotify output while capturing. |
 | `SOGGFY_HISTORY_LIMIT` | `250` | Maximum terminal jobs retained in the in-memory/history view. |
+| `SOGGFY_PREFETCH` | `0` | Opt-in two-slot exact-variant prefetch for registry-validated daemon builds. Only `0` or `1` are accepted. |
 | `SOGGFY_API_TOKEN` | unset | Required bearer token whenever `SOGGFY_HOST` is not loopback. |
 
 The normal runtime has one daemon-owned Spotify instance. The daemon and web UI/API share that same instance in-process; no additional web worker is created.
@@ -54,3 +55,7 @@ Use a temporary `SOGGFY_HOME` for smoke tests to guarantee isolation:
 ```sh
 SOGGFY_HOME=/tmp/soggfy-smoke soggfy daemon start
 ```
+
+## Queued prefetch
+
+`SOGGFY_PREFETCH=1` enables optional cache warming for the next two queued web/API jobs only when the exact Spotify build records `checks.prefetch=true` in the compatibility registry. It is currently validated for Spotify 1.3.0.277 arm64. Cached protected bytes are not a completed or playable Soggfy output; normal sequential capture, validation and publication still run. Renderer/variant/cleanup failures fall back to the normal capture path and are exposed in job prefetch metadata.

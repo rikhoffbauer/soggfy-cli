@@ -39,6 +39,16 @@ export interface OutputValidation {
   warnings: string[];
 }
 
+export interface JobPrefetchStatus {
+  state: "resolving" | "prefetching" | "cached" | "skipped" | "missed" | "error";
+  reason?: "unsupported-build" | "unknown-policy" | "ambiguous-variant" | "cancelled" | "variant-mismatch" | "cleanup-uncertain" | "prefetch-failed";
+  totalBytes?: number;
+  networkBytes?: number;
+  cachedBytes?: number;
+  elapsedMs?: number;
+  updatedAt: string;
+}
+
 export interface DownloadJob {
   id: string;
   trackId: string;
@@ -62,6 +72,7 @@ export interface DownloadJob {
   metadata?: TrackMetadata;
   validation?: OutputValidation;
   priorityInterrupted?: boolean;
+  prefetch?: JobPrefetchStatus;
   logs: string[];
 }
 
@@ -213,7 +224,14 @@ export class JobRegistry {
   }
 
   cancel(job: DownloadJob, reason = "cancelled by user"): DownloadJob {
-    return this.transition(job, "cancelled", { error: reason });
+    return this.transition(job, "cancelled", {
+      error: reason,
+      prefetch: job.prefetch ? {
+        state: "skipped",
+        reason: "cancelled",
+        updatedAt: nowIso(),
+      } : undefined,
+    });
   }
 
   requeueAfterPriorityInterruption(job: DownloadJob): DownloadJob {

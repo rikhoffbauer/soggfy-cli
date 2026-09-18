@@ -44,6 +44,10 @@ export class PriorityJobQueue {
     return this.entries.map((entry) => entry.job.id);
   }
 
+  snapshot(): readonly QueueEntry[] {
+    return [...this.entries];
+  }
+
   find(jobId: string): QueueEntry | undefined {
     return this.entries.find((entry) => entry.job.id === jobId);
   }

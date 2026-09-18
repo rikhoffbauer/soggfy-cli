@@ -16,7 +16,8 @@
         "playback": true,
         "capture": true,
         "mediaValidation": true,
-        "headless": true
+        "headless": true,
+        "audioFixture": true
       }
     },
     {
@@ -34,7 +35,8 @@
         "playback": true,
         "capture": true,
         "mediaValidation": true,
-        "headless": true
+        "headless": true,
+        "audioFixture": true
       }
     },
     {
@@ -53,6 +55,7 @@
         "capture": true,
         "mediaValidation": true,
         "audioFixture": true,
+        "prefetch": true,
         "headless": true
       }
     }

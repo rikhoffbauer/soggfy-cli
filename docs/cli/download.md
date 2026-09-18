@@ -56,3 +56,7 @@ When multiple tracks are requested, they are processed sequentially by this comm
 ## Exit behavior
 
 A non-zero exit status means resolution, Spotify startup/playback confirmation, capture, validation, transcoding, or output failed. Do not treat a created file as success unless the command itself exits successfully.
+
+## Prefetch scope
+
+The optional `SOGGFY_PREFETCH=1` optimization belongs to the daemon web/API queue and looks ahead only at jobs that are already queued there. The standalone CLI submission loop remains sequential in this increment; do not expect `soggfy download` playlist/album submission by itself to create speculative lookahead. Capture remains one-at-a-time even when queued variants are prefetched.

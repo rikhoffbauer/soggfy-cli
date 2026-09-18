@@ -147,3 +147,12 @@ test("completed job is reusable only while its saved artifact exists", () => {
   expect(replacement.id).not.toBe(completed.id);
   expect(replacement.state).toBe("queued");
 });
+
+
+test("cancelling a job clears stale speculative status", () => {
+  const registry = new JobRegistry();
+  const job = registry.create("cancel-prefetch-status");
+  registry.patch(job, { prefetch: { state: "prefetching", updatedAt: new Date().toISOString() } });
+  registry.cancel(job, "test cancel");
+  expect(job.prefetch).toMatchObject({ state: "skipped", reason: "cancelled" });
+});

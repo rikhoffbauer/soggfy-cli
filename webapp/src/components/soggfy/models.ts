@@ -20,6 +20,16 @@ export interface OutputValidation {
   decodedSignalOk?: boolean;
 }
 
+export interface JobPrefetchStatus {
+  state: "resolving" | "prefetching" | "cached" | "skipped" | "missed" | "error";
+  reason?: string;
+  totalBytes?: number;
+  networkBytes?: number;
+  cachedBytes?: number;
+  elapsedMs?: number;
+  updatedAt: string;
+}
+
 export interface DownloadJob {
   id: string;
   trackId: string;
@@ -41,6 +51,7 @@ export interface DownloadJob {
   metadata?: TrackMetadata;
   validation?: OutputValidation;
   priorityInterrupted?: boolean;
+  prefetch?: JobPrefetchStatus;
   logs: string[];
 }
 
@@ -57,6 +68,7 @@ export interface InstanceSnapshot {
   statusText: string;
   lastHeartbeatAt?: string;
   lastError?: string;
+  generation?: number;
   logs: string[];
 }
 

@@ -72,3 +72,15 @@ test("remove and shift return the exact queued entries", async () => {
   expect(queue.shift()).toBe(a);
   expect(queue.ids()).toEqual([]);
 });
+
+
+test("snapshot exposes queue order without allowing callers to mutate the queue", async () => {
+  const mod = await queueModule();
+  const queue = new mod.PriorityJobQueue();
+  queue.enqueue(entry("A"));
+  queue.enqueue(entry("B"));
+  const snapshot = queue.snapshot();
+  expect(snapshot.map((item: any) => item.job.id)).toEqual(["A", "B"]);
+  (snapshot as any[]).shift();
+  expect(queue.ids()).toEqual(["A", "B"]);
+});

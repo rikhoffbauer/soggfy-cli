@@ -1,6 +1,6 @@
 # Current Architecture
 
-Status: active implementation as of 2026-09-16.
+Status: active implementation as of 2026-09-18.
 
 ## Truth model
 
@@ -61,6 +61,14 @@ The web server is loaded into the daemon process after the daemon-owned `Spotify
 The daemon instance remains the sole owner of `/tmp/soggfy_cli.sock`, `/tmp/Soggfy_cli`, and `$SOGGFY_HOME/workspace/profiles/cli_instance`. The web job scheduler tracks HTTP jobs and media processing around that shared capture instance.
 
 The web layer therefore does not refresh/re-sign the payload or create `runtime/instance_<n>` workers when running inside the daemon. Standalone webapp execution remains an internal development path, not the normal product lifecycle.
+
+## Optional queued prefetch
+
+`SOGGFY_PREFETCH=1` adds a subordinate two-slot speculative controller to the daemon-backed scheduler. Prefetch capability is separate from capture compatibility and is enabled only when the exact registry entry has `checks.prefetch=true` (currently Spotify 1.3.0.277 arm64). The controller observes an immutable queue snapshot and never dequeues, promotes, completes or owns capture jobs.
+
+The shared renderer adapter resolves the current playback file identity and quality policy, selects exactly one matching future variant, and uses Spotify's progressive Download service to warm Spotify-owned cache while discarding response payloads inside the renderer. Only bounded counters/status reach Bun. When a job becomes active, speculative ownership is cancelled/destroyed first. Renderer-selected file ID must equal the prefetched file ID before the capture worker switches from the baseline 12x decode rate to the validated 16x rate; every exit restores 12x. A mismatch is an optimization miss, not a media failure.
+
+Renderer/session cleanup uncertainty disables further speculation for that Spotify-instance generation and leaves the singular baseline capture pipeline authoritative. Job `prefetch` metadata is explicitly subordinate to `DownloadState`: `cached` means only that Spotify reports the protected variant cached, never that Soggfy has a completed output.
 
 ## Job state machine
 

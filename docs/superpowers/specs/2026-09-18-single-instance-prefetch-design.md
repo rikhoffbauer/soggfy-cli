@@ -1,8 +1,10 @@
 # Single-instance parallel prefetch with sequential extraction
 
-Status: proposed; production implementation is conditional on the performance gate below.
+Status: Gate B is **GO**; production implementation and exact-build live acceptance completed with the feature default-off.
 Date: 2026-09-18.
 Companion: [implementation plan](../plans/2026-09-18-single-instance-prefetch.md).
+Measured outcome: `investigations/spotify-1.3.0.277-streamer/RESULTS.md`.
+Derived semantic supervision contract (non-normative): [TypeSafe contract](../supervision/2026-09-18-single-instance-prefetch.json) and [usage](../supervision/README.md).
 
 ## Goal and evaluation rubric
 
@@ -27,13 +29,13 @@ The user-supplied investigation reports the following on Spotify 1.3.0.277 arm64
 - Download.IsFileFullyCached and delivery accounting reflected this path; Storage.GetFileRanges did not.
 - Standalone Harmony/browser audio players did not enter the native protected-Ogg pipeline. The shipped preview configuration disallows protected tracks and does not supply an alternative native Ogg player.
 - Investigation instrumentation separated native streams by decoder pointer, Ogg-state pointer and serial. Two fixture dumps matched existing validated captures byte-for-byte. That is evidence for those fixtures, not a general production file-ID association mechanism.
-- No usable cold/prefetched benchmark is yet established. The first attempted trial failed renderer readiness and must not be counted.
+- The canonical repeated batch gate is now established in `results/batch-benchmark.json`: median total time improved from 114,969.109 ms to 45,938.376 ms (60.043%), all three valid pairs improved, exact outputs were stable, and enabled trials added no capture failures or buffering stalls.
 
 These findings justify investigating prefetch, not claiming fully parallel export or universal compatibility. The reported official arm64 executable SHA-256 is `7bc5fd4668e80f7066bcf31fa11489c4cbb620519e3424fd3c56482c8bc62415`; the earlier patched derivative is `afee5739f9074f727970a843962a44d05bd323b0a1b1fedd2df4eb601830f258`. Rebuilt patched copies may differ. Record the actually tested image and registry entry for every run.
 
 ## Scope and non-goals
 
-Initial production scope, only after the gate passes: opt-in prefetch for already queued jobs in the daemon-backed web/API scheduler, using its one Spotify instance. No second process or account, offline-download queue, independent decryption implementation, native decoder redesign, quality override, or concurrent playback capture.
+Initial production scope: opt-in prefetch for already queued jobs in the daemon-backed web/API scheduler, using its one Spotify instance. No second process or account, offline-download queue, independent decryption implementation, native decoder redesign, quality override, or concurrent playback capture.
 
 Standalone CLI downloads and the CLI's sequential batch submission remain behaviorally unchanged in this increment. They can benefit incidentally from cache warmed by queued daemon jobs, but no CLI playlist speedup is promised. CLI batch lookahead is a separate follow-up requiring explicit submission, cancellation and output-order semantics; do not silently submit an entire playlist merely to expose future tracks.
 
@@ -51,7 +53,7 @@ Run at least three valid paired cold/prefetched trials on the same track and exa
 
 Measure cold extraction, prefetch time, warm extraction, network/cache bytes, total batch time from first submission to last validated output, per-track completion, retries and buffering. Include prefetch startup cost in enabled batch totals; warm extraction alone is not the success metric. Validate container, duration and decodeability for every output and compare exact Ogg/PCM fixtures where applicable.
 
-Proposed engineering acceptance threshold: at least 10% lower median total batch time, improvement in each of the three paired batch runs, no invalid/misattributed output, and no additional observed capture failures or buffering stalls. This threshold is a design choice, not a measured result. Borderline/noisy results leave the feature off and require more evidence; do not claim significance from three runs. If the gate fails, publish findings and stop production implementation. A documented no-go is a completed investigation outcome.
+Engineering acceptance threshold: at least 10% lower median total batch time, improvement in each of the three paired batch runs, no invalid/misattributed output, and no additional observed capture failures or buffering stalls. The canonical 2026-09-18 run passed: 114,969.109 ms disabled median versus 45,938.376 ms enabled median (60.043% improvement), 3/3 pairs improved, zero invalid canonical trials, stable exact output hashes, and no additional enabled-side failures/stalls. This GO authorized phases 3–5; the feature remains default-off for initial release.
 
 ## Architecture
 
@@ -95,13 +97,13 @@ All exits destroy handles in bounded cleanup: success, error, timeout, cancellat
 
 Start with at most two speculative streams and the next two distinct eligible queued variants. The existing capture worker remains singular and authoritative. Recompute on enqueue, cancel, priority change, assignment and terminal transitions. A priority job is never delayed behind prefetch. Expelled speculative jobs release their handles before replacement work starts.
 
-Initial internal limits: 10 seconds for renderer/service/resolve setup, 15 seconds without delivered progress, 60 seconds total per acquisition, and 5 seconds for cleanup. These are conservative proposed defaults to verify against fixtures/live tests. No automatic prefetch retries in the first increment; the existing extraction path still performs its established retries. Bound delivery requests to 64 KiB ranges, subject to confirming protocol semantics. The lookahead limits speculative files, not total Spotify cache size. Disk/cache errors stop prefetch and remain visible.
+Production uses a 10-second initial size probe, a 15-second no-progress deadline while filling, a 60-second streamer-operation deadline after authenticated storage resolution, and a 5-second cleanup confirmation deadline. Renderer authentication/discovery has its own bounded polling/WebSocket deadlines. The Download service is invoked once for the full known object length because the validated protocol streams bounded callback chunks from that request; those payload chunks are consumed/discarded inside the renderer and are never materialized in Bun. No automatic prefetch retries are added in this increment; the existing extraction path keeps its established retries. The lookahead limits speculative files, not total Spotify cache size. Disk/cache errors stop prefetch and remain visible.
 
 If current capture reports buffering/stall pressure, cancel speculation and suppress it for the remainder of that capture. Do not treat merely unchanged UI position as sufficient evidence without the existing playback monitor. If the runtime cannot safely observe pressure, default off until live resource tests establish acceptable behavior.
 
 ## Configuration and observable behavior
 
-Proposed flag: `SOGGFY_PREFETCH=0|1`, default 0. Invalid values are explicit configuration errors. Enabled configuration on an unvalidated build or unsupported runtime mode produces a clear unsupported-prefetch error; normal operation with the flag off remains available. Validate prefetch capability separately from existing Ogg-hook compatibility: support for capture on another version is not evidence for these private services.
+Flag: `SOGGFY_PREFETCH=0|1`, default 0. Invalid values are explicit configuration errors. Enabled configuration on an unvalidated build or unsupported runtime mode produces a clear unsupported-prefetch error; normal operation with the flag off remains available. Validate prefetch capability separately from existing Ogg-hook compatibility: support for capture on another version is not evidence for these private services.
 
 A runtime acquisition failure marks that prefetch failed/skipped with a bounded reason and allows the normal capture path to proceed. This is a disclosed optimization fallback, not silent media success. Do not expose signed URLs, credentials, cookies, tokens, raw media or streamer handles in logs/API responses.
 
@@ -114,3 +116,7 @@ Automated coverage must exercise identity/variant mismatch, cache eviction, exac
 Live acceptance requires the exact-version benchmark plus queue cancellation, priority playback and daemon restart with prefetch enabled. Unit tests or mocked renderer RPCs do not establish live compatibility. Keep experimental native instrumentation opt-in and review its lifecycle/resource behavior independently; production prefetch must not require it.
 
 If evidence supports shipping, retain default-off for the initial release, update user documentation with measured scope and limits, and record exact checks/results in HANDOVER.md. Future fully parallel extraction is a separately scoped research project.
+
+## Implemented acceptance result
+
+The implementation in `src/core/spotify-prefetch.ts` and `webapp/src/server/prefetch-controller.ts` satisfies this design for exact Spotify 1.3.0.277. Registry support is represented by `checks.prefetch=true`; capture support alone does not imply prefetch support. Integrated evidence is persisted in `investigations/spotify-1.3.0.277-streamer/results/production-live-acceptance-20260918.json`.

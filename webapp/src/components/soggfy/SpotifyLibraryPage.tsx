@@ -146,7 +146,11 @@ function TrackRow({ track, index, job, onPlay, onQueue }: {
       </div>
       <div className="truncate text-xs text-white/30 max-md:hidden">{track.album || "Spotify"}</div>
       <div className="flex items-center gap-1">
-        {job ? <span className="mr-1 hidden text-[10px] capitalize text-primary/70 sm:inline">{job.state}</span> : null}
+        {job ? <span className="mr-1 hidden text-[10px] text-primary/70 sm:inline">{
+          job.state === "queued" && job.prefetch?.state === "cached" ? "cached · waiting"
+            : job.state === "queued" && job.prefetch?.state === "prefetching" ? "prefetching"
+            : job.state
+        }</span> : null}
         <IconAction label="Play" disabled={!track.playable} onClick={onPlay}><IconPlayerPlay /></IconAction>
         <IconAction label="Queue" disabled={!track.playable} onClick={onQueue}><IconDownload /></IconAction>
       </div>

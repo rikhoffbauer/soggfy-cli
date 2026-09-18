@@ -23,7 +23,7 @@ async function ev(expression:string){const i=++id,p=new Promise<any>(r=>pending.
 
 const src=`(async()=>{
 const CDN=${JSON.stringify(cdnURL)}, FILE=${JSON.stringify(fileId)}, TRACK=${JSON.stringify(trackUri)};
-const root=document.querySelector('[data-testid="root"]')||document.body?.firstElementChild,fk=Object.getOwnPropertyNames(root).find(k=>k.startsWith('__reactFiber$'));let f=root[fk];while(f?.return)f=f.return;const st=[f];let reg;
+const preferred=document.querySelector('[data-testid="root"]')||document.body?.firstElementChild;const nodes=preferred?[preferred,...document.querySelectorAll('*')]:[...document.querySelectorAll('*')];let f=null;for(const node of nodes){const fk=Object.getOwnPropertyNames(node).find(k=>k.startsWith('__reactFiber$'));if(fk&&node[fk]){f=node[fk];break}}if(!f)throw new Error('no React fiber');while(f?.return)f=f.return;const st=[f];let reg;
 while(st.length){const c=st.pop(),v=c?.memoizedProps?.value;if(v&&v._map instanceof Map){const ds=[...v._map.keys()].filter(k=>typeof k==='symbol').map(k=>k.description);if(ds.includes('EsperantoTransport')&&ds.includes('PlaybackAPI')&&ds.includes('PlayerAPI')){reg=v;break}}if(c?.sibling)st.push(c.sibling);if(c?.child)st.push(c.child)}
 const get=n=>{for(const k of reg._map.keys())if(typeof k==='symbol'&&k.description===n)return reg.resolve(k);throw Error(n)};
 const tr=get('EsperantoTransport'),pb=get('PlaybackAPI'),pl=get('PlayerAPI');

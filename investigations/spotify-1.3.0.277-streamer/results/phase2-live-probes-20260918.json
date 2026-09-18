@@ -1,0 +1,317 @@
+{
+  "version": 1,
+  "generatedAt": "2026-09-18T05:30:15.717793+00:00",
+  "purpose": "Phase-2 cancellation/two-streamer/resource and restoration evidence",
+  "isolated": {
+    "appPath": "/Volumes/ssd1/tmp/Spotify-1.3.0.277-Soggfy.app",
+    "version": "1.3.0.277",
+    "sha256": "54d6cb73790afa026ea972d863f7818e1c1c4f9802d8ff38a5f63f1e39558b94",
+    "socket": "/tmp/soggfy130-phase2-10023.sock",
+    "save": "/Volumes/ssd1/tmp/soggfy-phase2-closure-20260918/save",
+    "profile": "/Volumes/ssd1/tmp/soggfy-phase2-closure-20260918/profile",
+    "debugPort": 9231
+  },
+  "rendererReady": {
+    "ready": true,
+    "debugPort": 9231,
+    "required": [
+      "PlayerAPI",
+      "PlaybackAPI",
+      "EsperantoTransport"
+    ],
+    "elapsedMs": 16657.576583000002
+  },
+  "dualStreamer": {
+    "cachedBefore": {
+      "A": false,
+      "B": false
+    },
+    "cachedAfter": {
+      "A": true,
+      "B": true
+    },
+    "sizes": [
+      3361580,
+      3491434
+    ],
+    "networkRun": {
+      "A": {
+        "events": 188,
+        "bytes": 3361580,
+        "network": 3361579,
+        "cached": 0,
+        "firstMs": 151.69999998807907,
+        "lastMs": 2792.600000023842,
+        "hash": "93e1a668b662d83a82f1f36eb94b3e1f8d1681f418a286e806eedf93fa260e55",
+        "headHex": "cefadecd91c5bd776e30e7b8bfd4a904"
+      },
+      "B": {
+        "events": 196,
+        "bytes": 3491434,
+        "network": 3491433,
+        "cached": 0,
+        "firstMs": 153,
+        "lastMs": 2795.100000023842,
+        "hash": "b09fc9ba775d8e0ed124c6c76d89c11249450e9daeda09e3ababf11f8541d9e5",
+        "headHex": "58ac022ca11d07df5bf275fee8a4cb1c"
+      },
+      "overlap": true,
+      "transitions": 23,
+      "timelineHead": [
+        {
+          "label": "A",
+          "atMs": 151.69999998807907,
+          "fromNetwork": 16383,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 151.80000001192093,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 151.89999997615814,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.10000002384186,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.10000002384186,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.10000002384186,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.19999998807907,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.19999998807907,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.19999998807907,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.19999998807907,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.19999998807907,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.19999998807907,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.30000001192093,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.39999997615814,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        },
+        {
+          "label": "A",
+          "atMs": 152.5,
+          "fromNetwork": 16384,
+          "cached": 0,
+          "data": 16384
+        }
+      ]
+    },
+    "cachedReread": {
+      "A": {
+        "events": 206,
+        "bytes": 3361580,
+        "network": 0,
+        "cached": 3361580,
+        "firstMs": 12.699999988079071,
+        "lastMs": 21.900000035762787,
+        "hash": "93e1a668b662d83a82f1f36eb94b3e1f8d1681f418a286e806eedf93fa260e55",
+        "headHex": "cefadecd91c5bd776e30e7b8bfd4a904"
+      },
+      "B": {
+        "events": 214,
+        "bytes": 3491434,
+        "network": 0,
+        "cached": 0,
+        "firstMs": 23.80000001192093,
+        "lastMs": 38.40000003576279,
+        "hash": "b09fc9ba775d8e0ed124c6c76d89c11249450e9daeda09e3ababf11f8541d9e5",
+        "headHex": "58ac022ca11d07df5bf275fee8a4cb1c"
+      },
+      "hashMatchA": true,
+      "hashMatchB": true
+    },
+    "playback": {
+      "original": {
+        "sampledAt": 1789709398058,
+        "uri": "spotify:track:575BKqgHeL2srecj3MfGX1",
+        "isPaused": true,
+        "position": 45342,
+        "timestamp": 1789709392547,
+        "playbackId": "b55b0079b75ee1581470f3f6e32321f7",
+        "sessionId": "6v6tQHXRlbWFhspgZIMlfD"
+      },
+      "playBefore": {
+        "sampledAt": 1789709398892,
+        "uri": "spotify:track:575BKqgHeL2srecj3MfGX1",
+        "isPaused": false,
+        "position": 45342,
+        "timestamp": 1789709398099,
+        "playbackId": "b55b0079b75ee1581470f3f6e32321f7",
+        "sessionId": "6v6tQHXRlbWFhspgZIMlfD"
+      },
+      "playAfter": {
+        "sampledAt": 1789709403352,
+        "uri": "spotify:track:575BKqgHeL2srecj3MfGX1",
+        "isPaused": false,
+        "position": 45434,
+        "timestamp": 1789709399072,
+        "playbackId": "b55b0079b75ee1581470f3f6e32321f7",
+        "sessionId": "6v6tQHXRlbWFhspgZIMlfD"
+      },
+      "effectiveAdvance": 3579,
+      "wallAdvance": 4460,
+      "restored": {
+        "sampledAt": 1789709403859,
+        "uri": "spotify:track:575BKqgHeL2srecj3MfGX1",
+        "isPaused": true,
+        "position": 45341,
+        "timestamp": 1789709403650,
+        "playbackId": "b55b0079b75ee1581470f3f6e32321f7",
+        "sessionId": "6v6tQHXRlbWFhspgZIMlfD"
+      }
+    }
+  },
+  "cancelStreamer": {
+    "cachedBefore": {
+      "C": false,
+      "D": false
+    },
+    "cachedAfter": {
+      "C": false,
+      "D": true
+    },
+    "sizes": [
+      4607508,
+      3058456
+    ],
+    "cancel": {
+      "atMs": 6.800000011920929,
+      "bytes": 147456,
+      "destroyed": true
+    },
+    "C": {
+      "events": 5,
+      "bytes": 147456,
+      "lastAtMs": 6.600000023841858,
+      "finalSeen": false
+    },
+    "D": {
+      "events": 116,
+      "bytes": 3058456,
+      "network": 3058455,
+      "firstAtMs": 0.5,
+      "lastAtMs": 835.6000000238419,
+      "finalSeen": true,
+      "hash": "bba7bcc27816383180a7f850f275aa6c5a44f5b16371e446cb08b68430066c7b",
+      "cachedRereadHash": "bba7bcc27816383180a7f850f275aa6c5a44f5b16371e446cb08b68430066c7b",
+      "hashMatch": true,
+      "rereadNetwork": 0
+    },
+    "player": {
+      "before": {
+        "uri": "spotify:track:575BKqgHeL2srecj3MfGX1",
+        "isPaused": true,
+        "position": 45341
+      },
+      "after": {
+        "uri": "spotify:track:575BKqgHeL2srecj3MfGX1",
+        "isPaused": true,
+        "position": 45341
+      }
+    }
+  },
+  "normalBefore": {
+    "daemonPid": 52926,
+    "spotifyPid": 52949,
+    "command": "/Users/rikhoffbauer/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify --disable-gpu --disable-software-rasterizer --renderer-process-limit=1 --js-flags=--max-old-space-size=256 --disable-extensions --disable-background-networking --user-data-dir=/Users/rikhoffbauer/.soggfy/workspace/profiles/cli_instance --remote-debugging-port=9224 --ssl-key-log-file=/tmp/soggfy_sslkeylog.txt",
+    "app": "/Users/rikhoffbauer/.soggfy/workspace/PatchedSpotify.app",
+    "version": "1.2.99.317",
+    "sha256": "42add29ff06934cd612984ddce079705165296160a88b4ffa2ba604c18206d8b"
+  },
+  "normalAfter": {
+    "status": "\n\u001b[1m\u001b[34mDaemon Status\u001b[0m\n\n\u001b[2m2026-09-18 05:30:15\u001b[0m \u001b[32m\u2713\u001b[0m Daemon running (PID: 10321)\n\u001b[2m2026-09-18 05:30:15\u001b[0m \u001b[32m\u2713\u001b[0m Spotify IPC: responsive\n\u001b[2m2026-09-18 05:30:15\u001b[0m \u001b[32m\u2713\u001b[0m Web UI/API: responsive (http://127.0.0.1:8085)\n\u001b[2m  PID file: /Users/rikhoffbauer/.soggfy/daemon.pid\u001b[0m\n\u001b[2m  Identity socket: /Users/rikhoffbauer/.soggfy/daemon.sock\u001b[0m\n\u001b[2m  IPC socket: /Users/rikhoffbauer/.soggfy/runtime/spotify.sock\u001b[0m\n\u001b[2m  Log file: /Users/rikhoffbauer/.soggfy/logs/daemon.log\u001b[0m\n",
+    "inspectionError": "Command '['/usr/libexec/PlistBuddy', '-c', 'Print :CFBundleShortVersionString', '/Users/rikhoffbauer/.soggfy/workspace/PatchedSpotify.app', '/Contents/Info.plist']' returned non-zero exit status 1.",
+    "postRestorationVerification": {
+      "verifiedAt": "2026-09-18T06:08:59.304422+00:00",
+      "daemonPid": 10321,
+      "spotifyPid": 10344,
+      "command": "/Users/rikhoffbauer/.soggfy/workspace/PatchedSpotify.app/Contents/MacOS/Spotify --disable-gpu --disable-software-rasterizer --renderer-process-limit=1 --js-flags=--max-old-space-size=256 --disable-extensions --disable-background-networking --user-data-dir=/Users/rikhoffbauer/.soggfy/workspace/profiles/cli_instance --remote-debugging-port=9224 --ssl-key-log-file=/tmp/soggfy_sslkeylog.txt",
+      "app": "/Users/rikhoffbauer/.soggfy/workspace/PatchedSpotify.app",
+      "version": "1.2.99.317",
+      "sha256": "42add29ff06934cd612984ddce079705165296160a88b4ffa2ba604c18206d8b",
+      "health": {
+        "daemonRunning": true,
+        "spotifyIpcResponsive": true,
+        "webApiResponsive": true,
+        "origin": "http://127.0.0.1:8085"
+      },
+      "note": "Follow-up identity inspection after the original combined recorder constructed the Info.plist path incorrectly. The original inspectionError is retained above rather than rewritten."
+    }
+  }
+}

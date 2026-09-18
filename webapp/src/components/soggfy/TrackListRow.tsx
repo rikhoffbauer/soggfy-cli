@@ -16,6 +16,9 @@ function stateLabel(job?: DownloadJob) {
   if (job.state === "cancelled") return "Cancelled";
   if (job.state === "capturing" || job.state === "playing") return "Downloading";
   if (job.state === "transcoding" || job.state === "finalizing") return "Processing";
+  if (job.state === "queued" && job.prefetch?.state === "cached") return "Cached · waiting";
+  if (job.state === "queued" && job.prefetch?.state === "prefetching") return "Prefetching";
+  if (job.state === "queued" && job.prefetch?.state === "resolving") return "Preparing";
   return "Queued";
 }
 

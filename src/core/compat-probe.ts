@@ -101,6 +101,7 @@ function emptyChecks(): Required<SpotifyCompatibilityChecks> {
     capture: false,
     mediaValidation: false,
     audioFixture: false,
+    prefetch: false,
     headless: false,
   };
 }

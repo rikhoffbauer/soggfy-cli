@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "kind": "typesafe-supervision-audit",
+  "contract": "single-instance-prefetch-supervision",
+  "startedAt": "2026-09-18T08:25:17.794Z",
+  "durationMs": 4606.9235,
+  "requestId": "req_01a0b39ec31b7cb8b49ed0b8e8370d9c",
+  "model": "jev-1.13.0",
+  "usage": {
+    "input_tokens": 8337,
+    "output_tokens": 311
+  },
+  "provenance": {
+    "contractPath": "/Volumes/Repositories/soggfy-cli/docs/superpowers/supervision/2026-09-18-single-instance-prefetch.json",
+    "contractSha256": "1ca17125907eeaee87655b23c9f49351b6d6cb90bdb3d4fe5c69913a51688fbe",
+    "statePath": "/Volumes/Repositories/soggfy-cli/investigations/spotify-1.3.0.277-streamer/supervision-state.json",
+    "stateSha256": "db931dc7942251f31e4ba23bbfbe6f54731296f4c295cad40bf9e631b87779fd",
+    "contexts": {
+      "acceptance": {
+        "path": "/Volumes/Repositories/soggfy-cli/investigations/spotify-1.3.0.277-streamer/results/production-live-acceptance-20260918.json",
+        "sha256": "aeddda1d78f9ce68ed5aa6096ed29aa50397c5ab99a6270515906aaae3841e60"
+      },
+      "results": {
+        "path": "/Volumes/Repositories/soggfy-cli/investigations/spotify-1.3.0.277-streamer/RESULTS.md",
+        "sha256": "543a2e3f62742a8c982dce309e11c82b8a06997f5dacc8196f44842d92f51ed5"
+      },
+      "handover": {
+        "path": "/Volumes/Repositories/soggfy-cli/HANDOVER.md",
+        "sha256": "bb567385b3e1eb7fa7f58cd018a0820cb910c8cc6e398154d67014160b4dee6e"
+      }
+    }
+  },
+  "sets": [
+    "closure_audit"
+  ],
+  "questionOrigins": {
+    "correct_identity": {
+      "set": "closure_audit",
+      "id": "correct_identity"
+    },
+    "lifecycle_safety": {
+      "set": "closure_audit",
+      "id": "lifecycle_safety"
+    },
+    "bounded_resources": {
+      "set": "closure_audit",
+      "id": "bounded_resources"
+    },
+    "honest_behavior": {
+      "set": "closure_audit",
+      "id": "honest_behavior"
+    },
+    "reproducibility": {
+      "set": "closure_audit",
+      "id": "reproducibility"
+    },
+    "final_claims_grounded": {
+      "set": "closure_audit",
+      "id": "final_claims_grounded"
+    }
+  },
+  "gates": {
+    "gateA": {
+      "decision": "PASS",
+      "missing": []
+    },
+    "gateB": {
+      "decision": "GO",
+      "failures": [],
+      "unknown": []
+    },
+    "productionPhases3To5Authorized": true
+  },
+  "answers": {
+    "correct_identity": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.91,
+      "probabilities": {
+        "insufficient_evidence": 0.04,
+        "satisfied": 0.94,
+        "violated": 0.02
+      }
+    },
+    "lifecycle_safety": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient_evidence": 0,
+        "satisfied": 1,
+        "violated": 0
+      }
+    },
+    "bounded_resources": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.8,
+      "probabilities": {
+        "violated": 0,
+        "satisfied": 0.87,
+        "insufficient_evidence": 0.13
+      }
+    },
+    "honest_behavior": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 1,
+      "probabilities": {
+        "violated": 0,
+        "satisfied": 1,
+        "insufficient_evidence": 0
+      }
+    },
+    "reproducibility": {
+      "type": "choice",
+      "choice": "satisfied",
+      "confidence": 0.99,
+      "probabilities": {
+        "violated": 0,
+        "satisfied": 1,
+        "insufficient_evidence": 0
+      }
+    },
+    "final_claims_grounded": {
+      "type": "choice",
+      "choice": "grounded",
+      "confidence": 0.62,
+      "probabilities": {
+        "overclaim": 0.26,
+        "incomplete": 0.02,
+        "grounded": 0.72,
+        "insufficient_evidence": 0
+      }
+    }
+  },
+  "normalized": {
+    "correct_identity": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.91,
+        "probabilities": {
+          "insufficient_evidence": 0.04,
+          "satisfied": 0.94,
+          "violated": 0.02
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 0.94,
+          "violated": 0.02,
+          "insufficient_evidence": 0.04
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "lifecycle_safety": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.99,
+        "probabilities": {
+          "insufficient_evidence": 0,
+          "satisfied": 1,
+          "violated": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 1,
+          "violated": 0,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "bounded_resources": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.8,
+        "probabilities": {
+          "violated": 0,
+          "satisfied": 0.87,
+          "insufficient_evidence": 0.13
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 0.87,
+          "violated": 0,
+          "insufficient_evidence": 0.13
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "honest_behavior": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "violated": 0,
+          "satisfied": 1,
+          "insufficient_evidence": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 1,
+          "violated": 0,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "reproducibility": {
+      "raw": {
+        "type": "choice",
+        "choice": "satisfied",
+        "confidence": 0.99,
+        "probabilities": {
+          "violated": 0,
+          "satisfied": 1,
+          "insufficient_evidence": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "satisfied": 1,
+          "violated": 0,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    },
+    "final_claims_grounded": {
+      "raw": {
+        "type": "choice",
+        "choice": "grounded",
+        "confidence": 0.62,
+        "probabilities": {
+          "overclaim": 0.26,
+          "incomplete": 0.02,
+          "grounded": 0.72,
+          "insufficient_evidence": 0
+        }
+      },
+      "probabilityDiagnostics": {
+        "rawSum": 1,
+        "normalized": {
+          "grounded": 0.72,
+          "overclaim": 0.26,
+          "incomplete": 0.02,
+          "insufficient_evidence": 0
+        },
+        "renormalized": false
+      },
+      "warnings": []
+    }
+  }
+}

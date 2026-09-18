@@ -7,11 +7,13 @@ import { findOutputForTrack } from "./outputs";
 import { MAX_ATTEMPTS, USE_DAEMON_INSTANCE } from "./runtime-config";
 import { preparePayload } from "./runtime-setup";
 import { SpotifyInstance, JobCancelledError, JobPriorityInterruptedError } from "./spotify-instance";
+import { createQueuePrefetchController, type QueuePrefetchController } from "./prefetch-controller";
 
 export class SpotifyPoolManager {
   instances: SpotifyInstance[] = [];
   queue = new PriorityJobQueue();
   started = false;
+  private prefetch: QueuePrefetchController | null = null;
 
   constructor(size: number) {
     for (let i = 1; i <= size; i++) this.instances.push(new SpotifyInstance(i));
@@ -33,6 +35,7 @@ export class SpotifyPoolManager {
     if (!this.instances.some((inst) => inst.isReady)) {
       throw new Error("No Spotify instances became ready; web runtime not started.");
     }
+    this.prefetch = createQueuePrefetchController(this.instances[0]!);
     this.started = true;
     this.startWatchdog();
     console.log(`[Server] Pool startup complete.`);
@@ -40,6 +43,8 @@ export class SpotifyPoolManager {
 
   async stop() {
     console.log(`[Server] Shutting down Spotify pool...`);
+    await this.prefetch?.stop();
+    this.prefetch = null;
     await Promise.all(this.instances.map((inst) => inst.stop()));
   }
 
@@ -60,6 +65,7 @@ export class SpotifyPoolManager {
     const job = jobs.create(parsedTrackId, metadata);
     if (note) jobs.log(job, note);
     this.queue.enqueue(this.queueEntry(job));
+    this.prefetch?.reconcile(this.queue.snapshot());
     this.dispatch();
     return job;
   }
@@ -88,6 +94,7 @@ export class SpotifyPoolManager {
       this.queue.enqueue(this.queueEntry(job));
     }
     this.queue.promote(job.id);
+    this.prefetch?.reconcile(this.queue.snapshot());
 
     const activeInstance = this.instances.find((inst) => inst.isBusy && inst.currentTrack !== trackId);
     const activeJob = activeInstance?.currentJobId ? jobs.get(activeInstance.currentJobId) : undefined;
@@ -112,6 +119,7 @@ export class SpotifyPoolManager {
     if (queued) {
       jobs.cancel(job, reason);
       queued.reject(new JobCancelledError(job));
+      this.prefetch?.reconcile(this.queue.snapshot());
       return job;
     }
 
@@ -124,6 +132,7 @@ export class SpotifyPoolManager {
       await instance.recycle(`cancelled job ${jobId}`).catch((err) => instance.log(`cancel recycle failed: ${err.message}`));
     }
     this.dispatch();
+    this.prefetch?.reconcile(this.queue.snapshot());
     return job;
   }
 
@@ -142,8 +151,28 @@ export class SpotifyPoolManager {
     if (!idleInstance) return;
     const queued = this.queue.shift();
     if (!queued) return;
+    // Reserve the single capture owner before the asynchronous prefetch
+    // handoff. Without this, a concurrent enqueue/dispatch could observe the
+    // instance as idle and start a second capture while cleanup is in flight.
+    idleInstance.isBusy = true;
+    idleInstance.statusText = `Handoff: ${queued.job.trackId}`;
 
-    idleInstance.downloadJob(queued.job)
+    const run = async () => {
+      let prefetchedVariant;
+      try {
+        prefetchedVariant = await this.prefetch?.handoff(queued.job);
+      } catch (error) {
+        jobs.log(queued.job, `prefetch handoff warning: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return idleInstance.downloadJob(queued.job, {
+        prefetchedVariant,
+        onPlaybackConfirmed: (confirmation) =>
+          this.prefetch?.onPlaybackConfirmed(queued.job, confirmation, this.queue.snapshot()),
+        onVariantMismatch: () => this.prefetch?.reportVariantMismatch(queued.job),
+      });
+    };
+
+    run()
       .then((res) => queued.resolve(res))
       .catch(async (err: Error) => {
         if (err instanceof JobPriorityInterruptedError) {
@@ -160,13 +189,17 @@ export class SpotifyPoolManager {
         if (queued.job.attempts < MAX_ATTEMPTS) {
           jobs.transition(queued.job, "queued", { instanceId: undefined, error: undefined });
           this.queue.enqueue(queued);
+          this.prefetch?.reconcile(this.queue.snapshot());
           await idleInstance.recycle(err.message).catch((recycleErr) => idleInstance.log(`recycle failed: ${recycleErr.message}`));
         } else {
           jobs.fail(queued.job, err);
           queued.reject(err);
         }
       })
-      .finally(() => this.dispatch());
+      .finally(() => {
+        this.prefetch?.reconcile(this.queue.snapshot());
+        this.dispatch();
+      });
   }
 
   private async refreshInstanceHealth(inst: SpotifyInstance) {
