@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { log } from "../core/log";
 import {
   PID_FILE, DAEMON_LOG, DAEMON_SOCKET, DAEMON_START_LOCK,
-  IPC_SOCKET, SAVE_PATH, ensureDirs,
+  SOGGFY_HOME, AUTH_DIR, IPC_SOCKET, SAVE_PATH, ensureDirs,
 } from "../core/paths";
 import { SpotifyInstance } from "../core/instance";
 import { defaultSpotifyRendererDebugPort } from "../core/spotify-renderer-auth";
@@ -179,7 +179,16 @@ function spawnDaemonProcess(): number {
     const child = spawn(process.execPath, [cliEntry, "daemon", "run"], {
       cwd: resolveWebappWorkingDirectory(),
       detached: true,
-      env: process.env,
+      env: {
+        ...process.env,
+        // Bun auto-loads webapp/.env because the daemon must start in that directory.
+        // Pin the parent's resolved runtime paths so that hidden .env defaults cannot
+        // make daemon start/status disagree about the identity or Spotify IPC paths.
+        SOGGFY_HOME,
+        SOGGFY_AUTH_DIR: AUTH_DIR,
+        SOGGFY_SOCKET_PATH: IPC_SOCKET,
+        SOGGFY_SAVE_PATH: SAVE_PATH,
+      },
       stdio: ["ignore", logFd, logFd],
     });
     child.unref();

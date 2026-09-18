@@ -40,6 +40,13 @@ test("daemon subprocess starts in webapp so Bun loads serve.static plugins", () 
   expect(daemonSource).toContain('existsSync(resolve(candidate, "bunfig.toml"))');
 });
 
+test("daemon subprocess pins shared runtime paths before Bun loads webapp .env", () => {
+  expect(daemonSource).toContain("SOGGFY_HOME,");
+  expect(daemonSource).toContain("SOGGFY_AUTH_DIR: AUTH_DIR");
+  expect(daemonSource).toContain("SOGGFY_SOCKET_PATH: IPC_SOCKET");
+  expect(daemonSource).toContain("SOGGFY_SAVE_PATH: SAVE_PATH");
+});
+
 test("HTTP occupancy probe detects an already-bound configured address", async () => {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
