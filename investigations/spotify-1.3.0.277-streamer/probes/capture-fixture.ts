@@ -1,6 +1,7 @@
 import { sendIPC } from "../../../src/core/ipc.ts";
 
 const trackId = process.argv[2];
+const expectedFileId = process.argv[3] || undefined;
 const socketPath = process.env.SOGGFY_INVESTIGATION_SOCKET ?? "/tmp/soggfy130.sock";
 const debugPort = Number(process.env.SOGGFY_INVESTIGATION_CDP ?? "9231");
 if (!trackId) throw new Error("usage: bun capture-fixture.ts <trackId>");
@@ -104,6 +105,9 @@ for (let i = 0; i < 100; i++) {
   await Bun.sleep(100);
 }
 if (!identity) throw new Error("failed to observe exact playing file identity");
+if (expectedFileId && identity.fileId !== expectedFileId) {
+  throw new Error(`selected fileId mismatch: expected ${expectedFileId}, got ${identity.fileId}`);
+}
 
 let status = "";
 for (let i = 0; i < 400; i++) {
@@ -125,6 +129,7 @@ const sha256 = [...sha].map(v => v.toString(16).padStart(2, "0")).join("");
 
 console.log(JSON.stringify({
   trackId,
+  expectedFileId: expectedFileId ?? null,
   uri: `spotify:track:${trackId}`,
   before,
   candidates,

@@ -1,0 +1,22 @@
+{
+  "valid": false,
+  "recordedAt": "2026-09-18T03:26:15Z",
+  "mode": "disabled",
+  "trackId": "575BKqgHeL2srecj3MfGX1",
+  "expectedFileId": "56bc9ef82236dc30d6f31d8125fc311b3c2442b9",
+  "reason": "capture validation failed: output duration 18.031746 s (< 30 s sanity threshold; expected full track ~224.2 s)",
+  "output": {
+    "bytes": 336163,
+    "sha256": "7243e839c0cd832b9bada4d8e71676189eff5f8cab7a641ea3d2e8a894861276",
+    "codec": "vorbis",
+    "sampleRate": 44100,
+    "channels": 2,
+    "duration": 18.031746
+  },
+  "payloadObservation": {
+    "captureBackend": "ogg",
+    "watchdogFinishedAfterIdleMs": 3224,
+    "nativeEosObserved": false
+  },
+  "countedTowardGate": false
+}
