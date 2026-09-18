@@ -39,9 +39,12 @@ export async function sendIPC(
   throw new Error("unreachable IPC retry fallthrough");
 }
 
-export async function ping(socketPath: string): Promise<boolean> {
+export async function ping(
+  socketPath: string,
+  { retries = 1, timeoutMs = 1_000 }: { retries?: number; timeoutMs?: number } = {},
+): Promise<boolean> {
   try {
-    const result = await sendIPC(socketPath, "ping", { retries: 1, timeoutMs: 1000 });
+    const result = await sendIPC(socketPath, "ping", { retries, timeoutMs });
     return result === "pong";
   } catch {
     return false;

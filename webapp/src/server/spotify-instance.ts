@@ -141,9 +141,9 @@ export class SpotifyInstance {
     }
   }
 
-  async ping(): Promise<boolean> {
+  async ping(retries = 3, timeoutMs = 2_000): Promise<boolean> {
     try {
-      const raw = await this.sendIPC("ping", 1, 1000);
+      const raw = await this.sendIPC("ping", retries, timeoutMs);
       const parsed = parsePlainIpcResponse(raw);
       const ok = parsed.value === "pong" || parsed.value?.ok === true;
       if (ok) this.lastHeartbeatAt = new Date().toISOString();

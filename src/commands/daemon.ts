@@ -420,7 +420,7 @@ async function daemonRun(): Promise<void> {
     await Bun.sleep(15_000);
     if (shuttingDown) break;
 
-    const ok = await ping(IPC_SOCKET);
+    const ok = await ping(IPC_SOCKET, { retries: 3, timeoutMs: 3_000 });
     if (ok) continue;
 
     appendDaemonLog("Watchdog: IPC ping failed, restarting instance...");

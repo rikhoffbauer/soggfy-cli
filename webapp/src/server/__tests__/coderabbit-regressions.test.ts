@@ -72,6 +72,14 @@ test("server build checks Bun.build success and watchdog prevents overlap", () =
   expect(pool).toContain("if (running) return");
 });
 
+test("daemon IPC health checks tolerate transient blocked replies", () => {
+  const daemon = source("src/commands/daemon.ts");
+  const spotify = source("webapp/src/server/spotify-instance.ts");
+  expect(daemon).toContain("ping(IPC_SOCKET, { retries: 3, timeoutMs: 3_000 })");
+  expect(spotify).toContain("async ping(retries = 3, timeoutMs = 2_000)");
+  expect(spotify).toContain('this.sendIPC("ping", retries, timeoutMs)');
+});
+
 test("server HTML prevents token-bearing URLs from leaking as referrers", () => {
   const html = source("webapp/src/index.html");
   expect(html).toContain('<meta name="referrer" content="no-referrer" />');
