@@ -1,0 +1,134 @@
+# Spotify 1.3.0.277 progressive streamer investigation
+
+This directory preserves the probes, protocol descriptor, native attribution instrumentation support, and benchmark evidence used by the single-instance prefetch design. Production prefetch remains conditional on the gate in `docs/superpowers/specs/2026-09-18-single-instance-prefetch-design.md`.
+
+## Exact build and schema
+
+The investigated official Spotify arm64 executable is:
+
+- Version: `1.3.0.277`
+- Official executable SHA-256: `7bc5fd4668e80f7066bcf31fa11489c4cbb620519e3424fd3c56482c8bc62415`
+- Compatibility registry status: `supported`
+- Registry validation timestamp: `2026-09-16T19:40:22.734Z`
+- Registry validation commit: `ade33aa1bfd28c26c10cfbbde018db6c59bc48e7`
+
+The recovered `es_download.FileDescriptorProto.bin` SHA-256 is:
+
+`08b98b3e7b4bacb84f597323885975965e5cae405c0f2a8d19226d73951ff7d4`
+
+A rebuilt/ad-hoc-signed patched app has a different executable hash. Benchmark result files record the app path used; record its current executable SHA-256 alongside the result before interpreting it.
+
+## Requirements
+
+- macOS arm64
+- Bun
+- `ffprobe` / FFmpeg for output validation
+- a patched Spotify `1.3.0.277` app using the current Soggfy payload
+- authenticated Soggfy-owned Spotify login state
+- Ghidra/radare2 only for repeating the static-analysis work
+
+The probes default to CDP port `9231`. Override with `SOGGFY_INVESTIGATION_CDP`.
+
+## Safe runtime procedure
+
+Do not kill Spotify processes by broad process-name matching. The benchmark runners use the verified Soggfy daemon stop/start path and restore the daemon in `finally`. Before and after manual experiments, record:
+
+```sh
+SOGGFY_HOST=127.0.0.1 soggfy daemon status
+pgrep -afil 'soggfy|Spotify.*Contents/MacOS/Spotify'
+lsof -nP -iTCP:8085 -iTCP:9224 -iTCP:9231 -sTCP:LISTEN
+```
+
+The normal daemon currently uses its configured supported Spotify build; do not assume it is the same version as this isolated investigation.
+
+## Probe contracts
+
+Start an isolated exact-version instance with:
+
+```sh
+SOGGFY_INVESTIGATION_APP=/path/to/Spotify-1.3.0.277-Soggfy.app \
+SOGGFY_INVESTIGATION_SOCKET=/tmp/soggfy130.sock \
+SOGGFY_INVESTIGATION_SAVE=/tmp/soggfy130-save \
+SOGGFY_INVESTIGATION_PROFILE=/tmp/soggfy130-profile \
+SOGGFY_INVESTIGATION_CDP=9231 \
+bun investigations/spotify-1.3.0.277-streamer/probes/launch-exact.ts
+```
+
+Wait for the actual renderer service registry, not merely the CDP listener:
+
+```sh
+SOGGFY_INVESTIGATION_CDP=9231 \
+bun investigations/spotify-1.3.0.277-streamer/probes/wait-renderer.ts \
+  PlayerAPI PlaybackAPI EsperantoTransport
+```
+
+Check one exact variant's Spotify-managed cache state:
+
+```sh
+bun investigations/spotify-1.3.0.277-streamer/probes/cache-status.ts \
+  <fileId> <formatEnum>
+```
+
+Fetch one exact variant fully into Spotify's cache:
+
+```sh
+bun investigations/spotify-1.3.0.277-streamer/probes/fill-cache.ts \
+  <fileId> <formatEnum> <spotify:track:URI>
+```
+
+Read a bounded protected-byte range:
+
+```sh
+bun investigations/spotify-1.3.0.277-streamer/probes/direct-streamer.ts \
+  <fileId> <formatEnum> <start> <end> <output-file>
+```
+
+Exercise two simultaneous progressive streamers and a cached reread:
+
+```sh
+bun investigations/spotify-1.3.0.277-streamer/probes/dual-streamer.ts
+```
+
+Exercise cancellation/destruction of one streamer while another continues:
+
+```sh
+bun investigations/spotify-1.3.0.277-streamer/probes/cancel-streamer.ts
+```
+
+Capture a track through the existing sequential native path while asserting the exact selected variant:
+
+```sh
+SOGGFY_INVESTIGATION_SOCKET=/tmp/soggfy130.sock \
+bun investigations/spotify-1.3.0.277-streamer/probes/capture-fixture.ts \
+  <trackId> <expectedFileId>
+```
+
+Run the same-file cold/prefetched benchmark:
+
+```sh
+SOGGFY_BENCH_PAIRS=3 \
+bun investigations/spotify-1.3.0.277-streamer/probes/benchmark-same-file.ts
+```
+
+Run the fixed 3-track paired batch gate:
+
+```sh
+SOGGFY_BATCH_PAIRS=3 SOGGFY_BATCH_MAX_PAIR_ATTEMPTS=5 \
+bun investigations/spotify-1.3.0.277-streamer/probes/benchmark-batch.ts
+```
+
+Invalid trials are evidence and are not counted toward the paired gate.
+
+## Native attribution instrumentation
+
+Set `SOGGFY_INVESTIGATE_OGG_CONTEXT=1` only on Spotify `1.3.0.277`. For this exact build, static analysis established that both `ogg_stream_pagein` calls inside `DecodeAudioData` pass `decoder + 0x88` as the Ogg stream-state pointer.
+
+The instrumentation therefore records logical streams by native decoder pointer, Ogg-state pointer, serial, and a unique stream generation. It does not use thread identity or `g_active_track_id` to name the raw context dump. The implementation is exact-build gated, bounds active dump state, closes replaced/stale streams, and is inert unless explicitly enabled.
+
+The investigation-only dump is evidence tooling; production prefetch must not depend on it.
+
+## Evidence provenance
+
+The original architecture spec records earlier supplied investigation claims separately. Files in `results/` generated by the benchmark runners are locally reproduced measurements. A failed readiness, cache-state, exact-file-ID, container/duration, or restoration assertion invalidates that trial and must be retained as an invalid result rather than silently omitted.
+
+See `RESULTS.md` for the current decision-gate summary.
