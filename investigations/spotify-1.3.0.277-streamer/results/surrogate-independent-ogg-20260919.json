@@ -1,0 +1,157 @@
+{
+  "generatedAt": "2026-09-18T23:49:07.076Z",
+  "scope": "local-generated-ogg-surrogate-only",
+  "realSpotifyGatesChanged": false,
+  "fixture": {
+    "codec": "opus",
+    "durationMs": 2400,
+    "inputA": {
+      "bytes": 36481,
+      "sha256": "a2f44fc6429fcd8b3fae3a9ce35bbc070227b1c6d636f0c2518a4bdd837efcf0"
+    },
+    "inputB": {
+      "bytes": 39596,
+      "sha256": "04c6d1831edf4e33406703b7a612f59c744df6ac1596d8da299d3624ddd84eda"
+    }
+  },
+  "parallel": {
+    "overlap": {
+      "contextIds": [
+        1,
+        2
+      ],
+      "overlapStartMs": 1789775345424,
+      "overlapEndMs": 1789775345652,
+      "overlapMs": 228,
+      "bothMadeProgress": true
+    },
+    "contexts": [
+      {
+        "contextId": 1,
+        "sourceId": "local-opus-A",
+        "state": "completed",
+        "totalEncodedBytes": 36481,
+        "sha256": "a2f44fc6429fcd8b3fae3a9ce35bbc070227b1c6d636f0c2518a4bdd837efcf0",
+        "pages": 5,
+        "progressEvents": 72,
+        "firstProgressAtMs": 1789775345424,
+        "lastProgressAtMs": 1789775345680,
+        "eosAtMs": 1789775345680,
+        "teardownAtMs": 1789775345683,
+        "framingComplete": true,
+        "lateWritesAfterTeardown": 0
+      },
+      {
+        "contextId": 2,
+        "sourceId": "local-opus-B",
+        "state": "completed",
+        "totalEncodedBytes": 39596,
+        "sha256": "04c6d1831edf4e33406703b7a612f59c744df6ac1596d8da299d3624ddd84eda",
+        "pages": 5,
+        "progressEvents": 62,
+        "firstProgressAtMs": 1789775345424,
+        "lastProgressAtMs": 1789775345652,
+        "eosAtMs": 1789775345652,
+        "teardownAtMs": 1789775345657,
+        "framingComplete": true,
+        "lateWritesAfterTeardown": 0
+      }
+    ],
+    "outputs": {
+      "a": {
+        "bytes": 36481,
+        "validation": {
+          "warnings": [],
+          "ok": true,
+          "ffprobeOk": true,
+          "durationMs": 2407,
+          "container": "ogg",
+          "decodedSignalOk": true,
+          "rms": 0.08853998879391828,
+          "peak": 0.12601669132709503,
+          "silenceRatio": 0
+        }
+      },
+      "b": {
+        "bytes": 39596,
+        "validation": {
+          "warnings": [],
+          "ok": true,
+          "ffprobeOk": true,
+          "durationMs": 2407,
+          "container": "ogg",
+          "decodedSignalOk": true,
+          "rms": 0.0884448867502251,
+          "peak": 0.12794633209705353,
+          "silenceRatio": 0.00002604166666666667
+        }
+      }
+    }
+  },
+  "surrogateGates": {
+    "C3aA": {
+      "pass": true,
+      "failures": []
+    },
+    "C3aB": {
+      "pass": true,
+      "failures": []
+    },
+    "C3b": {
+      "pass": true,
+      "failures": []
+    },
+    "C4": {
+      "pass": true,
+      "failures": []
+    }
+  },
+  "lifecycleEvidence": {
+    "recoverable": {
+      "cancel_startup": {
+        "contained": true,
+        "teardownComplete": true,
+        "noLateWrites": true,
+        "peerUnaffected": true
+      },
+      "cancel_consuming": {
+        "contained": true,
+        "teardownComplete": true,
+        "noLateWrites": true,
+        "peerUnaffected": true
+      },
+      "source_read_failure": {
+        "contained": true,
+        "teardownComplete": true,
+        "noLateWrites": true,
+        "peerUnaffected": true
+      },
+      "writer_failure": {
+        "contained": true,
+        "teardownComplete": true,
+        "noLateWrites": true,
+        "peerUnaffected": true
+      },
+      "timeout_no_progress": {
+        "contained": true,
+        "teardownComplete": true,
+        "noLateWrites": true,
+        "peerUnaffected": true
+      },
+      "late_callback": {
+        "contained": true,
+        "teardownComplete": true,
+        "noLateWrites": true,
+        "peerUnaffected": true
+      }
+    },
+    "processRestart": {
+      "completedArtifactsPreserved": true,
+      "incompleteArtifactsUnpublished": true,
+      "liveContextsInvalidated": true,
+      "cleanRequeueSupported": true
+    }
+  },
+  "allSurrogateGatesGo": true,
+  "note": "This proves the reusable local-fixture concurrency pipeline only. It does not constitute Spotify C3a/C3b/C4 evidence and does not authorize or implement protected-media extraction."
+}

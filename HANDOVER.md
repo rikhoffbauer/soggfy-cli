@@ -43,6 +43,27 @@ so Phase 3 Approach A is the smallest observed boundary. This is preparation for
 the next gate, not evidence that C3a passed. Existing sequential capture/prefetch
 remains the production baseline.
 
+A reusable local/generated-media concurrency surrogate is now implemented in
+`src/dev/independent-ogg-pipeline.ts`, with separate gate evaluators in
+`src/dev/surrogate-native-source-gates.ts`. Each worker owns independent source,
+Ogg page decoder/CRC state, sink, hash and lifecycle state; the coordinator
+supports arbitrary N workers. A 3-worker unit proof passes. The real local
+Opus/Ogg integration produced two exact outputs with clean media validation and
+228 ms of overlapping progress; the full surrogate C3a/C3b/C4 matrix is GO,
+including cancellation, source/writer failure, timeout, rejected late callbacks
+and restart/requeue semantics. Evidence:
+`investigations/spotify-1.3.0.277-streamer/results/surrogate-independent-ogg-20260919.json`.
+Run it with `bun run test:independent-ogg`.
+
+These are **surrogate-only results**. They do not promote Spotify C3a/C3b/C4 and
+do not mean single-instance parallel Spotify extraction is implemented.
+
+Verification for the surrogate layer: `bun test` passes **486/486** tests
+(**1,480 expectations across 99 files**); root and webapp typechecks pass;
+the native fixture suite passes; `bun run test:independent-ogg` passes against
+real generated Opus/Ogg media; the docs build passes; and `git diff --check`
+passes.
+
 Verification for the C2 promotion: `bun test` passes **456/456** tests
 (**1,391 expectations across 96 files**); root and webapp TypeScript checks pass;
 the native fixture suite passes including the new exact-identity predicate;

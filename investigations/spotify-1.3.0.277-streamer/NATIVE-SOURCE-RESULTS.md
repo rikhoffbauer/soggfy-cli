@@ -161,6 +161,29 @@ can be driven independently. Evidence:
 This is gate preparation only: **C3a remains NOT RUN** because no new
 independent-consumption evidence has been produced.
 
+## Reusable local Ogg concurrency surrogate
+
+A separate local/generated-media harness now exercises the intended concurrency
+shape without using Spotify protected media or private source consumption:
+
+- each worker owns its own `peek/consume` source, Ogg page decoder, incremental
+  hash state, capture sink, lifecycle state and progress timeline;
+- the coordinator supports arbitrary N workers, with a 3-worker regression test;
+- Ogg validation checks BOS/EOS, serial/sequence continuity and the page CRC;
+- recoverable failure cases cover startup/active cancellation, source failure,
+  writer failure, timeout/no-progress and rejected late callbacks;
+- restart semantics preserve completed outputs, remove incomplete outputs,
+  invalidate the interrupted context and allow a clean requeue.
+
+The real locally generated Opus/Ogg integration run produced two byte-identical
+outputs with clean `ffprobe`/decode validation and **228 ms** of overlapping
+progress. Surrogate C3a (both contexts), C3b and C4 all pass. Evidence:
+`results/surrogate-independent-ogg-20260919.json`.
+
+This is explicitly **surrogate architecture evidence only**. It does not change
+the Spotify C3a/C3b/C4 rows above and does not implement or authorize private
+Spotify media extraction. Re-run with `bun run test:independent-ogg`.
+
 ## Consequence
 
 The earlier C2 blocker is removed. Phase 3 may now investigate one independent

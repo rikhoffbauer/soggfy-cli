@@ -207,6 +207,18 @@ Only if A/B are unavailable. Identify required scheduler/callback/audio-clock de
 
 If independent consumption requires reconstructing broad private playback state, reference-counting rules, scheduler plumbing, audio-sink behavior and source management, record the negative result and retain optimized sequential capture.
 
+### Local surrogate architecture (not Spotify gate evidence)
+
+The reusable concurrency machinery may be exercised with generated/local Ogg
+media independently of the Spotify experiment. The surrogate implementation
+keeps one source, Ogg parser/CRC state, capture sink, hash state and lifecycle
+per worker, supports arbitrary N workers, and proves overlapping useful progress
+plus the same failure/restart invariants. Passing this surrogate is useful
+implementation evidence but **must never be used to mark C3a/C3b/C4 GO**.
+
+Current surrogate evidence is recorded in
+`results/surrogate-independent-ogg-20260919.json`; all surrogate gates pass.
+
 ## Gate C3a — One independent source succeeds
 
 PASS only if one exact cached variant can be consumed independently with all of:
