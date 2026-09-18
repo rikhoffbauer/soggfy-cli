@@ -13,7 +13,9 @@ It does not consult `g_active_track_id` or audible/global playback state. Two
 exact-build transition sites (`+0xc9cdd4` and `+0x656d1c`) provide monotonic
 thread-local construction tokens. Binding additionally requires the same live
 source generation, thread, transition site/token and shared native call ancestry;
-wrong/missing/duplicate cases fail closed.
+wrong/missing/duplicate cases fail closed. Legacy cache/context/owner scans are
+diagnostic-only and no longer mutate authoritative source identity; the
+transition-token predicate is the sole writer of a bound source `fileId`.
 
 Retained natural-execution evidence passes A -> B -> A, teardown-before-pointer
 reuse, and seek/restart. In the repeat trace, generations 4 and 5 reuse the same

@@ -16,7 +16,10 @@ The exact native identity path is now:
 `source generation -> native transition invocation -> playback backend assignment -> canonical fileId`
 
 The binding does not consult `g_active_track_id`, the audible item, or timing
-alone.
+alone. Earlier cache/context/owner identity scans remain diagnostic hints only:
+they cannot populate the authoritative source `fileId` or emit
+`source_identity_bound`. The transition-token predicate is the sole
+authoritative writer.
 
 Two exact-build transition call sites delimit the construction-time identity
 scope:

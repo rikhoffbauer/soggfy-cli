@@ -107,4 +107,27 @@ test("native source exact identity binding is construction-scoped and independen
   expect(binding).toContain("sharedCaller != 0");
   expect(binding).toContain("it->second.generation == pendingGeneration");
   expect(binding).toContain("!it->second.fileId.empty()");
+
+  const newStateStart = source.indexOf(
+    "static InvestigationNativeSourceState InvestigationNewNativeSourceState(",
+  );
+  const newStateEnd = source.indexOf(
+    "static std::string InvestigationFileIdHex(",
+    newStateStart,
+  );
+  const newState = source.slice(newStateStart, newStateEnd);
+  expect(newState).not.toContain("state.fileId =");
+
+  const ownerStart = source.indexOf("static uintptr_t my_InvestigationOwnerConstructor(");
+  const ownerEnd = source.indexOf(
+    "static uintptr_t my_InvestigationSourceInit(",
+    ownerStart,
+  );
+  const ownerConstructor = source.slice(ownerStart, ownerEnd);
+  expect(ownerConstructor).not.toContain("it->second.fileId =");
+  expect(ownerConstructor).not.toContain('"source_identity_bound"');
+  expect(ownerConstructor).toContain('"owner_ctor_identity_hint"');
+
+  const authoritativeBindings = source.match(/"source_identity_bound"/g) ?? [];
+  expect(authoritativeBindings).toHaveLength(1);
 });

@@ -326,8 +326,6 @@ static InvestigationOwnerConstructorFn orig_InvestigationOwnerConstructor = null
 
 static thread_local std::string g_investigation_cache_file_id;
 static thread_local uintptr_t g_investigation_cache_object = 0;
-static thread_local uintptr_t g_investigation_constructing_owner = 0;
-static thread_local std::string g_investigation_constructing_file_id;
 static thread_local std::string g_investigation_context_file_id;
 static thread_local uintptr_t g_investigation_higher_context = 0;
 static std::atomic<uint64_t> g_investigation_owner_ctor_traces{0};
@@ -538,11 +536,6 @@ static InvestigationNativeSourceState InvestigationNewNativeSourceState(
     state.lastAtMs = state.createdAtMs;
     state.initThreadId = InvestigationThreadId();
     state.mode = mode;
-    if (state.owner != 0 &&
-        state.owner == g_investigation_constructing_owner &&
-        !g_investigation_constructing_file_id.empty()) {
-        state.fileId = g_investigation_constructing_file_id;
-    }
     return state;
 }
 
@@ -1849,18 +1842,14 @@ static uintptr_t my_InvestigationOwnerConstructor(
         InvestigationScanDependency("parent+0x08", x1);
         InvestigationScanDependency("parent+0xf0", x5);
     }
-    const uintptr_t previousOwner = g_investigation_constructing_owner;
-    const std::string previousFileId = g_investigation_constructing_file_id;
     const std::string& constructionFileId =
         !g_investigation_context_file_id.empty()
             ? g_investigation_context_file_id
             : g_investigation_cache_file_id;
     if (InvestigationNativeSourceEnabled() &&
         !constructionFileId.empty()) {
-        g_investigation_constructing_owner = ownerPtr;
-        g_investigation_constructing_file_id = constructionFileId;
         InvestigationAppendIdentityEvent(
-            "owner_ctor_bound_file",
+            "owner_ctor_identity_hint",
             constructionFileId,
             0,
             g_investigation_cache_object,
@@ -1888,10 +1877,8 @@ static uintptr_t my_InvestigationOwnerConstructor(
             match = InvestigationFindCanonicalFileId(parent, 0x118);
             matchBase = parent;
         }
-        std::string matchedFileId;
         if (match) {
             InvestigationAppendOwnerFileMatch(matchBase, *match);
-            matchedFileId = match->fileId;
         } else {
             auto audioMatch =
                 InvestigationFindCanonicalAudioId(ownerPtr, 0x700);
@@ -1903,31 +1890,10 @@ static uintptr_t my_InvestigationOwnerConstructor(
             }
             if (audioMatch) {
                 InvestigationAppendAudioIdMatch(audioBase, *audioMatch);
-                matchedFileId = audioMatch->fileId;
-            }
-        }
-        if (!matchedFileId.empty()) {
-            InvestigationNativeSourceState snapshot;
-            bool found = false;
-            {
-                std::lock_guard<std::mutex> lock(g_investigation_source_mutex);
-                const uintptr_t source = ownerPtr + kSpotify130277SourceOffset;
-                auto it = g_investigation_native_sources.find(source);
-                if (it != g_investigation_native_sources.end()) {
-                    it->second.fileId = matchedFileId;
-                    snapshot = it->second;
-                    found = true;
-                }
-            }
-            if (found) {
-                InvestigationAppendNativeSourceEvent(
-                    "source_identity_bound", snapshot);
             }
         }
     }
 
-    g_investigation_constructing_owner = previousOwner;
-    g_investigation_constructing_file_id = previousFileId;
     return result;
 }
 
