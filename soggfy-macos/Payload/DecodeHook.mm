@@ -61,6 +61,15 @@ static std::mutex g_gated_sync_mutex;
 // never use thread identity as the stream identity.
 static thread_local void* g_investigation_current_decoder = nullptr;
 static constexpr uintptr_t kSpotify130277OggStateOffset = 0x88;
+static constexpr size_t kMaxInvestigationStreams = 16;
+static constexpr uint64_t kInvestigationStreamStaleMs = 5 * 60 * 1000;
+static std::atomic<bool> g_investigation_context_layout_valid{false};
+static std::atomic<uint64_t> g_investigation_stream_generation{0};
+
+static uint64_t InvestigationNowMs() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 struct InvestigationOggKey {
     uintptr_t decoder = 0;
@@ -86,18 +95,24 @@ struct InvestigationOggFile {
     std::string path;
     uint64_t bytes = 0;
     uint64_t pages = 0;
+    uint64_t generation = 0;
+    uint64_t startedAtMs = 0;
 };
 
 static std::mutex g_investigation_ogg_mutex;
 static std::unordered_map<InvestigationOggKey, InvestigationOggFile, InvestigationOggKeyHash>
     g_investigation_ogg_files;
 
-static bool InvestigationOggEnabled() {
-    static const bool enabled = [] {
+static bool InvestigationOggRequested() {
+    static const bool requested = [] {
         const char* value = std::getenv("SOGGFY_INVESTIGATE_OGG_CONTEXT");
         return value && value[0] != '\0' && strcmp(value, "0") != 0;
     }();
-    return enabled;
+    return requested;
+}
+
+static bool InvestigationOggEnabled() {
+    return InvestigationOggRequested() && g_investigation_context_layout_valid.load();
 }
 
 static std::filesystem::path InvestigationBasePath() {
@@ -128,6 +143,7 @@ static void InvestigationAppendEvent(
         << ",\"relationOk\":" << (relationOk ? "true" : "false");
     if (file) {
         out << ",\"path\":\"" << file->path << "\""
+            << ",\"generation\":" << file->generation
             << ",\"bytes\":" << file->bytes
             << ",\"pages\":" << file->pages;
     }
@@ -155,17 +171,58 @@ static void InvestigationCaptureOggPage(
     std::lock_guard<std::mutex> lock(g_investigation_ogg_mutex);
     auto it = g_investigation_ogg_files.find(key);
     if (isVorbisBos) {
+        const uint64_t now = InvestigationNowMs();
+        for (auto stale = g_investigation_ogg_files.begin(); stale != g_investigation_ogg_files.end();) {
+            if (now - stale->second.startedAtMs < kInvestigationStreamStaleMs) {
+                ++stale;
+                continue;
+            }
+            stale->second.stream.flush();
+            stale->second.stream.close();
+            InvestigationAppendEvent("stale", stale->first, &stale->second,
+                stale->first.os == stale->first.decoder + kSpotify130277OggStateOffset);
+            stale = g_investigation_ogg_files.erase(stale);
+        }
+
+        it = g_investigation_ogg_files.find(key);
+        if (it != g_investigation_ogg_files.end()) {
+            it->second.stream.flush();
+            it->second.stream.close();
+            InvestigationAppendEvent("replaced", key, &it->second, relationOk);
+            g_investigation_ogg_files.erase(it);
+        }
+
+        if (g_investigation_ogg_files.size() >= kMaxInvestigationStreams) {
+            auto oldest = std::min_element(
+                g_investigation_ogg_files.begin(),
+                g_investigation_ogg_files.end(),
+                [](const auto& a, const auto& b) {
+                    return a.second.startedAtMs < b.second.startedAtMs;
+                });
+            if (oldest != g_investigation_ogg_files.end()) {
+                oldest->second.stream.flush();
+                oldest->second.stream.close();
+                InvestigationAppendEvent("evicted", oldest->first, &oldest->second,
+                    oldest->first.os == oldest->first.decoder + kSpotify130277OggStateOffset);
+                g_investigation_ogg_files.erase(oldest);
+            }
+        }
+
         const auto base = InvestigationBasePath();
         std::error_code ec;
         std::filesystem::create_directories(base / "streams", ec);
 
+        const uint64_t generation = g_investigation_stream_generation.fetch_add(1) + 1;
         std::ostringstream name;
         name << "pid-" << getpid()
              << "-decoder-" << std::hex << decoderPtr
              << "-os-" << osPtr
-             << "-serial-" << serial << ".ogg";
+             << "-serial-" << serial << std::dec
+             << "-generation-" << generation << ".ogg";
         InvestigationOggFile capture;
         capture.path = (base / "streams" / name.str()).string();
+        capture.generation = generation;
+        capture.startedAtMs = now;
         capture.stream.open(capture.path, std::ios::binary | std::ios::trunc);
         if (capture.stream.is_open()) {
             auto [inserted, _] = g_investigation_ogg_files.insert_or_assign(
@@ -182,6 +239,13 @@ static void InvestigationCaptureOggPage(
     }
     it->second.bytes += hlen + blen;
     it->second.pages += 1;
+
+    if (!it->second.stream.good()) {
+        it->second.stream.close();
+        InvestigationAppendEvent("write_error", key, &it->second, relationOk);
+        g_investigation_ogg_files.erase(it);
+        return;
+    }
 
     if (isEos) {
         it->second.stream.flush();
@@ -448,6 +512,14 @@ void InstallDecoderHook() {
     }
     NSString *bundleVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
     const char *version = bundleVersion.UTF8String;
+    if (InvestigationOggRequested()) {
+        const bool exactInvestigationBuild = version && strcmp(version, "1.3.0.277") == 0;
+        g_investigation_context_layout_valid.store(exactInvestigationBuild);
+        if (!exactInvestigationBuild) {
+            printf("[Soggfy-WARN] Ogg context investigation disabled: decoder+0x88 is only validated for Spotify 1.3.0.277.\n");
+            fflush(stdout);
+        }
+    }
     SpotifyHookTargets compatibilityTargets{};
     const SpotifyHookTargets *targets = SpotifyHookTargetsForVersion(version);
     if (!targets && SpotifyHookTargetsForCompatibilityEnvironment(version, &compatibilityTargets)) {
