@@ -13,7 +13,7 @@
     "start": "bun run src/cli.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit --pretty",
-    "test:native": "./scripts/run-state-manager-fixture.sh && ./scripts/run-process-role-fixture.sh && ./scripts/run-ogg-preroll-fixture.sh && ./scripts/run-hook-targets-fixture.sh && bash scripts/run-child-process-fixture.sh",
+    "test:native": "./scripts/run-state-manager-fixture.sh && ./scripts/run-process-role-fixture.sh && ./scripts/run-ogg-preroll-fixture.sh && ./scripts/run-hook-targets-fixture.sh && ./scripts/run-native-source-identity-fixture.sh && bash scripts/run-child-process-fixture.sh",
     "test:webapp": "cd webapp && bun test src/server/__tests__",
     "typecheck:webapp": "cd webapp && bun run typecheck",
     "doctor": "bun run scripts/doctor.ts",

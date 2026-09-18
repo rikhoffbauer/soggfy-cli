@@ -1,0 +1,115 @@
+{
+  "generatedAt": "2026-09-18T22:54:25.926Z",
+  "gate": "C2",
+  "exactFileIds": {
+    "A": "f38702bf00c1b1271576c399dbc5713f2412132a",
+    "B": "6c3230af2542446176eb71f54ed0c66000420ef8"
+  },
+  "repeatPointerReuse": {
+    "pass": true,
+    "sequence": [
+      {
+        "generation": 3,
+        "fileId": "f38702bf00c1b1271576c399dbc5713f2412132a",
+        "source": "0x11c001a6c78",
+        "wallMs": 1789766784447
+      },
+      {
+        "generation": 4,
+        "fileId": "6c3230af2542446176eb71f54ed0c66000420ef8",
+        "source": "0x11c001a7a78",
+        "wallMs": 1789766788340
+      },
+      {
+        "generation": 5,
+        "fileId": "f38702bf00c1b1271576c399dbc5713f2412132a",
+        "source": "0x11c001a7a78",
+        "wallMs": 1789766792156
+      }
+    ],
+    "pointerReuse": true,
+    "teardownBeforeReuse": true
+  },
+  "seekRestart": {
+    "pass": true,
+    "generation": 6,
+    "resetCount": 2,
+    "wrongIdentityAssignments": 0
+  },
+  "dynamicConstructionScope": {
+    "pass": true,
+    "candidates": [
+      {
+        "generation": 1,
+        "source": "0x12c0021ee78",
+        "fileId": "56bc9ef82236dc30d6f31d8125fc311b3c2442b9",
+        "scopeToken": 1,
+        "scopeSiteOffset": "0xc9cdd4",
+        "sharedCallerOffset": "0xc94610"
+      },
+      {
+        "generation": 2,
+        "source": "0x12c0021d278",
+        "fileId": "f38702bf00c1b1271576c399dbc5713f2412132a",
+        "scopeToken": 3,
+        "scopeSiteOffset": "0x656d1c",
+        "sharedCallerOffset": "0x7d7448"
+      },
+      {
+        "generation": 3,
+        "source": "0x12c0b74f878",
+        "fileId": "9153475961a5554acb6714e269c800a2daa4546d",
+        "scopeToken": 5,
+        "scopeSiteOffset": "0x656d1c",
+        "sharedCallerOffset": "0x7d7448"
+      },
+      {
+        "generation": 8,
+        "source": "0x12c0b743b78",
+        "fileId": "3b5fcbc754c83c46357653d64b53314f3bd498f9",
+        "scopeToken": 6,
+        "scopeSiteOffset": "0xc9cdd4",
+        "sharedCallerOffset": "0xc94610"
+      },
+      {
+        "generation": 12,
+        "source": "0x12c0f36b278",
+        "fileId": "c4e242f70fb8c36a4cb5409db12b058a2de39a81",
+        "scopeToken": 7,
+        "scopeSiteOffset": "0xc9cdd4",
+        "sharedCallerOffset": "0xc94610"
+      },
+      {
+        "generation": 13,
+        "source": "0x12c0b736278",
+        "fileId": "c4e242f70fb8c36a4cb5409db12b058a2de39a81",
+        "scopeToken": 7,
+        "scopeSiteOffset": "0xc9cdd4",
+        "sharedCallerOffset": "0x1c067a4"
+      },
+      {
+        "generation": 14,
+        "source": "0x12c0f36b278",
+        "fileId": "eed0c5b8e597e37abdec246d36f6060a79d0aade",
+        "scopeToken": 8,
+        "scopeSiteOffset": "0xc9cdd4",
+        "sharedCallerOffset": "0xc94610"
+      }
+    ],
+    "distinctTokens": [
+      1,
+      3,
+      5,
+      6,
+      7,
+      8
+    ],
+    "distinctSites": [
+      "0xc9cdd4",
+      "0x656d1c"
+    ],
+    "bothKnownScopeSites": true
+  },
+  "pass": true,
+  "note": "Evidence is compositional: the retained repeat/pointer-reuse/seek trace predates transition tokens; a later natural-execution trace validates tokens on both transition branches. The fail-closed binding predicate is verified separately by the native fixture."
+}

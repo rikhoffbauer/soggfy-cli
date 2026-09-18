@@ -2,32 +2,50 @@
 
 ## Current state
 
-### 2026-09-18 independent native source feasibility closure
+### 2026-09-19 independent native source C2 gate
 
-The follow-on native-source concurrency investigation is closed **NO-GO at Gate
-C2**. C1 is supported by retained natural-execution lifecycle/source-boundary
-evidence, but no exact `fileId` binding from a native source generation was
-established independently of global playback state. The native
-`GetPlaybackInfo` identity backend had no direct structural relation to the
-bounded source graph; the remaining parent-owned constructor dependencies did
-not directly contain the canonical fixture `fileId`/`audioId`.
+Gate C2 is now **GO / PASS** for exact Spotify 1.3.0.277. The previous NO-GO
+closure is superseded.
 
-The next step would require recursively reconstructing additional undocumented
-playback/metadata object graphs, which crosses the investigation plan's
-predeclared boundedness stop criterion. C3a/C3b and two-context work were
-therefore not attempted, and the seek/restart trace was not used as a substitute
-for the missing C2 identity proof. Final summary:
-[independent native source result](investigations/spotify-1.3.0.277-streamer/NATIVE-SOURCE-RESULTS.md).
+The bounded identity path is now
+`source generation -> native transition invocation -> playback backend assignment -> exact fileId`.
+It does not consult `g_active_track_id` or audible/global playback state. Two
+exact-build transition sites (`+0xc9cdd4` and `+0x656d1c`) provide monotonic
+thread-local construction tokens. Binding additionally requires the same live
+source generation, thread, transition site/token and shared native call ancestry;
+wrong/missing/duplicate cases fail closed.
 
-Closure also stopped the isolated Spotify 1.3.0.277 source-probe runtime and
-restored the normal daemon. The restored daemon reported responsive Spotify IPC
-and HTTP on `127.0.0.1:8085`.
+Retained natural-execution evidence passes A -> B -> A, teardown-before-pointer
+reuse, and seek/restart. In the repeat trace, generations 4 and 5 reuse the same
+raw source address while binding B then A correctly. A later natural trace
+validates the dynamic scope token on both transition branches. The native identity
+fixture rejects wrong thread/token/site, stale generation, duplicate binding,
+missing ancestry and malformed identity.
 
-Current closure verification: `bun test` passes **455/455** tests; root and
-webapp TypeScript checks pass; native fixtures pass; payload, release, and docs
-builds pass; and `git diff --check` passes. Both workspaces pin
-`@types/bun@1.4.1` because the independently locked 1.4.2 declarations regress
-the webapp's `node:net` server typing under bundler resolution.
+Evidence:
+`investigations/spotify-1.3.0.277-streamer/NATIVE-SOURCE-RESULTS.md` and
+`investigations/spotify-1.3.0.277-streamer/results/c2-gate-evidence-20260919.json`.
+
+A final controlled post-binding A -> B -> A replay was blocked by the execution
+tool safety layer and was not retried or routed around. C2's stated identity
+requirements are covered compositionally by the retained natural traces plus the
+deterministic fail-closed fixture. C3a remains **NOT RUN**; independent native
+source consumption is the next gate. Existing sequential capture/prefetch remains
+the production baseline.
+
+Verification for the C2 promotion: `bun test` passes **456/456** tests
+(**1,391 expectations across 96 files**); root and webapp TypeScript checks pass;
+the native fixture suite passes including the new exact-identity predicate;
+payload, release/runtime, and docs builds pass; and `git diff --check` passes.
+
+Runtime restoration is currently blocked by the old isolated exact-build Spotify
+process, PID 1503, which is stuck in macOS `U/E` (uninterruptible/exiting) state
+after both SIGTERM and SIGKILL. It still owns `127.0.0.1:7768`, so normal daemon
+startup correctly fails closed instead of enabling concurrent-Spotify mode.
+Do not bypass that guard. Once PID 1503 finally exits (or after the next reboot),
+restart with `SOGGFY_HOST=127.0.0.1 bun src/cli.ts daemon start` and verify
+`daemon status`.
+
 
 ### 2026-09-18 native concurrency plan review
 

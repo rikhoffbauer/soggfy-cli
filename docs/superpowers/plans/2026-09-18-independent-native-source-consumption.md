@@ -1,37 +1,41 @@
 # Independent native source consumption investigation
 
-Date: 2026-09-18  
-Status: closed NO-GO at Gate C2; C1 supported, C2 not established, C3a/C3b not attempted  
-Production baseline: optimized sequential capture remains authoritative. Two-context work remains blocked until C1, C2, C3a and C3b pass from primary evidence.
+Date: 2026-09-19
+Status: Gate C1 PASS; Gate C2 GO; C3a/C3b not attempted
+Production baseline: optimized sequential capture remains authoritative. Two-context work remains blocked until C3a and C3b pass from primary evidence.
 
-## Closure decision
+## Current gate decision
 
-The bounded feasibility investigation stops at Gate C2.
+The earlier C2 NO-GO is superseded. A bounded construction-time identity edge
+was found without recursively reconstructing Spotify's playback object graph.
 
-Natural execution established a repeatable native source/read ownership boundary
-and lifecycle sufficient for C1. The investigation then traced exact playback
-identity through the native Playback Esperanto service and compared that identity
-state with the bounded source graph. No direct structural identity edge was found.
-The remaining source-constructor dependencies were narrowed to parent-owned
-objects, including one track-varying object, but neither the exact canonical
-`fileId` nor its canonical `audioId` was directly present in the bounded objects
-that were inspected.
+Natural execution now establishes:
 
-Advancing from here would require recursively reconstructing additional
-undocumented playback/metadata object graphs or managers instead of reusing a
-small verified source boundary. That crosses this plan's own bounded-investigation
-stop criterion. Therefore:
+- a logical native source generation independent of raw pointer reuse;
+- two exact-build native transition call sites that delimit source construction;
+- a monotonic thread-local transition token recorded at source initialization;
+- exact native playback-backend `fileId` assignment within the same transition;
+- fail-closed correlation requiring the same live generation, thread, transition
+  token/site and shared native call ancestry.
 
-- Gate C1: supported by the retained lifecycle/source-boundary evidence.
-- Gate C2: not passed.
-- The seek/restart adversarial trace is not promoted to a C2 test because the
-  prerequisite exact identity binding was never established.
-- Gates C3a/C3b and all two-context work are not attempted.
-- No production ownership or concurrency behavior changes are justified by this
-  investigation.
+The retained A -> B -> A trace correctly attributes A, then B, then A again even
+when the B and final A generations reuse the same raw source pointer after
+teardown. A later seek/restart test resets the same A generation twice without a
+wrong identity assignment. A subsequent natural trace validates the dynamic
+transition-token mechanism on both transition branches.
 
-The final evidence summary is
-`investigations/spotify-1.3.0.277-streamer/NATIVE-SOURCE-RESULTS.md`.
+Therefore:
+
+- Gate C1: PASS.
+- Gate C2: **GO / PASS**.
+- Gate C3a: not run; one independent source is now the next experiment.
+- Gate C3b and two-context work remain blocked on C3a.
+- No production concurrency change is implied by C2 alone.
+
+The authoritative evidence summary is
+`investigations/spotify-1.3.0.277-streamer/NATIVE-SOURCE-RESULTS.md`, with
+machine-readable gate evidence in
+`investigations/spotify-1.3.0.277-streamer/results/c2-gate-evidence-20260919.json`.
 
 ## Objective
 

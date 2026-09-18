@@ -86,3 +86,25 @@ test("native source investigation tracing remains opt-in and bounded", () => {
     expect(source).toContain('(it->second.pages % 128) == 0');
   });
 });
+
+test("native source exact identity binding is construction-scoped and independent of global playback", async () => {
+  const source = await Bun.file(new URL("../soggfy-macos/Payload/DecodeHook.mm", import.meta.url)).text();
+  const start = source.indexOf("static void InvestigationPlaybackBackendAssignProbe(");
+  const end = source.indexOf("static void InvestigationSourcePublishHandleProbe(", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const binding = source.slice(start, end);
+
+  expect(source).toContain('#include "NativeSourceIdentity.h"');
+  expect(source).toContain("InvestigationIdentityScopeEnter(0xc9cdd4)");
+  expect(source).toContain("InvestigationIdentityScopeEnter(0x656d1c)");
+  expect(source).toContain("CanBindExactNativeSourceIdentity(bindingInput)");
+  expect(source).toContain('"source_identity_bound"');
+  expect(binding).not.toContain("g_active_track_id");
+  expect(binding).not.toContain("g_track_mutex");
+  expect(binding).toContain("pending.identityScopeToken");
+  expect(binding).toContain("pending.identityScopeSiteOffset");
+  expect(binding).toContain("sharedCaller != 0");
+  expect(binding).toContain("it->second.generation == pendingGeneration");
+  expect(binding).toContain("!it->second.fileId.empty()");
+});

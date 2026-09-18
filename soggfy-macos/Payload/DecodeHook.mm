@@ -1,6 +1,7 @@
 #include <os/log.h>
 #include "CapturePolicy.h"
 #include "DecodeHook.h"
+#include "NativeSourceIdentity.h"
 #include "OggPreRoll.h"
 #include "Scanner.h"
 #include "StateManager.h"
@@ -110,6 +111,46 @@ static uint64_t InvestigationWallMs() {
     return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
+struct InvestigationFrameRecord {
+    uintptr_t framePointer = 0;
+    uintptr_t returnAddress = 0;
+};
+
+static int InvestigationCaptureFrameRecords(
+    InvestigationFrameRecord* records,
+    int capacity
+) {
+    if (!records || capacity <= 0) return 0;
+    pthread_t thread = pthread_self();
+    const uintptr_t stackTop = reinterpret_cast<uintptr_t>(
+        pthread_get_stackaddr_np(thread));
+    const size_t stackSize = pthread_get_stacksize_np(thread);
+    const uintptr_t stackBottom =
+        stackTop >= stackSize ? stackTop - stackSize : 0;
+    uintptr_t framePointer = reinterpret_cast<uintptr_t>(
+        __builtin_frame_address(0));
+    int count = 0;
+    while (count < capacity &&
+           framePointer >= stackBottom &&
+           framePointer + 2 * sizeof(uintptr_t) <= stackTop &&
+           (framePointer % alignof(uintptr_t)) == 0) {
+        const uintptr_t previous =
+            *reinterpret_cast<const uintptr_t*>(framePointer);
+        const uintptr_t returnAddress =
+            *reinterpret_cast<const uintptr_t*>(
+                framePointer + sizeof(uintptr_t));
+        records[count++] = InvestigationFrameRecord{
+            framePointer, returnAddress};
+        if (previous <= framePointer ||
+            previous < stackBottom ||
+            previous + 2 * sizeof(uintptr_t) > stackTop) {
+            break;
+        }
+        framePointer = previous;
+    }
+    return count;
+}
+
 struct InvestigationOggKey {
     uintptr_t decoder = 0;
     uintptr_t os = 0;
@@ -211,6 +252,53 @@ static std::unordered_map<uintptr_t, InvestigationNativeSourceState>
     g_investigation_native_sources;
 static std::unordered_map<uintptr_t, InvestigationRetiredSource>
     g_investigation_retired_sources;
+static std::atomic<uintptr_t> g_investigation_spotify_image_base{0};
+
+struct InvestigationPendingSourceBinding {
+    uint64_t generation = 0;
+    uintptr_t source = 0;
+    uint64_t threadId = 0;
+    uint64_t identityScopeToken = 0;
+    uintptr_t identityScopeSiteOffset = 0;
+    void* frames[24] = {};
+    int frameCount = 0;
+    InvestigationFrameRecord frameRecords[24] = {};
+    int frameRecordCount = 0;
+};
+
+static std::atomic<uint64_t> g_investigation_identity_scope_generation{0};
+static thread_local uint64_t g_investigation_identity_scope_token = 0;
+static thread_local uintptr_t g_investigation_identity_scope_site_offset = 0;
+static thread_local InvestigationPendingSourceBinding
+    g_investigation_pending_source_binding;
+
+static void InvestigationIdentityScopeEnter(uintptr_t siteOffset) {
+    g_investigation_identity_scope_token =
+        g_investigation_identity_scope_generation.fetch_add(1) + 1;
+    g_investigation_identity_scope_site_offset = siteOffset;
+}
+
+static uint64_t InvestigationCurrentIdentityScopeToken() {
+    return g_investigation_identity_scope_token;
+}
+
+static uintptr_t InvestigationCurrentIdentityScopeSiteOffset() {
+    return g_investigation_identity_scope_site_offset;
+}
+
+static void InvestigationIdentityScopeAEnterProbe(
+    void*,
+    DobbyRegisterContext*
+) {
+    InvestigationIdentityScopeEnter(0xc9cdd4);
+}
+
+static void InvestigationIdentityScopeBEnterProbe(
+    void*,
+    DobbyRegisterContext*
+) {
+    InvestigationIdentityScopeEnter(0x656d1c);
+}
 
 using InvestigationSourceInitFn = uintptr_t (*)(void*, uint8_t);
 using InvestigationSourcePeekFn = InvestigationNativeSourceSpan (*)(void*);
@@ -953,6 +1041,109 @@ static void InvestigationPlaybackBackendAssignProbe(
 
     void* frames[24] = {};
     const int frameCount = backtrace(frames, 24);
+    InvestigationFrameRecord frameRecords[24] = {};
+    const int frameRecordCount = InvestigationCaptureFrameRecords(
+        frameRecords,
+        static_cast<int>(std::size(frameRecords)));
+
+    uint64_t pendingGeneration = 0;
+    uintptr_t pendingSource = 0;
+    uintptr_t sharedCaller = 0;
+    uintptr_t sharedFramePointer = 0;
+    uint64_t pendingThreadId = 0;
+    const auto pending = g_investigation_pending_source_binding;
+    const uint64_t currentThreadId = InvestigationThreadId();
+    const uint64_t currentIdentityScopeToken =
+        InvestigationCurrentIdentityScopeToken();
+    const uintptr_t currentIdentityScopeSiteOffset =
+        InvestigationCurrentIdentityScopeSiteOffset();
+    const bool sameIdentityScope =
+        pending.identityScopeToken != 0 &&
+        pending.identityScopeToken == currentIdentityScopeToken &&
+        pending.identityScopeSiteOffset ==
+            currentIdentityScopeSiteOffset;
+    if (pending.generation != 0 &&
+        pending.source != 0 &&
+        pending.threadId == currentThreadId &&
+        sameIdentityScope) {
+        bool validPending = false;
+        {
+            std::lock_guard<std::mutex> lock(g_investigation_source_mutex);
+            auto it = g_investigation_native_sources.find(pending.source);
+            validPending =
+                it != g_investigation_native_sources.end() &&
+                it->second.generation == pending.generation &&
+                it->second.fileId.empty();
+        }
+        if (validPending) {
+            const uintptr_t imageBase =
+                g_investigation_spotify_image_base.load();
+            constexpr uintptr_t kSpotify130277TextSpan = 0x24b4000;
+            for (int i = 0;
+                 i < pending.frameRecordCount && sharedCaller == 0;
+                 ++i) {
+                const auto& candidate = pending.frameRecords[i];
+                if (!imageBase ||
+                    candidate.returnAddress < imageBase ||
+                    candidate.returnAddress >=
+                        imageBase + kSpotify130277TextSpan) {
+                    continue;
+                }
+                for (int j = 0; j < frameRecordCount; ++j) {
+                    if (candidate.returnAddress ==
+                            frameRecords[j].returnAddress &&
+                        candidate.framePointer ==
+                            frameRecords[j].framePointer) {
+                        sharedCaller = candidate.returnAddress;
+                        sharedFramePointer = candidate.framePointer;
+                        break;
+                    }
+                }
+            }
+            if (sharedCaller != 0) {
+                pendingGeneration = pending.generation;
+                pendingSource = pending.source;
+                pendingThreadId = pending.threadId;
+            }
+        }
+    }
+
+    InvestigationNativeSourceState boundSnapshot;
+    bool sourceIdentityBound = false;
+    if (pendingGeneration != 0) {
+        std::lock_guard<std::mutex> lock(g_investigation_source_mutex);
+        auto it = g_investigation_native_sources.find(pendingSource);
+        const bool generationLive =
+            it != g_investigation_native_sources.end() &&
+            it->second.generation == pendingGeneration;
+        const bool alreadyBound =
+            generationLive && !it->second.fileId.empty();
+        NativeSourceIdentityBindingInputs bindingInput;
+        bindingInput.pendingGeneration = pending.generation;
+        bindingInput.pendingSource = pending.source;
+        bindingInput.pendingThreadId = pending.threadId;
+        bindingInput.pendingScopeToken = pending.identityScopeToken;
+        bindingInput.pendingScopeSiteOffset =
+            pending.identityScopeSiteOffset;
+        bindingInput.currentThreadId = currentThreadId;
+        bindingInput.currentScopeToken = currentIdentityScopeToken;
+        bindingInput.currentScopeSiteOffset =
+            currentIdentityScopeSiteOffset;
+        bindingInput.generationLive = generationLive;
+        bindingInput.alreadyBound = alreadyBound;
+        bindingInput.sharedCallFrame = sharedCaller != 0;
+        bindingInput.fileId = fileId;
+        if (CanBindExactNativeSourceIdentity(bindingInput)) {
+            it->second.fileId = fileId;
+            boundSnapshot = it->second;
+            sourceIdentityBound = true;
+        }
+    }
+    if (sourceIdentityBound) {
+        InvestigationAppendNativeSourceEvent(
+            "source_identity_bound", boundSnapshot);
+    }
+
     const auto base = InvestigationBasePath();
     std::error_code ec;
     std::filesystem::create_directories(base, ec);
@@ -973,6 +1164,25 @@ static void InvestigationPlaybackBackendAssignProbe(
     }
     if (!audioId.empty()) {
         out << ",\"audioId\":\"" << audioId << "\"";
+    }
+    if (pendingGeneration != 0) {
+        const uintptr_t imageBase =
+            g_investigation_spotify_image_base.load();
+        out << ",\"pendingSourceGeneration\":" << pendingGeneration
+            << ",\"pendingSource\":\"0x" << std::hex << pendingSource << "\""
+            << ",\"pendingThreadId\":" << std::dec << pendingThreadId
+            << ",\"identityScopeToken\":" << pending.identityScopeToken
+            << ",\"identityScopeSiteOffset\":\"0x" << std::hex
+            << pending.identityScopeSiteOffset << "\""
+            << ",\"sharedCaller\":\"0x" << std::hex << sharedCaller << "\""
+            << ",\"sharedFramePointer\":\"0x" << sharedFramePointer << "\""
+            << ",\"sharedCallerOffset\":\"0x"
+            << (imageBase && sharedCaller >= imageBase
+                ? sharedCaller - imageBase
+                : 0)
+            << "\"" << std::dec;
+        g_investigation_pending_source_binding =
+            InvestigationPendingSourceBinding{};
     }
     out << ",\"stack\":[";
     for (int i = 0; i < frameCount; ++i) {
@@ -1746,6 +1956,26 @@ static uintptr_t my_InvestigationSourceInit(void* source, uint8_t mode) {
         snapshot = InvestigationNewNativeSourceState(key, mode);
         g_investigation_native_sources.insert_or_assign(key, snapshot);
     }
+    g_investigation_pending_source_binding =
+        InvestigationPendingSourceBinding{};
+    g_investigation_pending_source_binding.generation =
+        snapshot.generation;
+    g_investigation_pending_source_binding.source = snapshot.source;
+    g_investigation_pending_source_binding.threadId =
+        snapshot.initThreadId;
+    g_investigation_pending_source_binding.identityScopeToken =
+        InvestigationCurrentIdentityScopeToken();
+    g_investigation_pending_source_binding.identityScopeSiteOffset =
+        InvestigationCurrentIdentityScopeSiteOffset();
+    g_investigation_pending_source_binding.frameCount = backtrace(
+        g_investigation_pending_source_binding.frames,
+        static_cast<int>(std::size(
+            g_investigation_pending_source_binding.frames)));
+    g_investigation_pending_source_binding.frameRecordCount =
+        InvestigationCaptureFrameRecords(
+            g_investigation_pending_source_binding.frameRecords,
+            static_cast<int>(std::size(
+                g_investigation_pending_source_binding.frameRecords)));
     InvestigationAppendNativeSourceEvent("source_init", snapshot);
     return result;
 }
@@ -2165,6 +2395,12 @@ static bool InstallNativeSourceInvestigationHooks(uintptr_t base) {
         0xfc, 0x6f, 0xba, 0xa9, 0xfa, 0x67, 0x01, 0xa9,
         0xf8, 0x5f, 0x02, 0xa9, 0xf6, 0x57, 0x03, 0xa9,
     };
+    static constexpr uint8_t identityScopeAEnterInstruction[] = {
+        0x20, 0x01, 0x3f, 0xd6,
+    };
+    static constexpr uint8_t identityScopeBEnterInstruction[] = {
+        0x53, 0xc9, 0xff, 0x97,
+    };
 
     HookSpec hooks[] = {
         {"investigation source init", 0x11f029c, initPrologue, sizeof(initPrologue),
@@ -2218,6 +2454,8 @@ static bool InstallNativeSourceInvestigationHooks(uintptr_t base) {
     const uintptr_t playbackSnapshotAddress = base + 0x662ddc;
     const uintptr_t backendAssignAddress = base + 0x1993cac;
     const uintptr_t sourcePublishAddress = base + 0x6209d0;
+    const uintptr_t identityScopeAEnterAddress = base + 0xc9cdd4;
+    const uintptr_t identityScopeBEnterAddress = base + 0x656d1c;
     if (!MatchesPrologue(
             dispatchAddress,
             playbackServiceDispatchPrologue,
@@ -2257,6 +2495,31 @@ static bool InstallNativeSourceInvestigationHooks(uintptr_t base) {
         printf("[Soggfy-ERROR] Native-source investigation disabled: source publish handoff prologue mismatch.\n");
         fflush(stdout);
         return false;
+    }
+    struct IdentityScopeInstruction {
+        const char* name;
+        uintptr_t address;
+        const uint8_t* bytes;
+        size_t length;
+    };
+    const IdentityScopeInstruction identityScopeInstructions[] = {
+        {"identity scope A enter", identityScopeAEnterAddress,
+            identityScopeAEnterInstruction,
+            sizeof(identityScopeAEnterInstruction)},
+        {"identity scope B enter", identityScopeBEnterAddress,
+            identityScopeBEnterInstruction,
+            sizeof(identityScopeBEnterInstruction)},
+    };
+    for (const auto& instruction : identityScopeInstructions) {
+        if (!MatchesPrologue(
+                instruction.address,
+                instruction.bytes,
+                instruction.length)) {
+            printf("[Soggfy-ERROR] Native-source investigation disabled: %s instruction mismatch.\n",
+                   instruction.name);
+            fflush(stdout);
+            return false;
+        }
     }
     for (const auto& hook : hooks) {
         if (!InstallCheckedHook(
@@ -2332,6 +2595,32 @@ static bool InstallNativeSourceInvestigationHooks(uintptr_t base) {
     printf("[Soggfy-INFO] Instrumented source publish handoff at 0x%lx with validated prologue\n",
            sourcePublishAddress);
     fflush(stdout);
+
+    struct IdentityScopeProbe {
+        const char* name;
+        uintptr_t address;
+        dobby_instrument_callback_t callback;
+    };
+    const IdentityScopeProbe identityScopeProbes[] = {
+        {"identity scope A enter", identityScopeAEnterAddress,
+            InvestigationIdentityScopeAEnterProbe},
+        {"identity scope B enter", identityScopeBEnterAddress,
+            InvestigationIdentityScopeBEnterProbe},
+    };
+    for (const auto& probe : identityScopeProbes) {
+        const int result = DobbyInstrument(
+            reinterpret_cast<void*>(probe.address),
+            probe.callback);
+        if (result != 0) {
+            printf("[Soggfy-ERROR] Failed to instrument %s at 0x%lx (result=%d)\n",
+                   probe.name, probe.address, result);
+            fflush(stdout);
+            return false;
+        }
+        printf("[Soggfy-INFO] Instrumented %s at 0x%lx\n",
+               probe.name, probe.address);
+        fflush(stdout);
+    }
     return true;
 }
 
@@ -2341,6 +2630,7 @@ void InstallDecoderHook() {
     installed = true;
 
     uintptr_t base = Scanner::GetImageBaseAddress("Spotify");
+    g_investigation_spotify_image_base.store(base);
     if (!base) {
         printf("[Soggfy-DEBUG] Spotify image not found, skipping decoder hook.\n");
         fflush(stdout);
