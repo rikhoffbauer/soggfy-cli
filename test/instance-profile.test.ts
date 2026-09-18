@@ -2,8 +2,14 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { createServer } from "node:net";
 import { PATCHED_APP } from "../src/core/paths";
-import { managedStandaloneProfileDirs, SpotifyInstance, spotifyInstanceCompatibilityEnvironment } from "../src/core/instance";
+import {
+  isLoopbackPortAvailable,
+  managedStandaloneProfileDirs,
+  SpotifyInstance,
+  spotifyInstanceCompatibilityEnvironment,
+} from "../src/core/instance";
 
 const source = readFileSync(join(import.meta.dir, "../src/core/instance.ts"), "utf8");
 
@@ -98,6 +104,28 @@ test("SpotifyInstance can expose a dedicated loopback renderer debug port for au
   expect(source).toContain('`--remote-debugging-port=${this.debugPort}`');
 });
 
+test("loopback port probe rejects a listener already owned by another process", async () => {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0, exclusive: true }, resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP address");
+    expect(await isLoopbackPortAvailable(address.port)).toBe(false);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => error ? reject(error) : resolve())
+    );
+  }
+});
+
+test("SpotifyInstance refuses conflicting Spotify control listeners unless explicitly overridden", () => {
+  expect(source).toContain("isLoopbackPortAvailable(7768)");
+  expect(source).toContain('SOGGFY_ALLOW_CONCURRENT_SPOTIFY !== "1"');
+  expect(source).toContain("Spotify local control port 7768 is already owned");
+});
 
 test("managedStandaloneProfileDirs returns only Soggfy standalone runtime profiles in numeric order", () => {
   const root = mkdtempSync(join(tmpdir(), "soggfy-profiles-"));

@@ -1,6 +1,7 @@
 import { spawn, type Subprocess } from "bun";
 import { existsSync, unlinkSync, mkdirSync, readdirSync } from "fs";
 import { join } from "path";
+import { createServer } from "node:net";
 import { sendIPC, ping } from "./ipc";
 import { log } from "./log";
 import { assertSupportedSpotifyBundle, cloneSpotifyLoginState, resetSpotifyTransientRuntimeState, terminateProcessTree } from "./spotify-runtime";
@@ -45,6 +46,16 @@ export function spotifyInstanceCompatibilityEnvironment(
   return compatibilityHookTargets
     ? compatibilityHookTargetEnvironment(compatibilityHookTargets.version, compatibilityHookTargets.targets)
     : { SOGGFY_COMPAT_ALLOW_DISCOVERED_TARGETS: "0" };
+}
+
+export async function isLoopbackPortAvailable(port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(false));
+    server.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
+      server.close(() => resolve(true));
+    });
+  });
 }
 
 export class SpotifyInstance {
@@ -95,6 +106,17 @@ export class SpotifyInstance {
         if (standaloneProfileDir === this.profileDir) continue;
         await this.retireOrphanedProfile(binaryPath, standaloneProfileDir, "standalone web runtime profile");
       }
+    }
+
+    if (
+      process.env.SOGGFY_ALLOW_CONCURRENT_SPOTIFY !== "1"
+      && !(await isLoopbackPortAvailable(7768))
+    ) {
+      throw new Error(
+        "Spotify local control port 7768 is already owned by another Spotify instance. "
+        + "Stop the other Spotify/Soggfy instance before starting this one. "
+        + "Set SOGGFY_ALLOW_CONCURRENT_SPOTIFY=1 only for explicit compatibility investigation.",
+      );
     }
 
     // Prepare directories
