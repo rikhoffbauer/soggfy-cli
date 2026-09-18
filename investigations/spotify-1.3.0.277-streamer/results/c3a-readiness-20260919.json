@@ -1,0 +1,180 @@
+{
+  "generatedAt": "2026-09-18T23:27:20.722Z",
+  "purpose": "C3a approach-A readiness from natural execution only",
+  "sourceEvents": "retained c2-scope2 natural-execution trace",
+  "generationsWithExactC2Candidate": 7,
+  "generationsWithCompleteNaturalSourceLifecycle": 6,
+  "approachAReady": true,
+  "independentConsumptionProven": false,
+  "rows": [
+    {
+      "generation": 1,
+      "source": "0x12c0021ee78",
+      "fileId": "56bc9ef82236dc30d6f31d8125fc311b3c2442b9",
+      "identityScopeToken": 1,
+      "identityScopeSiteOffset": "0xc9cdd4",
+      "lifecycle": {
+        "init": true,
+        "observedPeek": false,
+        "observedConsume": false,
+        "resetEvents": 0,
+        "teardown": true,
+        "lateOperationsAfterTeardown": 0,
+        "lifecycleComplete": false
+      },
+      "observedNaturalConsumption": {
+        "peekCalls": 0,
+        "consumeCalls": 0,
+        "bytesOffered": 0,
+        "bytesConsumed": 0
+      },
+      "approachAReady": false,
+      "independentConsumptionProven": false
+    },
+    {
+      "generation": 2,
+      "source": "0x12c0021d278",
+      "fileId": "f38702bf00c1b1271576c399dbc5713f2412132a",
+      "identityScopeToken": 3,
+      "identityScopeSiteOffset": "0x656d1c",
+      "lifecycle": {
+        "init": true,
+        "observedPeek": true,
+        "observedConsume": true,
+        "resetEvents": 1,
+        "teardown": true,
+        "lateOperationsAfterTeardown": 0,
+        "lifecycleComplete": true
+      },
+      "observedNaturalConsumption": {
+        "peekCalls": 7985,
+        "consumeCalls": 128,
+        "bytesOffered": 150067053,
+        "bytesConsumed": 2457600
+      },
+      "approachAReady": true,
+      "independentConsumptionProven": false
+    },
+    {
+      "generation": 3,
+      "source": "0x12c0b74f878",
+      "fileId": "9153475961a5554acb6714e269c800a2daa4546d",
+      "identityScopeToken": 5,
+      "identityScopeSiteOffset": "0x656d1c",
+      "lifecycle": {
+        "init": true,
+        "observedPeek": true,
+        "observedConsume": true,
+        "resetEvents": 1,
+        "teardown": true,
+        "lateOperationsAfterTeardown": 0,
+        "lifecycleComplete": true
+      },
+      "observedNaturalConsumption": {
+        "peekCalls": 5375,
+        "consumeCalls": 1,
+        "bytesOffered": 100834560,
+        "bytesConsumed": 16384
+      },
+      "approachAReady": true,
+      "independentConsumptionProven": false
+    },
+    {
+      "generation": 8,
+      "source": "0x12c0b743b78",
+      "fileId": "3b5fcbc754c83c46357653d64b53314f3bd498f9",
+      "identityScopeToken": 6,
+      "identityScopeSiteOffset": "0xc9cdd4",
+      "lifecycle": {
+        "init": true,
+        "observedPeek": true,
+        "observedConsume": true,
+        "resetEvents": 1,
+        "teardown": true,
+        "lateOperationsAfterTeardown": 0,
+        "lifecycleComplete": true
+      },
+      "observedNaturalConsumption": {
+        "peekCalls": 5632,
+        "consumeCalls": 1,
+        "bytesOffered": 89659715,
+        "bytesConsumed": 16384
+      },
+      "approachAReady": true,
+      "independentConsumptionProven": false
+    },
+    {
+      "generation": 12,
+      "source": "0x12c0f36b278",
+      "fileId": "c4e242f70fb8c36a4cb5409db12b058a2de39a81",
+      "identityScopeToken": 7,
+      "identityScopeSiteOffset": "0xc9cdd4",
+      "lifecycle": {
+        "init": true,
+        "observedPeek": true,
+        "observedConsume": true,
+        "resetEvents": 1,
+        "teardown": true,
+        "lateOperationsAfterTeardown": 0,
+        "lifecycleComplete": true
+      },
+      "observedNaturalConsumption": {
+        "peekCalls": 864,
+        "consumeCalls": 1,
+        "bytesOffered": 14111057,
+        "bytesConsumed": 16384
+      },
+      "approachAReady": true,
+      "independentConsumptionProven": false
+    },
+    {
+      "generation": 13,
+      "source": "0x12c0b736278",
+      "fileId": "c4e242f70fb8c36a4cb5409db12b058a2de39a81",
+      "identityScopeToken": 7,
+      "identityScopeSiteOffset": "0xc9cdd4",
+      "lifecycle": {
+        "init": true,
+        "observedPeek": true,
+        "observedConsume": true,
+        "resetEvents": 1,
+        "teardown": true,
+        "lateOperationsAfterTeardown": 0,
+        "lifecycleComplete": true
+      },
+      "observedNaturalConsumption": {
+        "peekCalls": 1,
+        "consumeCalls": 1,
+        "bytesOffered": 16384,
+        "bytesConsumed": 16384
+      },
+      "approachAReady": true,
+      "independentConsumptionProven": false
+    },
+    {
+      "generation": 14,
+      "source": "0x12c0f36b278",
+      "fileId": "eed0c5b8e597e37abdec246d36f6060a79d0aade",
+      "identityScopeToken": 8,
+      "identityScopeSiteOffset": "0xc9cdd4",
+      "lifecycle": {
+        "init": true,
+        "observedPeek": true,
+        "observedConsume": true,
+        "resetEvents": 1,
+        "teardown": true,
+        "lateOperationsAfterTeardown": 0,
+        "lifecycleComplete": true
+      },
+      "observedNaturalConsumption": {
+        "peekCalls": 9980,
+        "consumeCalls": 256,
+        "bytesOffered": 162664906,
+        "bytesConsumed": 4194304
+      },
+      "approachAReady": true,
+      "independentConsumptionProven": false
+    }
+  ],
+  "note": "Readiness means the exact-identity-correlated natural source generation exposed bounded peek/consume progress and teardown without late operations. It does not prove the source can be driven independently of ordinary playback and therefore cannot pass C3a."
+}

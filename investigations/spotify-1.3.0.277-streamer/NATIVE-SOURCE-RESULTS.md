@@ -125,6 +125,39 @@ evidence and is not inferred from C2.
 | C3b | NOT RUN | Requires C3a first. |
 | C4 | NOT RUN | Two-context proof remains downstream of C3a/C3b. |
 
+## C3a preparation
+
+Phase 3 now has a deterministic, metadata-only gate evaluator in
+`src/dev/native-source-gates.ts` plus
+`probes/analyze-c3a-gate.ts`. It intentionally does not consume or expose
+encoded media itself.
+
+The evaluator can return C3a GO only when supplied evidence proves all of:
+
+- exact C2 `fileId` binding before first encoded progress;
+- explicit independent-consumption mode, not ordinary playback;
+- no global/audible playback identity dependency;
+- monotonic encoded progress and complete framing;
+- EOS after the final progress event;
+- exact whole-file SHA-256 equality;
+- clean existing media-validator result;
+- teardown acknowledgement after EOS;
+- zero writes after teardown;
+- ordinary playback unaffected.
+
+The synthetic regression suite fails closed for each missing/wrong condition.
+
+A metadata-only readiness analysis of the retained natural source trace found
+**6 of 7** exact-identity-correlated generations with observed `peek`,
+`consume`, explicit teardown, and zero late operations after teardown. This
+confirms Phase 3 Approach A (drive the existing encoded source/read object) is
+the smallest already-observed boundary; it does not establish that the boundary
+can be driven independently. Evidence:
+`results/c3a-readiness-20260919.json`.
+
+This is gate preparation only: **C3a remains NOT RUN** because no new
+independent-consumption evidence has been produced.
+
 ## Consequence
 
 The earlier C2 blocker is removed. Phase 3 may now investigate one independent

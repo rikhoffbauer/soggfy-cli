@@ -1,7 +1,7 @@
 # Independent native source consumption investigation
 
 Date: 2026-09-19
-Status: Gate C1 PASS; Gate C2 GO; C3a/C3b not attempted
+Status: Gate C1 PASS; Gate C2 GO; C3a deterministic gate harness prepared; live C3a/C3b not attempted
 Production baseline: optimized sequential capture remains authoritative. Two-context work remains blocked until C3a and C3b pass from primary evidence.
 
 ## Current gate decision
@@ -28,8 +28,9 @@ Therefore:
 
 - Gate C1: PASS.
 - Gate C2: **GO / PASS**.
-- Gate C3a: not run; one independent source is now the next experiment.
-- Gate C3b and two-context work remain blocked on C3a.
+- Gate C3a: not run; a fail-closed metadata-only evaluator and synthetic
+  regression suite are prepared for the one-independent-source experiment.
+- Gate C3b and two-context work remain blocked on live C3a evidence.
 - No production concurrency change is implied by C2 alone.
 
 The authoritative evidence summary is

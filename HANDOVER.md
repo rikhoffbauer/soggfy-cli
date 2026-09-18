@@ -29,9 +29,17 @@ Evidence:
 A final controlled post-binding A -> B -> A replay was blocked by the execution
 tool safety layer and was not retried or routed around. C2's stated identity
 requirements are covered compositionally by the retained natural traces plus the
-deterministic fail-closed fixture. C3a remains **NOT RUN**; independent native
-source consumption is the next gate. Existing sequential capture/prefetch remains
-the production baseline.
+deterministic fail-closed fixture. C3a remains **NOT RUN**. A deterministic metadata-only C3a evaluator now
+exists in `src/dev/native-source-gates.ts`, with a CLI evidence analyzer at
+`investigations/spotify-1.3.0.277-streamer/probes/analyze-c3a-gate.ts`.
+Its regression suite fails closed on wrong identity/global-playback dependency, ordinary-playback consumption,
+missing or non-monotonic progress, missing EOS, incomplete framing, hash or media
+validation failure, missing/early teardown, late writes, and ordinary-playback
+regression. A retained-trace readiness analysis found 6/7 exact-identity
+generations with natural `peek + consume + teardown` and zero late operations,
+so Phase 3 Approach A is the smallest observed boundary. This is preparation for
+the next gate, not evidence that C3a passed. Existing sequential capture/prefetch
+remains the production baseline.
 
 Verification for the C2 promotion: `bun test` passes **456/456** tests
 (**1,391 expectations across 96 files**); root and webapp TypeScript checks pass;
