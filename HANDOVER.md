@@ -2,6 +2,16 @@
 
 ## Current state
 
+### 2026-09-18: single-instance prefetch planning
+
+Added the [architecture spec](docs/superpowers/specs/2026-09-18-single-instance-prefetch-design.md) and [implementation plan](docs/superpowers/plans/2026-09-18-single-instance-prefetch.md). These describe opt-in parallel exact-variant acquisition with existing sequential extraction, conditional on a measured batch-throughput benefit. Fully parallel extraction is not established; the reported standalone-player route failed for protected Ogg. Initial scope is already-queued daemon web/API jobs; the CLI submits tracks sequentially and has no promised batch acceleration in this increment.
+
+This planning turn inspected source and existing investigation artifacts but did not repeat live experiments or change production code. Existing uncommitted `DecodeHook.mm` instrumentation and `investigations/` were left intact. User-supplied investigation reports remain distinct from live verification. The last report says the normal daemon was stopped; actual current process health has not been checked in this planning turn. Do not reuse its historical PIDs for cleanup.
+
+Next owner actions: execute plan phases 1–2 (reproducibility/instrumentation review, actual process ownership, corrected repeated same-file and batch benchmarks, daemon restoration). Proceed to production phases only if the documented gate passes; otherwise retain the current pipeline and record the no-go. The 10% median batch threshold is proposed, not a measured result. No workstream is running in the background.
+
+### Prior remediation baseline (historical verification)
+
 As of 2026-09-17, the four findings from [REVIEW.md](REVIEW.md) are addressed in the working tree based on `87ccbff` (`fix: retire stale standalone spotify before daemon start`). The 2026-09-08 review baseline is preserved in [REVIEW-2026-09-08.md](REVIEW-2026-09-08.md).
 
 Daemon-backed CLI downloads now enter the same `SpotifyPoolManager` scheduler used by the web API, bind to the exact returned job, and fail closed rather than using direct shared IPC when a daemon exists without its scheduler API. Loopback API requests now require a loopback request host; mutations additionally enforce the centralized origin/fetch-metadata/JSON boundary, and configured loopback tokens are enforced. Standalone retained or failed captures move to `~/.soggfy/captures` before runtime cleanup. Completed jobs whose saved artifact disappeared no longer block replacement downloads. Runtime-build test timeouts/cleanup and stale-lock operator guidance are also addressed.
