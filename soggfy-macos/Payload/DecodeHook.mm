@@ -11,11 +11,18 @@
 #include <algorithm>
 #include <mach-o/dyld.h>
 #include <stdio.h>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <chrono>
 #include <thread>
 #include <atomic>
 #include <cstring>
+#include <sstream>
+#include <unordered_map>
+#include <unistd.h>
 
 struct ogg_page_sys {
     unsigned char *header;
@@ -47,6 +54,142 @@ static OggPreRollBuffer g_ogg_preroll;
 static OggStreamSelection g_ogg_stream_selection;
 static std::atomic<uint64_t> g_last_gated_sync_ms{0};
 static std::mutex g_gated_sync_mutex;
+
+// Investigation-only attribution state. In Spotify 1.3.0.277 the two
+// ogg_stream_pagein() call sites inside DecodeAudioData pass decoder + 0x88 as
+// the ogg_stream_state pointer. We still verify that invariant at runtime and
+// never use thread identity as the stream identity.
+static thread_local void* g_investigation_current_decoder = nullptr;
+static constexpr uintptr_t kSpotify130277OggStateOffset = 0x88;
+
+struct InvestigationOggKey {
+    uintptr_t decoder = 0;
+    uintptr_t os = 0;
+    uint32_t serial = 0;
+
+    bool operator==(const InvestigationOggKey& other) const {
+        return decoder == other.decoder && os == other.os && serial == other.serial;
+    }
+};
+
+struct InvestigationOggKeyHash {
+    size_t operator()(const InvestigationOggKey& key) const {
+        size_t h = std::hash<uintptr_t>{}(key.decoder);
+        h ^= std::hash<uintptr_t>{}(key.os) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<uint32_t>{}(key.serial) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+struct InvestigationOggFile {
+    std::ofstream stream;
+    std::string path;
+    uint64_t bytes = 0;
+    uint64_t pages = 0;
+};
+
+static std::mutex g_investigation_ogg_mutex;
+static std::unordered_map<InvestigationOggKey, InvestigationOggFile, InvestigationOggKeyHash>
+    g_investigation_ogg_files;
+
+static bool InvestigationOggEnabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("SOGGFY_INVESTIGATE_OGG_CONTEXT");
+        return value && value[0] != '\0' && strcmp(value, "0") != 0;
+    }();
+    return enabled;
+}
+
+static std::filesystem::path InvestigationBasePath() {
+    const char* save = std::getenv("SOGGFY_SAVE_PATH");
+    return std::filesystem::path(save && save[0] ? save : "/tmp/Soggfy_cli") /
+        "investigation-ogg-context";
+}
+
+static void InvestigationAppendEvent(
+    const char* event,
+    const InvestigationOggKey& key,
+    const InvestigationOggFile* file,
+    bool relationOk
+) {
+    const auto base = InvestigationBasePath();
+    std::error_code ec;
+    std::filesystem::create_directories(base, ec);
+    std::ofstream out(base / "events.jsonl", std::ios::app);
+    if (!out.is_open()) return;
+    out << "{\"event\":\"" << event << "\""
+        << ",\"pid\":" << static_cast<int>(getpid())
+        << ",\"decoder\":\"0x" << std::hex << key.decoder << "\""
+        << ",\"oggState\":\"0x" << std::hex << key.os << "\""
+        << ",\"serial\":\"0x" << std::hex << key.serial << "\""
+        << std::dec
+        << ",\"decoderToOggOffset\":"
+        << (key.os >= key.decoder ? key.os - key.decoder : 0)
+        << ",\"relationOk\":" << (relationOk ? "true" : "false");
+    if (file) {
+        out << ",\"path\":\"" << file->path << "\""
+            << ",\"bytes\":" << file->bytes
+            << ",\"pages\":" << file->pages;
+    }
+    out << "}\n";
+}
+
+static void InvestigationCaptureOggPage(
+    void* decoder,
+    void* os,
+    uint32_t serial,
+    bool isVorbisBos,
+    bool isEos,
+    const unsigned char* hdr,
+    size_t hlen,
+    const unsigned char* body,
+    size_t blen
+) {
+    if (!InvestigationOggEnabled() || !decoder || !os || !hdr || hlen == 0) return;
+
+    const uintptr_t decoderPtr = reinterpret_cast<uintptr_t>(decoder);
+    const uintptr_t osPtr = reinterpret_cast<uintptr_t>(os);
+    const bool relationOk = osPtr == decoderPtr + kSpotify130277OggStateOffset;
+    InvestigationOggKey key{decoderPtr, osPtr, serial};
+
+    std::lock_guard<std::mutex> lock(g_investigation_ogg_mutex);
+    auto it = g_investigation_ogg_files.find(key);
+    if (isVorbisBos) {
+        const auto base = InvestigationBasePath();
+        std::error_code ec;
+        std::filesystem::create_directories(base / "streams", ec);
+
+        std::ostringstream name;
+        name << "pid-" << getpid()
+             << "-decoder-" << std::hex << decoderPtr
+             << "-os-" << osPtr
+             << "-serial-" << serial << ".ogg";
+        InvestigationOggFile capture;
+        capture.path = (base / "streams" / name.str()).string();
+        capture.stream.open(capture.path, std::ios::binary | std::ios::trunc);
+        if (capture.stream.is_open()) {
+            auto [inserted, _] = g_investigation_ogg_files.insert_or_assign(
+                key, std::move(capture));
+            it = inserted;
+            InvestigationAppendEvent("bos", key, &it->second, relationOk);
+        }
+    }
+
+    if (it == g_investigation_ogg_files.end() || !it->second.stream.is_open()) return;
+    it->second.stream.write(reinterpret_cast<const char*>(hdr), static_cast<std::streamsize>(hlen));
+    if (body && blen > 0) {
+        it->second.stream.write(reinterpret_cast<const char*>(body), static_cast<std::streamsize>(blen));
+    }
+    it->second.bytes += hlen + blen;
+    it->second.pages += 1;
+
+    if (isEos) {
+        it->second.stream.flush();
+        it->second.stream.close();
+        InvestigationAppendEvent("eos", key, &it->second, relationOk);
+        g_investigation_ogg_files.erase(it);
+    }
+}
 
 static uint64_t SteadyNowMs() {
     using namespace std::chrono;
@@ -109,6 +252,17 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
 
         bool is_vorbis_bos = is_bos && (bdy != nullptr) && (blen >= 7) &&
                              (bdy[0] == 0x01) && (memcmp(bdy + 1, "vorbis", 6) == 0);
+
+        InvestigationCaptureOggPage(
+            g_investigation_current_decoder,
+            os,
+            serial,
+            is_vorbis_bos,
+            is_eos,
+            hdr,
+            static_cast<size_t>(hlen),
+            bdy,
+            static_cast<size_t>(blen));
 
         if (!track_id.empty() && track_id != "prototype_track" &&
             CaptureBackendAllowsSource("ogg")) {
@@ -216,8 +370,10 @@ static int my_ogg_stream_pagein(void* os, ogg_page_sys* og) {
 static int my_DecodeAudioData(void* x0, float* x1, size_t* x2, const char* x3, size_t* x4, int x5) {
     if (!orig_DecodeAudioData) return 0;
 
-
+    void* previousInvestigationDecoder = g_investigation_current_decoder;
+    if (InvestigationOggEnabled()) g_investigation_current_decoder = x0;
     int ret = orig_DecodeAudioData(x0, x1, x2, x3, x4, x5);
+    if (InvestigationOggEnabled()) g_investigation_current_decoder = previousInvestigationDecoder;
     if (!g_decoder_hooks_ready.load()) return ret;
 
     size_t samplesDecoded = (x2 != nullptr) ? *x2 : 0;
