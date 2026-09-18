@@ -1,0 +1,49 @@
+{
+  "trackId": "05UwCkSH4WUgVGokcJuCdC",
+  "uri": "spotify:track:05UwCkSH4WUgVGokcJuCdC",
+  "before": {
+    "fileId": "56bc9ef82236dc30d6f31d8125fc311b3c2442b9",
+    "fileBitrate": 160000,
+    "audioId": "e9fcfea33c054f48b0b32f44f9c0fee9",
+    "uri": "spotify:track:575BKqgHeL2srecj3MfGX1",
+    "isPaused": true,
+    "position": 45342,
+    "playbackId": "b4653ee20457f91ee89002d267c6a190",
+    "sessionId": "6v6tQHXRlbWFhspgZIMlfD"
+  },
+  "identity": {
+    "fileId": "56bc9ef82236dc30d6f31d8125fc311b3c2442b9",
+    "fileBitrate": 160000,
+    "audioId": "e9fcfea33c054f48b0b32f44f9c0fee9",
+    "uri": "spotify:track:05UwCkSH4WUgVGokcJuCdC",
+    "isPaused": false,
+    "position": 0,
+    "playbackId": "773ee8f32dc374533b873de92b030860",
+    "sessionId": "3tX8iBCmQJYoiRLrtew8MG"
+  },
+  "after": {
+    "fileId": "f38702bf00c1b1271576c399dbc5713f2412132a",
+    "fileBitrate": 160000,
+    "audioId": "4141d33192574b3ab8ff399ab82c0aea",
+    "uri": "spotify:track:05UwCkSH4WUgVGokcJuCdC",
+    "isPaused": false,
+    "position": 0,
+    "playbackId": "773ee8f32dc374533b873de92b030860",
+    "sessionId": "3tX8iBCmQJYoiRLrtew8MG"
+  },
+  "elapsedMs": 16543.467208,
+  "metrics": {
+    "ok": true,
+    "trackId": "05UwCkSH4WUgVGokcJuCdC",
+    "status": "completed",
+    "captureBackend": "ogg",
+    "bytesWritten": 3361413,
+    "limitBytes": 0,
+    "fileName": "/Volumes/ssd1/tmp/soggfy130-save/05UwCkSH4WUgVGokcJuCdC.ogg"
+  },
+  "output": {
+    "fileName": "/Volumes/ssd1/tmp/soggfy130-save/05UwCkSH4WUgVGokcJuCdC.ogg",
+    "bytes": 3361413,
+    "sha256": "33f6badbb936d2782a57e1ebdef1e2d573c9838fd26ab058f05485f2422baa50"
+  }
+}

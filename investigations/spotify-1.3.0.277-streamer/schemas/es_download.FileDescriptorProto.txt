@@ -1,0 +1,685 @@
+name: "es_download.proto"
+package: "spotify.download.esperanto.proto"
+dependency: "esperanto_options.proto"
+dependency: "google/protobuf/empty.proto"
+dependency: "google/protobuf/wrappers.proto"
+message_type {
+  name: "FileStreamerId"
+  field {
+    name: "id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+    json_name: "id"
+  }
+}
+message_type {
+  name: "RequestDataParams"
+  field {
+    name: "file_streamer"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".spotify.download.esperanto.proto.FileStreamerId"
+    json_name: "fileStreamer"
+  }
+  field {
+    name: "start"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "start"
+  }
+  field {
+    name: "end"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "end"
+  }
+}
+message_type {
+  name: "RequestDataResponse"
+  field {
+    name: "position"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "position"
+  }
+  field {
+    name: "total_size"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "totalSize"
+  }
+  field {
+    name: "final"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    json_name: "final"
+  }
+  field {
+    name: "error"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.Error"
+    json_name: "error"
+  }
+  field {
+    name: "data"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_BYTES
+    json_name: "data"
+  }
+  field {
+    name: "previously_cached"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "previouslyCached"
+  }
+  field {
+    name: "from_network"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "fromNetwork"
+  }
+  field {
+    name: "had_cache_error"
+    number: 8
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    json_name: "hadCacheError"
+  }
+}
+message_type {
+  name: "SegmentFileStreamerId"
+  field {
+    name: "id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+    json_name: "id"
+  }
+}
+message_type {
+  name: "SegmentFileStreamerParams"
+  field {
+    name: "media_url"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "mediaUrl"
+  }
+  field {
+    name: "playback_id"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "playbackId"
+  }
+  field {
+    name: "session_id"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "sessionId"
+  }
+  field {
+    name: "content_type"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.ContentType"
+    json_name: "contentType"
+  }
+  field {
+    name: "content_form"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.ContentForm"
+    json_name: "contentForm"
+  }
+}
+message_type {
+  name: "SegmentRequestMetadata"
+  field {
+    name: "profile_index"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_INT32
+    json_name: "profileIndex"
+  }
+  field {
+    name: "time_offset"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_INT32
+    json_name: "timeOffset"
+  }
+  field {
+    name: "content_type"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.ContentType"
+    json_name: "contentType"
+  }
+}
+message_type {
+  name: "RequestSegmentDataParams"
+  field {
+    name: "segment_file_streamer"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".spotify.download.esperanto.proto.SegmentFileStreamerId"
+    json_name: "segmentFileStreamer"
+  }
+  field {
+    name: "url_path"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "urlPath"
+  }
+  field {
+    name: "cdn_base_url"
+    number: 3
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+    json_name: "cdnBaseUrl"
+  }
+  field {
+    name: "start"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "start"
+  }
+  field {
+    name: "end"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "end"
+  }
+  field {
+    name: "metadata"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".spotify.download.esperanto.proto.SegmentRequestMetadata"
+    json_name: "metadata"
+  }
+}
+message_type {
+  name: "FinishSegmentDataRequestParams"
+  field {
+    name: "segment_file_streamer"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".spotify.download.esperanto.proto.SegmentFileStreamerId"
+    json_name: "segmentFileStreamer"
+  }
+  field {
+    name: "url_path"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "urlPath"
+  }
+}
+message_type {
+  name: "MediaManifestParams"
+  field {
+    name: "manifest_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "manifestId"
+  }
+  field {
+    name: "playback_id"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "playbackId"
+  }
+  field {
+    name: "session_id"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "sessionId"
+  }
+  field {
+    name: "request_type"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.MediaManifestRequestType"
+    json_name: "requestType"
+  }
+  field {
+    name: "media_type"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.MediaManifestParams.MediaType"
+    json_name: "mediaType"
+  }
+  enum_type {
+    name: "MediaType"
+    value {
+      name: "VIDEO"
+      number: 0
+    }
+    value {
+      name: "AUDIO"
+      number: 1
+    }
+  }
+}
+message_type {
+  name: "MediaManifestResponse"
+  field {
+    name: "manifest_data"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BYTES
+    json_name: "manifestData"
+  }
+  field {
+    name: "had_cache_error"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    json_name: "hadCacheError"
+  }
+  field {
+    name: "bytes_from_network"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "bytesFromNetwork"
+  }
+  field {
+    name: "manifest_error"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.MediaManifestError"
+    json_name: "manifestError"
+  }
+  field {
+    name: "manifest_url"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "manifestUrl"
+  }
+}
+message_type {
+  name: "ProgressiveFileStreamerParams"
+  field {
+    name: "url"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "url"
+  }
+  field {
+    name: "playback_id"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "playbackId"
+  }
+  field {
+    name: "session_id"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "sessionId"
+  }
+  field {
+    name: "disable_range_requests"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    json_name: "disableRangeRequests"
+  }
+}
+message_type {
+  name: "IsFileFullyCachedParams"
+  field {
+    name: "progressive_file"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".spotify.download.esperanto.proto.IsFileFullyCachedParams.ProgressiveFileParams"
+    oneof_index: 0
+    json_name: "progressiveFile"
+  }
+  field {
+    name: "segment_file"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".spotify.download.esperanto.proto.IsFileFullyCachedParams.SegmentFileParams"
+    oneof_index: 0
+    json_name: "segmentFile"
+  }
+  nested_type {
+    name: "ProgressiveFileParams"
+    field {
+      name: "url"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "url"
+    }
+  }
+  nested_type {
+    name: "SegmentFileParams"
+    field {
+      name: "url_path"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "urlPath"
+    }
+    field {
+      name: "content_form"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_ENUM
+      type_name: ".spotify.download.esperanto.proto.ContentForm"
+      json_name: "contentForm"
+    }
+  }
+  oneof_decl {
+    name: "file"
+  }
+}
+message_type {
+  name: "GetFirstCachedSegmentIndexParams"
+  field {
+    name: "url_paths"
+    number: 1
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+    json_name: "urlPaths"
+  }
+  field {
+    name: "content_type"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.ContentType"
+    json_name: "contentType"
+  }
+  field {
+    name: "content_form"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.ContentForm"
+    json_name: "contentForm"
+  }
+}
+message_type {
+  name: "GetFirstCachedSegmentIndexResponse"
+  field {
+    name: "index"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_INT32
+    json_name: "index"
+  }
+}
+message_type {
+  name: "GetMediaHandleParams"
+  field {
+    name: "media_type"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.GetMediaHandleParams.MediaType"
+    json_name: "mediaType"
+  }
+  field {
+    name: "id"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    json_name: "id"
+  }
+  enum_type {
+    name: "MediaType"
+    value {
+      name: "VIDEO"
+      number: 0
+    }
+    value {
+      name: "AUDIO"
+      number: 1
+    }
+  }
+}
+message_type {
+  name: "GetMediaHandleIdResponse"
+  field {
+    name: "handle_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+    json_name: "handleId"
+  }
+  field {
+    name: "status"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".spotify.download.esperanto.proto.VerificationStatus"
+    oneof_index: 0
+    json_name: "status"
+    proto3_optional: true
+  }
+  oneof_decl {
+    name: "_status"
+  }
+}
+message_type {
+  name: "VideoBandwidthResponse"
+  field {
+    name: "advised_max_bitrate"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+    json_name: "advisedMaxBitrate"
+  }
+}
+enum_type {
+  name: "Error"
+  value {
+    name: "SUCCESS"
+    number: 0
+  }
+  value {
+    name: "GENERIC"
+    number: 1
+  }
+}
+enum_type {
+  name: "VerificationStatus"
+  value {
+    name: "OK"
+    number: 0
+  }
+  value {
+    name: "FAILED"
+    number: 1
+  }
+  value {
+    name: "SUNSET"
+    number: 2
+  }
+}
+enum_type {
+  name: "ContentType"
+  value {
+    name: "VIDEO"
+    number: 0
+  }
+  value {
+    name: "AUDIO"
+    number: 1
+  }
+  value {
+    name: "SUBTITLE"
+    number: 2
+  }
+}
+enum_type {
+  name: "ContentForm"
+  value {
+    name: "LONG"
+    number: 0
+  }
+  value {
+    name: "SHORT"
+    number: 1
+  }
+}
+enum_type {
+  name: "MediaManifestRequestType"
+  value {
+    name: "INTERACTIVE"
+    number: 0
+  }
+  value {
+    name: "PREFETCH"
+    number: 1
+  }
+  value {
+    name: "OTHER"
+    number: 2
+  }
+}
+enum_type {
+  name: "MediaManifestError"
+  value {
+    name: "MEDIA_MANIFEST_SUCCESS"
+    number: 0
+  }
+  value {
+    name: "MEDIA_MANIFEST_INVALID_MANIFEST_ID"
+    number: 1
+  }
+  value {
+    name: "MEDIA_MANIFEST_CONNECTION_ERROR"
+    number: 2
+  }
+  value {
+    name: "MEDIA_MANIFEST_HTTP_ERROR"
+    number: 3
+  }
+  value {
+    name: "MEDIA_MANIFEST_CONNECTION_TIMEOUT"
+    number: 4
+  }
+  value {
+    name: "MEDIA_MANIFEST_HTTP_FORBIDDEN"
+    number: 5
+  }
+}
+service {
+  name: "Download"
+  method {
+    name: "CreateProgressiveFileStreamer"
+    input_type: ".spotify.download.esperanto.proto.ProgressiveFileStreamerParams"
+    output_type: ".spotify.download.esperanto.proto.FileStreamerId"
+  }
+  method {
+    name: "DestroyFileStreamer"
+    input_type: ".spotify.download.esperanto.proto.FileStreamerId"
+    output_type: ".google.protobuf.Empty"
+  }
+  method {
+    name: "RequestData"
+    input_type: ".spotify.download.esperanto.proto.RequestDataParams"
+    output_type: ".spotify.download.esperanto.proto.RequestDataResponse"
+    server_streaming: true
+  }
+  method {
+    name: "IsFileFullyCached"
+    input_type: ".spotify.download.esperanto.proto.IsFileFullyCachedParams"
+    output_type: ".google.protobuf.BoolValue"
+  }
+  method {
+    name: "GetFirstCachedSegmentIndex"
+    input_type: ".spotify.download.esperanto.proto.GetFirstCachedSegmentIndexParams"
+    output_type: ".spotify.download.esperanto.proto.GetFirstCachedSegmentIndexResponse"
+    options {
+    }
+  }
+  method {
+    name: "GetFirstCachedSegmentIndexAsync"
+    input_type: ".spotify.download.esperanto.proto.GetFirstCachedSegmentIndexParams"
+    output_type: ".spotify.download.esperanto.proto.GetFirstCachedSegmentIndexResponse"
+  }
+  method {
+    name: "CreateSegmentFileStreamer"
+    input_type: ".spotify.download.esperanto.proto.SegmentFileStreamerParams"
+    output_type: ".spotify.download.esperanto.proto.SegmentFileStreamerId"
+  }
+  method {
+    name: "DestroySegmentFileStreamer"
+    input_type: ".spotify.download.esperanto.proto.SegmentFileStreamerId"
+    output_type: ".google.protobuf.Empty"
+  }
+  method {
+    name: "RequestSegmentData"
+    input_type: ".spotify.download.esperanto.proto.RequestSegmentDataParams"
+    output_type: ".spotify.download.esperanto.proto.RequestDataResponse"
+    server_streaming: true
+  }
+  method {
+    name: "FinishSegmentDataRequest"
+    input_type: ".spotify.download.esperanto.proto.FinishSegmentDataRequestParams"
+    output_type: ".google.protobuf.Empty"
+  }
+  method {
+    name: "GetMediaManifest"
+    input_type: ".spotify.download.esperanto.proto.MediaManifestParams"
+    output_type: ".spotify.download.esperanto.proto.MediaManifestResponse"
+  }
+  method {
+    name: "GetMediaHandleId"
+    input_type: ".spotify.download.esperanto.proto.GetMediaHandleParams"
+    output_type: ".spotify.download.esperanto.proto.GetMediaHandleIdResponse"
+    server_streaming: true
+  }
+  method {
+    name: "SubscribeVideoBandwidth"
+    input_type: ".google.protobuf.Empty"
+    output_type: ".spotify.download.esperanto.proto.VideoBandwidthResponse"
+    server_streaming: true
+  }
+}
+options {
+  java_package: "com.spotify.download.esperanto.proto"
+  optimize_for: CODE_SIZE
+  objc_class_prefix: "ESP"
+}
+syntax: "proto3"

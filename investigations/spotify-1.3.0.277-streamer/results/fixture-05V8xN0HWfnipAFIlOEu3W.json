@@ -1,0 +1,76 @@
+{
+  "trackId": "05V8xN0HWfnipAFIlOEu3W",
+  "uri": "spotify:track:05V8xN0HWfnipAFIlOEu3W",
+  "before": {
+    "fileId": "34f1bb2bdb4dddf8bb8f3ed493dfeb2a40679251",
+    "fileBitrate": 160000,
+    "audioId": "0dae52f406764902907341dcdbfcc160",
+    "uri": "spotify:track:1Lg1JRpmil218Yn3ZNWxLZ",
+    "isPaused": false,
+    "position": 0,
+    "playbackId": "8ad0e9da3b8655016ee74e585771678d",
+    "sessionId": "3tX8iBCmQJYoiRLrtew8MG"
+  },
+  "candidates": [
+    {
+      "fileId": "6c3230af2542446176eb71f54ed0c66000420ef8",
+      "formatEnum": 1,
+      "bitrate": 160000
+    },
+    {
+      "fileId": "6cb8c3d9d3b7527746725fc0d83d865c5c27ed85",
+      "formatEnum": 16,
+      "bitrate": 700000
+    },
+    {
+      "fileId": "9977b28a278794d05e8ddbb168cf205ad824e93e",
+      "formatEnum": 8,
+      "bitrate": 24000
+    },
+    {
+      "fileId": "52dd30916966f0270150c71311e5928bbf0f587f",
+      "formatEnum": 2,
+      "bitrate": 320000
+    },
+    {
+      "fileId": "574ada2af0af5f8f001d217dc703975efec7108d",
+      "formatEnum": 0,
+      "bitrate": 96000
+    }
+  ],
+  "identity": {
+    "fileId": "6c3230af2542446176eb71f54ed0c66000420ef8",
+    "fileBitrate": 160000,
+    "audioId": "67a96797b2b24860b0a2bc1b5d51cb8a",
+    "uri": "spotify:track:05V8xN0HWfnipAFIlOEu3W",
+    "isPaused": false,
+    "position": 0,
+    "playbackId": "ab9333a98d11f1e8738858180b5f2238",
+    "sessionId": "4LOjOb7lJquJ8OQwC6aV7O"
+  },
+  "after": {
+    "fileId": "6c3230af2542446176eb71f54ed0c66000420ef8",
+    "fileBitrate": 160000,
+    "audioId": "67a96797b2b24860b0a2bc1b5d51cb8a",
+    "uri": "spotify:track:05V8xN0HWfnipAFIlOEu3W",
+    "isPaused": false,
+    "position": 0,
+    "playbackId": "ab9333a98d11f1e8738858180b5f2238",
+    "sessionId": "4LOjOb7lJquJ8OQwC6aV7O"
+  },
+  "elapsedMs": 15329.300916,
+  "metrics": {
+    "ok": true,
+    "trackId": "05V8xN0HWfnipAFIlOEu3W",
+    "status": "completed",
+    "captureBackend": "ogg",
+    "bytesWritten": 3491267,
+    "limitBytes": 0,
+    "fileName": "/Volumes/ssd1/tmp/soggfy130-save/05V8xN0HWfnipAFIlOEu3W.ogg"
+  },
+  "output": {
+    "fileName": "/Volumes/ssd1/tmp/soggfy130-save/05V8xN0HWfnipAFIlOEu3W.ogg",
+    "bytes": 3491267,
+    "sha256": "1c3536cdee234855df5527529ca0e2840de590b60826bcdbd447ac80e7d67c7c"
+  }
+}
