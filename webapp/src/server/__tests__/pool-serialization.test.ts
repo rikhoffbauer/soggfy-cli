@@ -94,3 +94,24 @@ test("scheduler releases ownership after a terminal capture failure", async () =
   expect(failed.error).toContain("fixture capture failure");
   expect(next.state).toBe("completed");
 });
+
+test("health check restores an unready instance once IPC responds again", async () => {
+  const pool = new SpotifyPoolManager(0);
+  const logs: string[] = [];
+  const instance = {
+    isReady: false,
+    isBusy: false,
+    statusText: "Socket Error",
+    lastError: "daemon IPC unavailable",
+    ping: async () => true,
+    recycle: async () => undefined,
+    log: (message: string) => logs.push(message),
+  };
+
+  await (pool as any).refreshInstanceHealth(instance);
+
+  expect(instance.isReady).toBe(true);
+  expect(instance.statusText).toBe("Ready");
+  expect(instance.lastError).toBeUndefined();
+  expect(logs).toContain("Watchdog restored instance readiness.");
+});

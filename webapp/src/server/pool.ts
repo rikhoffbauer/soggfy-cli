@@ -169,17 +169,33 @@ export class SpotifyPoolManager {
       .finally(() => this.dispatch());
   }
 
+  private async refreshInstanceHealth(inst: SpotifyInstance) {
+    if (inst.isBusy) return;
+
+    const ok = await inst.ping();
+    if (ok) {
+      if (!inst.isReady) {
+        inst.isReady = true;
+        inst.statusText = "Ready";
+        inst.lastError = undefined;
+        inst.log("Watchdog restored instance readiness.");
+      }
+      return;
+    }
+
+    if (inst.isReady || !USE_DAEMON_INSTANCE) {
+      await inst.recycle("watchdog ping failed")
+        .catch((err) => inst.log(`watchdog recycle failed: ${err.message}`));
+    }
+  }
+
   private startWatchdog() {
     let running = false;
     setInterval(async () => {
       if (running) return;
       running = true;
       try {
-        for (const inst of this.instances) {
-          if (!inst.isReady || inst.isBusy) continue;
-          const ok = await inst.ping();
-          if (!ok) await inst.recycle("watchdog ping failed").catch((err) => inst.log(`watchdog recycle failed: ${err.message}`));
-        }
+        for (const inst of this.instances) await this.refreshInstanceHealth(inst);
         this.dispatch();
       } finally {
         running = false;
